@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor traffico</title>
+    <link rel="stylesheet" href="monitor.css">
+</head>
+<body>
+    <div id="ai-banner"></div>
+
+    <div class="topbar">
+        <nav class="tab-nav">
+            <button data-action="tab" data-tab="live" class="tab-btn active">Live</button>
+            <button data-action="tab" data-tab="report" class="tab-btn">Report</button>
+            <button data-action="tab" data-tab="impostazioni" class="tab-btn">Impostazioni</button>
+        </nav>
+        <div class="topbar-right">
+            <span id="pausa-indicator" class="pausa-indicator hidden">PAUSA</span>
+            <span id="countdown-display" class="countdown"></span>
+            <button data-action="darkmode" id="btn-darkmode" class="btn btn-icon" title="Tema chiaro/scuro" aria-label="Tema"></button>
+            <button data-action="notifiche" id="btn-notifiche" class="btn btn-icon" title="Avvisi sonori + desktop su rilevamento AI" aria-label="Notifiche"></button>
+        </div>
+    </div>
+
+    <!-- ====================== TAB LIVE ====================== -->
+    <div id="tab-live" class="tab-panel active">
+        <div class="layout">
+            <!-- SIDEBAR -->
+            <div class="sidebar" id="sidebar-domini">
+                <button class="rail-espandi" data-action="toggle-sidebar" title="Mostra domini" aria-label="Mostra pannello domini">&#xBB;</button>
+                <div class="card">
+                    <div class="sidebar-header">
+                        <h2>Domini (<span id="count-domini">0</span>)</h2>
+                        <button class="btn-collassa" data-action="toggle-sidebar" title="Nascondi domini" aria-label="Nascondi pannello domini">&#xAB;</button>
+                    </div>
+                    <input class="filtro-input" type="text" placeholder="Filtra domini/IP/studenti..." data-action="filtro">
+                    <div class="dominio-list" id="lista-domini">
+                        <div class="sezione-domini" id="sezione-ai" style="display:none">
+                            <h3 class="ai-header">AI (<span id="count-ai">0</span>)</h3>
+                            <div id="domini-ai-list"></div>
+                        </div>
+                        <div class="sezione-domini">
+                            <h3>Siti (<span id="count-siti">0</span>)</h3>
+                            <div id="domini-siti-list"></div>
+                        </div>
+                        <div class="sezione-domini" id="sezione-sistema" style="display:none">
+                            <h3>Sistema (<span id="count-sistema">0</span>)
+                                <button class="btn-toggle" data-action="toggle-sezione" data-sezione="sistema">+</button>
+                            </h3>
+                            <div id="domini-sistema-list" class="hidden"></div>
+                        </div>
+                        <div class="sezione-domini" id="sezione-bloccati" style="display:none">
+                            <h3 class="bloccati-header">Bloccati (<span id="count-bloccati">0</span>)</h3>
+                            <div id="domini-bloccati-list"></div>
+                        </div>
+                        <div class="sezione-domini" id="sezione-nascosti" style="display:none">
+                            <h3 class="nascosti-header">Nascosti (<span id="count-nascosti">0</span>)
+                                <button class="btn-toggle" data-action="toggle-sezione" data-sezione="nascosti">+</button>
+                            </h3>
+                            <div id="domini-nascosti-list" class="hidden"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MAIN -->
+            <div class="main">
+                <div class="toolbar">
+                    <div class="toolbar-group">
+                        <button data-action="session-toggle" id="btn-sessione" class="btn-primary">Avvia sessione</button>
+                        <button data-action="pausa-toggle" id="btn-pausa" class="btn btn-warning">Pausa</button>
+                        <button data-action="block-all-ai" class="btn-danger">Blocca AI</button>
+                        <button data-action="unblock-all-ai" class="btn">Sblocca AI</button>
+                        <details class="menu-overflow">
+                            <summary class="btn btn-icon" title="Altre azioni" aria-label="Altre azioni">&#x22EE;</summary>
+                            <div class="menu-overflow-panel">
+                                <div class="menu-sezione">
+                                    <div class="menu-sezione-titolo">Blocklist</div>
+                                    <button data-action="clear-blocklist" class="menu-item danger">Svuota blocklist</button>
+                                </div>
+                                <div class="menu-sezione">
+                                    <div class="menu-sezione-titolo">Preset blocklist</div>
+                                    <select id="preset-select" data-action="preset-load" class="menu-select">
+                                        <option value="">-- Carica preset --</option>
+                                    </select>
+                                    <button data-action="preset-save" class="menu-item">Salva preset corrente</button>
+                                </div>
+                                <div class="menu-sezione">
+                                    <button data-action="export" class="menu-item">Esporta JSON sessione</button>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                    <div class="toolbar-group toolbar-right">
+                        <label class="deadline-label">Fine:
+                            <input type="time" id="input-deadline" data-action="set-deadline">
+                        </label>
+                        <button data-action="clear-deadline" class="btn btn-icon" title="Annulla countdown">X</button>
+                    </div>
+                </div>
+
+                <div class="stat-row">
+                    <div class="stat-card"><div class="numero" id="stat-richieste">0</div><div class="etichetta">Richieste</div></div>
+                    <div class="stat-card"><div class="numero" id="stat-domini">0</div><div class="etichetta">Domini</div></div>
+                    <div class="stat-card"><div class="numero" id="stat-ip">0</div><div class="etichetta">IP attivi</div></div>
+                    <div class="stat-card"><div class="numero" id="stat-durata">0:00</div><div class="etichetta">Durata</div></div>
+                    <div class="stat-card status"><div class="numero" id="stat-status">-</div><div class="etichetta" id="stat-modo">Stato</div></div>
+                </div>
+
+                <div class="main-panels">
+                    <div class="panel">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 id="panel-ip-titolo">Traffico per IP</h2>
+                                <div class="view-toggle">
+                                    <button data-action="vista-griglia" id="btn-vista-griglia" class="btn-view" title="Vista a griglia">&#x25A6;</button>
+                                    <button data-action="vista-lista" id="btn-vista-lista" class="btn-view" title="Vista a lista">&#x2630;</button>
+                                </div>
+                            </div>
+                            <div class="card-scroll" id="ip-container"></div>
+                        </div>
+                    </div>
+                    <div class="panel narrow" id="panel-richieste">
+                        <button class="rail-espandi" data-action="toggle-richieste" title="Mostra ultime richieste" aria-label="Mostra ultime richieste">&#xAB;</button>
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>Ultime richieste</h2>
+                                <button class="btn-collassa" data-action="toggle-richieste" title="Nascondi ultime richieste" aria-label="Nascondi ultime richieste">&#xBB;</button>
+                            </div>
+                            <div class="card-scroll" id="lista-richieste"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================== TAB REPORT ====================== -->
+    <div id="tab-report" class="tab-panel">
+        <div class="report-layout">
+            <div class="card report-header">
+                <h2 id="report-titolo">Report sessione corrente</h2>
+                <div class="toolbar-group">
+                    <select id="report-sessione-select" data-action="report-sessione-select">
+                        <option value="">-- Sessione corrente --</option>
+                    </select>
+                    <button data-action="report-elimina" class="btn btn-danger" id="btn-elimina-sessione" disabled>Elimina archivio</button>
+                </div>
+            </div>
+
+            <div class="report-grid">
+                <div class="card report-stats">
+                    <h3>Riepilogo</h3>
+                    <dl id="report-riepilogo"></dl>
+                </div>
+                <div class="card">
+                    <h3>Top domini AI contattati</h3>
+                    <div class="report-bars" id="report-top-ai">-</div>
+                </div>
+                <div class="card">
+                    <h3>Top 10 domini (tutti)</h3>
+                    <div class="report-bars" id="report-top-domini">-</div>
+                </div>
+                <div class="card">
+                    <h3>Attivita' per studente</h3>
+                    <div class="report-bars" id="report-top-studenti">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================== TAB IMPOSTAZIONI ====================== -->
+    <div id="tab-impostazioni" class="tab-panel">
+        <div class="impostazioni-layout">
+            <div class="card">
+                <h3>Configurazione</h3>
+                <div id="riavvio-banner" class="riavvio-banner hidden">Alcune modifiche richiedono il riavvio del server per avere effetto.</div>
+
+                <h4>Generale</h4>
+                <div class="settings-grid">
+                    <label>Titolo</label>
+                    <input type="text" data-action="settings-field" data-key="titolo">
+
+                    <label>Classe / contesto</label>
+                    <input type="text" data-action="settings-field" data-key="classe">
+
+                    <label>Modo proxy</label>
+                    <select data-action="settings-field" data-key="modo">
+                        <option value="blocklist">Blocklist (blocca solo elencati)</option>
+                        <option value="allowlist">Allowlist (passa solo elencati)</option>
+                    </select>
+
+                    <label>Soglia inattivita' (sec)</label>
+                    <input type="number" data-action="settings-field" data-key="inattivitaSogliaSec" min="10" max="3600">
+                </div>
+
+                <h4 style="margin-top:16px">Porte <span class="hint-inline">(richiede riavvio)</span></h4>
+                <div class="settings-grid">
+                    <label>Porta proxy</label>
+                    <input type="number" data-action="settings-field" data-key="proxy.port" min="1024" max="65535">
+
+                    <label>Porta monitor</label>
+                    <input type="number" data-action="settings-field" data-key="web.port" min="1024" max="65535">
+                </div>
+
+                <h4 style="margin-top:16px">Autenticazione <span class="hint-inline">(richiede riavvio)</span></h4>
+                <div class="settings-grid">
+                    <label>Abilitata</label>
+                    <input type="checkbox" data-action="settings-field" data-key="web.auth.enabled">
+
+                    <label>Utente</label>
+                    <input type="text" data-action="settings-field" data-key="web.auth.user">
+
+                    <label>Password</label>
+                    <input type="password" data-action="settings-field" data-key="web.auth.password" placeholder="(non modificata)">
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Domini ignorati</h3>
+                <p class="hint">Traffico verso questi domini non compare nel monitor (match per sostringa). Sono anche sempre consentiti dal proxy, anche in pausa/allowlist.</p>
+                <ul class="ignorati-list" id="ignorati-list"></ul>
+                <div class="aggiungi-studente">
+                    <input type="text" id="nuovo-ignorato" placeholder="es. ocsp.digicert.com" data-action="nuovo-ignorato-key" style="flex:1">
+                    <button data-action="aggiungi-ignorato" class="btn btn-primary">Aggiungi</button>
+                </div>
+            </div>
+
+            <div class="card" id="card-studenti">
+                <h3>Mappa studenti (IP &rarr; nome)</h3>
+                <p class="hint">Puoi modificare direttamente qui. Ogni cambiamento viene salvato automaticamente in <code>studenti.json</code>.</p>
+
+                <div class="toolbar-group classi-toolbar">
+                    <select id="sel-classe" data-action="sel-combo" class="classe-select">
+                        <option value="">-- Classe --</option>
+                    </select>
+                    <select id="sel-lab" data-action="sel-combo" class="classe-select">
+                        <option value="">-- Laboratorio --</option>
+                    </select>
+                    <button data-action="combo-load" id="btn-combo-load" class="btn btn-primary" disabled>Carica</button>
+                    <button data-action="combo-save" class="btn">Salva combinazione</button>
+                    <button data-action="combo-delete" id="btn-combo-delete" class="btn btn-danger" disabled>Elimina</button>
+                </div>
+
+                <h4 style="margin-top:14px">Mappa attuale (<span id="count-studenti">0</span>)</h4>
+                <table class="mappa-studenti">
+                    <thead><tr><th>IP</th><th>Nome</th><th></th></tr></thead>
+                    <tbody id="studenti-tbody"></tbody>
+                </table>
+
+                <div class="aggiungi-studente">
+                    <input type="text" id="nuovo-ip" placeholder="IP (es. 192.168.1.15)" data-action="nuovo-studente-key">
+                    <input type="text" id="nuovo-nome" placeholder="Nome" data-action="nuovo-studente-key">
+                    <button data-action="aggiungi-studente" class="btn btn-primary">Aggiungi</button>
+                </div>
+
+                <div class="toolbar-group" style="margin-top:12px">
+                    <button data-action="reload-studenti" class="btn">Ricarica da file</button>
+                    <button data-action="svuota-studenti" class="btn btn-danger">Svuota mappa</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Archivio sessioni</h3>
+                <p class="hint">All'"Avvia sessione" la precedente (se aveva dati) viene archiviata in <code>sessioni/</code>. L'archivio sopravvive ai riavvii.</p>
+                <button data-action="archivia-ora" class="btn">Archivia sessione corrente</button>
+                <button data-action="ricarica-sessioni" class="btn">Aggiorna lista</button>
+                <ul class="sessioni-list" id="sessioni-list"></ul>
+            </div>
+
+            <div class="card">
+                <h3>Collegamenti utili</h3>
+                <ul class="link-list">
+                    <li><a href="/api/export" target="_blank">Scarica JSON sessione corrente</a></li>
+                    <li><a href="/api/session/status" target="_blank">Stato sessione (JSON)</a></li>
+                    <li><a href="/api/sessioni" target="_blank">Lista archivio (JSON)</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

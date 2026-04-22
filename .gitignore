@@ -1,0 +1,34 @@
+# Binario Node.js bundled (91 MB). L'utente lo scarica separatamente (vedi README).
+node.exe
+*.exe
+
+# Stato runtime (rigenerato ad ogni avvio)
+_traffico_log.txt
+_blocked_domains.txt
+
+# Sessioni archiviate (contengono IP + domini visitati dagli studenti = dati sensibili)
+sessioni/*.json
+sessioni/_archivio_privato/
+
+# Mappe classi salvate (contengono nomi studenti reali)
+classi/*.json
+
+# File temporanei di smoke test / debug
+_server.log
+_smoke.json
+_*.log
+
+# Sistema operativo
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Directory Claude Code (stato locale della sessione di lavoro)
+.claude/

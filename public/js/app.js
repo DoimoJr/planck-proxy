@@ -1,0 +1,149 @@
+// Entry point: init + event delegation
+
+import { state, assorbiEntry } from './state.js';
+import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown } from './render.js';
+import { avviaSSE } from './sse.js';
+import * as actions from './actions.js';
+
+async function init() {
+    const [cfgRes, histRes, sesRes, setRes] = await Promise.all([
+        fetch('/api/config').then(r => r.json()),
+        fetch('/api/history').then(r => r.json()),
+        fetch('/api/sessioni').then(r => r.json()).catch(() => ({ sessioni: [] })),
+        fetch('/api/settings').then(r => r.json()).catch(() => ({ settings: null })),
+    ]);
+
+    state.cfg = cfgRes;
+    document.title = cfgRes.titolo + (cfgRes.classe ? ' - ' + cfgRes.classe : '');
+
+    state.bloccati = new Set(histRes.bloccati);
+    state.sessioneAttiva = !!histRes.sessioneAttiva;
+    state.sessioneInizio = histRes.sessioneInizio || null;
+    state.sessioneFineISO = histRes.sessioneFineISO || null;
+    state.pausato = !!histRes.pausato;
+    state.deadlineISO = histRes.deadlineISO || null;
+    state.sessioniArchivio = sesRes.sessioni || [];
+    state.settings = setRes.settings || null;
+
+    if (histRes.alive) {
+        for (const [ip, ts] of Object.entries(histRes.alive)) state.aliveMap.set(ip, ts);
+    }
+
+    for (const e of histRes.entries) assorbiEntry(e);
+
+    aggiornaToggleButtons();
+    aggiornaSelectPresets();
+    aggiornaInputDeadline();
+    renderTabs();
+    actions.applicaCollassi();
+    renderAll();
+    avviaSSE();
+
+    // Countdown: tick ogni secondo (solo aggiorna la UI, zero allocazioni)
+    setInterval(renderCountdown, 1000);
+    // Refresh complessivo (durata, "ultima attivita'") - ogni 5s
+    setInterval(renderAll, 5000);
+}
+
+// Chiude il menu overflow (⋮) dopo un click su un item o al click fuori.
+function chiudiMenuOverflow() {
+    document.querySelectorAll('details.menu-overflow[open]').forEach(d => { d.open = false; });
+}
+document.body.addEventListener('click', (e) => {
+    // Se l'utente clicca fuori dal menu (e fuori dal summary), chiudilo.
+    if (!e.target.closest('details.menu-overflow')) chiudiMenuOverflow();
+}, true);
+
+// --- Click delegation ---
+document.body.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    const d = el.dataset.dominio;
+    const ip = el.dataset.ip;
+    const nome = el.dataset.nome;
+
+    // Se l'azione e' stata attivata dentro al menu overflow, chiudi il menu dopo l'azione.
+    // (Eccezione: il summary stesso, che serve per aprire il menu — non e' un data-action.)
+    const dentroMenu = el.closest('.menu-overflow-panel');
+
+    switch (action) {
+        case 'blocca': e.stopPropagation(); actions.bloccaDominio(d); break;
+        case 'sblocca': actions.sbloccaDominio(d); break;
+        case 'nascondi-dominio': actions.nascondiDominio(d); break;
+        case 'mostra-dominio': actions.mostraDominio(d); break;
+        case 'reset-nascosti': actions.resetNascosti(); break;
+        case 'focus-ip': actions.setFocus(ip); break;
+        case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
+        case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
+        case 'vista-griglia': actions.cambiaVistaIp('griglia'); break;
+        case 'vista-lista': actions.cambiaVistaIp('lista'); break;
+        case 'toggle-sidebar': actions.toggleSidebar(); break;
+        case 'toggle-richieste': actions.toggleRichieste(); break;
+        case 'session-toggle': actions.toggleSessione(); break;
+        case 'export': actions.esportaSessione(); break;
+        case 'block-all-ai': actions.bloccaAI(); break;
+        case 'unblock-all-ai': actions.sbloccaAI(); break;
+        case 'clear-blocklist': actions.svuotaBlocklist(); break;
+        case 'preset-save': actions.salvaPreset(); break;
+        case 'darkmode': actions.toggleDarkmode(); break;
+        case 'notifiche': actions.toggleNotifiche(); break;
+        case 'pausa-toggle': actions.togglePausa(); break;
+        case 'clear-deadline': actions.annullaDeadline(); break;
+        case 'tab': actions.cambiaTab(el.dataset.tab); break;
+        case 'reload-studenti': actions.ricaricaStudenti(); break;
+        case 'elimina-studente': actions.eliminaStudente(el.dataset.ip); break;
+        case 'aggiungi-studente': actions.aggiungiStudente(); break;
+        case 'svuota-studenti': actions.svuotaMappaStudenti(); break;
+        case 'combo-load': actions.caricaCombo(); break;
+        case 'combo-save': actions.salvaCombo(); break;
+        case 'combo-delete': actions.eliminaCombo(); break;
+        case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
+        case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
+        case 'archivia-ora': actions.archiviaOra(); break;
+        case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
+        case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;
+        case 'sessione-elimina': e.stopPropagation(); actions.eliminaSessioneArchiviata(nome); break;
+        case 'report-elimina': actions.eliminaSessioneArchiviata(null); break;
+    }
+
+    if (dentroMenu) chiudiMenuOverflow();
+});
+
+// --- Input / change ---
+document.body.addEventListener('input', (e) => {
+    const el = e.target;
+    if (el.dataset.action === 'filtro') actions.setFiltro(el.value);
+});
+document.body.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.dataset.action === 'preset-load') {
+        actions.caricaPreset(el.value);
+        el.value = '';
+        chiudiMenuOverflow();
+    } else if (el.dataset.action === 'set-deadline') {
+        actions.impostaDeadline(el.value);
+    } else if (el.dataset.action === 'report-sessione-select') {
+        actions.apriSessioneArchiviata(el.value);
+    } else if (el.dataset.action === 'sel-combo') {
+        actions.aggiornaStatoCombo();
+    } else if (el.dataset.action === 'edit-studente') {
+        actions.modificaStudente(el.dataset.ip, el.value);
+    } else if (el.dataset.action === 'settings-field') {
+        actions.settingsCampoModificato(el);
+    }
+});
+
+// Invio nei campi di aggiunta studente = aggiungi
+document.body.addEventListener('keydown', (e) => {
+    const el = e.target;
+    if (e.key === 'Enter' && el.dataset.action === 'nuovo-studente-key') {
+        e.preventDefault();
+        actions.aggiungiStudente();
+    } else if (e.key === 'Enter' && el.dataset.action === 'nuovo-ignorato-key') {
+        e.preventDefault();
+        actions.aggiungiIgnorato();
+    }
+});
+
+init();

@@ -6,13 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Classroom-invigilation toolkit used by a teacher during exams: the teacher's PC runs a proxy that all student PCs are forced through, and a web dashboard (3 tabs: Live / Report / Impostazioni) shows live traffic per-IP, flags AI-assistant domains, blocks sites on the fly, supports session lifecycle (pause/deadline/archive), and exports session logs. Everything (code, UI, commits) is in **Italian** and should stay that way.
 
-**Portable by design**: the folder is self-contained. `node.exe` is bundled. No `npm install`, no build step, no git. `.bat` files on student PCs are distributed manually (Veyon or similar).
+**Portable by design**: the folder is self-contained. No `npm install`, no build step. `.bat` files on student PCs are distributed manually (Veyon or similar).
+
+Pubblicato come **`DoimoJr/planck-proxy`** su GitHub (MIT). `node.exe` (~91 MB) e' escluso dal repo via `.gitignore`: l'utente lo scarica da [nodejs.org](https://nodejs.org/en/download) e lo mette nella radice del progetto (vedi README). In locale la cartella si chiama ancora `consegna_portable/` (path originale), sul repo il nome e' `planck-proxy`.
 
 ## Layout
 
 ```
 consegna_portable/
-├── node.exe                    bundled Node.js runtime (~91 MB)
+├── node.exe                    Node.js runtime (~91 MB, NON in git — scaricato separatamente)
 ├── avvia.bat                   launcher
 ├── server.js                   proxy + web + API + SSE (single process)
 ├── domains.js                  DOMINI_AI + PATTERN_SISTEMA + classifica()
@@ -40,17 +42,17 @@ Runtime state (auto-created, not committed): `_blocked_domains.txt`, `_traffico_
 
 ## Run / test
 
-- **Start**: `avvia.bat` → runs `server.js`. Proxy on `:9090`, monitor UI on `:8080`, both `0.0.0.0`.
+- **Start**: `avvia.bat` → runs `server.js`. Proxy on `:9090`, monitor UI on `:9999`, both `0.0.0.0`.
 - **Student setup**: edit `IP_PROF` in `proxy_on.bat`, distribute via Veyon, run.
 - **Smoke tests** (server running):
   - `./node.exe --check server.js domains.js public/js/app.js ...`
   - `curl -x http://127.0.0.1:9090 http://example.com` → 200 (or 403 if blocked / paused)
-  - `curl http://127.0.0.1:8080/api/config` → config + domains + studenti + presets
-  - `curl http://127.0.0.1:8080/api/pausa/on` → subsequent proxy requests get 403
-  - `curl 'http://127.0.0.1:8080/api/deadline/set?time=23:59'` → deadline ISO returned
-  - `curl http://127.0.0.1:8080/api/session/start` → archives previous session into `sessioni/`
-  - `curl http://127.0.0.1:8080/api/sessioni` → list of archived session files
-  - `curl -I http://127.0.0.1:8080/api/export` → `Content-Disposition: attachment`
+  - `curl http://127.0.0.1:9999/api/config` → config + domains + studenti + presets
+  - `curl http://127.0.0.1:9999/api/pausa/on` → subsequent proxy requests get 403
+  - `curl 'http://127.0.0.1:9999/api/deadline/set?time=23:59'` → deadline ISO returned
+  - `curl http://127.0.0.1:9999/api/session/start` → archives previous session into `sessioni/`
+  - `curl http://127.0.0.1:9999/api/sessioni` → list of archived session files
+  - `curl -I http://127.0.0.1:9999/api/export` → `Content-Disposition: attachment`
 
 ## Architecture
 
@@ -60,7 +62,7 @@ Single Node process, two HTTP servers, shared in-memory state:
 student PC ──HTTP/HTTPS──► :9090 proxy ──► origin
                               │
                               ▼ ring buffer (MAX_STORIA=5000) + SSE broadcast
-                          :8080 web/API ──► monitor UI (public/)
+                          :9999 web/API ──► monitor UI (public/)
                               │
                               ▼ persistence
                           _blocked_domains.txt   (blocklist / allowlist, one line per domain)
@@ -103,7 +105,7 @@ student PC ──HTTP/HTTPS──► :9090 proxy ──► origin
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/config` | `{titolo, classe, modo, inattivitaSogliaSec, dominiAI, patternSistema, studenti, presets}` |
-| `GET /api/history` | `{entries, bloccati, sessioneInizio, pausato, deadlineISO}` - full hydrate |
+| `GET /api/history` | `{entries, bloccati, sessioneAttiva, sessioneInizio, sessioneFineISO, pausato, deadlineISO, alive}` - full hydrate |
 | `GET /api/block?domain=X` / `unblock?domain=X` | Toggle single |
 | `GET /api/block-all-ai` / `unblock-all-ai` | Bulk via `DOMINI_AI` |
 | `GET /api/clear-blocklist` | Empty list |
@@ -145,7 +147,7 @@ Implementazione: `renderTabellaIp()` e' un dispatcher che legge `state.vistaIp` 
 
 ### Frontend architecture
 
-- **Single mutable `state` object** in `state.js`; persistence for `nascosti`, `darkmode`, `notifiche`, `tabAttivo` in `localStorage`.
+- **Single mutable `state` object** in `state.js`; persistence in `localStorage` per: `nascosti`, `darkmode`, `notifiche`, `tabAttivo`, `vistaIp` (griglia|lista), `sidebarCollassata`, `richiesteCollassate`.
 - **Render throttling**: `renderAll()` wraps `_renderAllSync()` with a `requestAnimationFrame` guard — multiple calls in the same frame coalesce into one paint. Critical during SSE event bursts (20+ students simultaneously).
 - **Countdown ticks independently** every 1s via a dedicated `setInterval(renderCountdown, 1000)` — doesn't trigger full renders.
 - **Tabs**: three `<section class="tab-panel">`; `renderTabs()` toggles the `.active` class. Switching into Report or Impostazioni triggers a fresh `ricaricaSessioni()`.
@@ -180,13 +182,13 @@ When the user selects an archived session in Impostazioni (dropdown) or clicks a
 - **Runtime-vs-boot config reads**: `config.web.auth`, `config.modo`, `config.dominiIgnorati` are read on every request via `config.xxx` so UI edits apply immediately. Ports (`PORTA_PROXY`, `PORTA_WEB`) stay as boot-time consts — reassigning them wouldn't re-bind the listening socket anyway.
 - **Password never leaves the server**: `sanitizeConfig()` strips `web.auth.password` and replaces with `{password:"", passwordSet:boolean}`. The UI password field only sends a new value if non-empty (empty submit is ignored client-side — the field placeholder reflects whether a password is already set).
 - **Filename sanitization**: presets use `[a-zA-Z0-9_-]`; sessions use `[a-zA-Z0-9_.\-]` + mandatory `.json` suffix. Both refuse bypass attempts — see `nomeSessioneSafe()`.
-- **No tests, no linter, no CI.** Validate with the smoke tests above and by loading `http://localhost:8080` in a browser.
+- **No tests, no linter, no CI.** Validate with the smoke tests above and by loading `http://localhost:9999` in a browser.
 
 ## Known structural limits
 
 - **Watchdog keepalive**: `proxy_on.bat`'s VBS ping the proxy at `GET /_alive` every 5s via `MSXML2.ServerXMLHTTP.6.0` with `setProxy 1` (bypasses the local proxy config to avoid a loop). The proxy intercepts `/_alive` before attempting to forward, updates `aliveMap[ip] = now`, and broadcasts `{type:'alive', ip, ts}` via SSE. Frontend renders a colored dot in the IP table column "WD": green <15s since last ping, yellow 15–60s, red >60s (possible bypass), gray = never seen. IPs present only in `aliveMap` (no traffic yet) still appear in the table — they show as rows with 0 traffic and the dot. This is **detection, not prevention**: a student killing `wscript.exe` turns their dot red within 60s, but the red dot alone isn't proof — students legitimately finishing the test also stop pinging.
 - **Hotspot bypass**: phone hotspot circumvents the LAN proxy. Unsolvable at this layer. If the PC itself joins a hotspot, the browser can't reach the proxy → visible errors, and also `/_alive` stops arriving → watchdog dot turns red. If the student uses the phone *directly* (PC still on LAN and pinging), the watchdog stays green — only visual supervision catches this.
 - **Auth is HTTP Basic**: trusted-LAN only; not TLS-protected. Disabled by default. The advice to bind the web server to `127.0.0.1` instead of `0.0.0.0` for teacher-only access is deliberately **not** implemented — the user wanted LAN access left open.
-- **Archive saves at `session/start` and at graceful shutdown only**. `session/stop` NON archivia (tiene i dati visibili per revisione). A `kill -9` o power loss il buffer in memoria si perde — esporta manualmente se la sessione e' importante, o premi Avvia della successiva per forzare l'archivio.
+- **Archive saves at `session/stop`, at `session/start` (difensivo per API calls che saltano Stop) e at graceful shutdown**. Lo stop archivia subito (se ha dati), poi il buffer resta visibile in UI per revisione finche' non premi Avvia. A `kill -9` o power loss prima di uno stop esplicito, il buffer in memoria si perde — esporta manualmente se la sessione e' importante.
 - **Preset save overwrites silently.** Same name = overwrite.
 - **Deadline is in-memory**: lost on restart.

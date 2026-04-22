@@ -1,7 +1,23 @@
-// ============================================================
-// Server unificato: proxy HTTP/HTTPS + UI monitor + API
-// Uso: node server.js  (oppure avvia.bat)
-// ============================================================
+/**
+ * @file Server unificato: proxy HTTP/HTTPS + web UI + API REST + SSE.
+ *
+ * Architettura:
+ *   - Unico processo Node, due HTTP server (proxy su `config.proxy.port`
+ *     e web su `config.web.port`), entrambi su `0.0.0.0`.
+ *   - Stato condiviso in RAM (`storia`, `bloccati`, `aliveMap`, ...).
+ *   - Persistenza su file:
+ *       - `_blocked_domains.txt` (blocklist, una riga per dominio)
+ *       - `_traffico_log.txt` (audit append-only, non riletto)
+ *       - `config.json` (ri-salvato da `/api/settings/update`)
+ *       - `studenti.json` (mappa IP -> nome)
+ *       - `presets/*.json` (snapshot blocklist)
+ *       - `sessioni/*.json` (archivio sessioni concluse)
+ *       - `classi/<classe>--<lab>.json` (mappe studenti combo classe+lab)
+ *
+ * Avvio: `node server.js` (o `avvia.bat` su Windows). Le porte sono lette
+ * una sola volta al boot: modificarle dalla UI richiede restart manuale.
+ * Auth HTTP Basic e `dominiIgnorati` sono letti runtime da `config.*`.
+ */
 
 const net = require('net');
 const http = require('http');
@@ -28,10 +44,18 @@ const PORTA_PROXY = config.proxy.port;     // usato solo al listen (richiede res
 const PORTA_WEB = config.web.port;          // idem
 // auth e dominiIgnorati sono letti dinamicamente da `config` (modificabili a caldo)
 
+/** Scrive `config` su disco. Silenzia errori (ENOSPC, permessi). */
 function salvaConfigFile() {
     try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); } catch {}
 }
 
+/**
+ * Restituisce una copia di `config` con la password rimossa e sostituita
+ * da `passwordSet: boolean`. Usata per tutte le risposte a `/api/settings`
+ * e per i broadcast SSE `settings` — la password reale non esce mai dal server.
+ * @param {Object} c
+ * @returns {Object}
+ */
 function sanitizeConfig(c) {
     const out = JSON.parse(JSON.stringify(c));
     if (out.web?.auth) {
@@ -41,9 +65,22 @@ function sanitizeConfig(c) {
     return out;
 }
 
+/**
+ * Legge un valore da un oggetto via path dotted (es. "web.auth.enabled").
+ * @param {Object} obj
+ * @param {string} path
+ */
 function getDeep(obj, path) {
     return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
 }
+
+/**
+ * Scrive un valore in un oggetto via path dotted, creando oggetti
+ * intermedi mancanti. Mutazione in-place.
+ * @param {Object} obj
+ * @param {string} path
+ * @param {*} value
+ */
 function setDeep(obj, path, value) {
     const parts = path.split('.');
     let cur = obj;
@@ -54,6 +91,11 @@ function setDeep(obj, path, value) {
     cur[parts[parts.length - 1]] = value;
 }
 
+/**
+ * Mappa key-dotted -> validator. Ogni valore in ingresso a
+ * `/api/settings/update` deve passare il predicato corrispondente,
+ * altrimenti finisce in `rejected`.
+ */
 const SETTINGS_VALIDATORI = {
     'titolo': v => typeof v === 'string' && v.length <= 200,
     'classe': v => typeof v === 'string' && v.length <= 100,
@@ -66,8 +108,19 @@ const SETTINGS_VALIDATORI = {
     'web.auth.password': v => typeof v === 'string' && v.length > 0 && v.length < 200,
     'dominiIgnorati': v => Array.isArray(v) && v.every(s => typeof s === 'string'),
 };
+/**
+ * Chiavi che vengono scritte su disco ma NON applicate a caldo.
+ * Il client latch-a `riavvioRichiesto` e mostra un banner persistente.
+ */
 const SETTINGS_RESTART = new Set(['proxy.port', 'web.port', 'web.auth.enabled', 'web.auth.user', 'web.auth.password']);
 
+/**
+ * Applica un set di coppie key-dotted/value a `config`, valida per chiave,
+ * persiste su disco se almeno una e' stata accettata.
+ *
+ * @param {Object<string,*>} body
+ * @returns {{updated: string[], rejected: string[], richiedeRiavvio: string[]}}
+ */
 function applicaSettings(body) {
     const updated = [], rejected = [], richiedeRiavvio = [];
     for (const [key, value] of Object.entries(body || {})) {
@@ -81,6 +134,12 @@ function applicaSettings(body) {
     return { updated, rejected, richiedeRiavvio };
 }
 
+/**
+ * Legge un body HTTP come JSON, con guard anti-flood a 1 MB.
+ * Ritorna `{}` su errore di parse o payload malformato (mai rigetta).
+ * @param {import('http').IncomingMessage} req
+ * @returns {Promise<Object>}
+ */
 function leggiBody(req) {
     return new Promise((resolve) => {
         let data = '';
@@ -93,8 +152,18 @@ function leggiBody(req) {
 if (!fs.existsSync(SESSIONI_DIR)) fs.mkdirSync(SESSIONI_DIR);
 if (!fs.existsSync(CLASSI_DIR)) fs.mkdirSync(CLASSI_DIR);
 
-// --- STUDENTI ---
+// ============================================================
+// STUDENTI: mappa IP -> nome persistita in `studenti.json`
+// ============================================================
+/** @type {Object<string,string>} */
 let studenti = {};
+
+/**
+ * (Ri)carica la mappa studenti da `studenti.json`. Le chiavi con prefisso
+ * `_` sono ignorate: convenzione per inserire "commenti" nel JSON (che per
+ * sua natura non supporta commenti nativi). Ogni mutazione via API rimuove
+ * comunque questi commenti riscrivendo il file.
+ */
 function caricaStudenti() {
     try {
         const raw = JSON.parse(fs.readFileSync(STUDENTI_PATH, 'utf8'));
@@ -104,28 +173,51 @@ function caricaStudenti() {
         }
     } catch { studenti = {}; }
 }
+
+/** Scrive la mappa corrente su `studenti.json`. Silenzia errori di I/O. */
 function salvaStudentiFile() {
     try { fs.writeFileSync(STUDENTI_PATH, JSON.stringify(studenti, null, 2)); } catch {}
 }
 caricaStudenti();
 
-// --- CLASSI (mappe studenti salvate: coppia classe+laboratorio) ---
+// ============================================================
+// CLASSI: mappe studenti salvate per coppia (classe, lab).
+// File su disco: `classi/<classe>--<lab>.json` con contenuto
+// `{classe, lab, mappa}`. I segmenti sono sanitizzati a [a-zA-Z0-9_-].
+// ============================================================
+
+/**
+ * Sanitizza un segmento di nome classe/lab, tenendo solo alfanumerici,
+ * underscore e trattino. Restituisce null se il risultato e' vuoto.
+ */
 function sanSegmento(s) {
     const safe = (s || '').replace(/[^a-zA-Z0-9_-]/g, '');
     return safe || null;
 }
+
+/**
+ * Costruisce il nome file per una combinazione (classe, lab).
+ * @returns {string|null} Nome file (es. `4dii--lab1.json`) o null se segmenti non validi.
+ */
 function fileClasse(classe, lab) {
     const sc = sanSegmento(classe);
     const sl = sanSegmento(lab);
     if (!sc || !sl) return null;
     return sc + '--' + sl + '.json';
 }
+
+/** Inverso di `fileClasse`: estrae `{classe, lab}` dal filename. */
 function parseFileClasse(filename) {
     const stem = filename.replace(/\.json$/, '');
     const idx = stem.indexOf('--');
     if (idx < 0) return null;
     return { classe: stem.slice(0, idx), lab: stem.slice(idx + 2) };
 }
+
+/**
+ * Elenca tutte le combinazioni salvate in `classi/`.
+ * @returns {Array<{classe:string, lab:string, file:string}>}
+ */
 function listaClassi() {
     try {
         return fs.readdirSync(CLASSI_DIR)
@@ -138,12 +230,23 @@ function listaClassi() {
             .sort((a, b) => a.classe.localeCompare(b.classe) || a.lab.localeCompare(b.lab));
     } catch { return []; }
 }
+
+/**
+ * Legge una combo da disco.
+ * @returns {{classe:string, lab:string, mappa:Object<string,string>}|null}
+ */
 function leggiClasse(classe, lab) {
     const file = fileClasse(classe, lab);
     if (!file) return null;
     try { return JSON.parse(fs.readFileSync(path.join(CLASSI_DIR, file), 'utf8')); }
     catch { return null; }
 }
+/**
+ * Salva una combo su disco. @returns {boolean} true in caso di successo.
+ * @param {string} classe
+ * @param {string} lab
+ * @param {Object<string,string>} mappa - IP -> nome.
+ */
 function salvaClasse(classe, lab, mappa) {
     const file = fileClasse(classe, lab);
     if (!file) return false;
@@ -151,6 +254,8 @@ function salvaClasse(classe, lab, mappa) {
     try { fs.writeFileSync(path.join(CLASSI_DIR, file), JSON.stringify(contenuto, null, 2)); return true; }
     catch { return false; }
 }
+
+/** Elimina il file combo corrispondente. @returns {boolean} */
 function eliminaClasse(classe, lab) {
     const file = fileClasse(classe, lab);
     if (!file) return false;
@@ -158,7 +263,10 @@ function eliminaClasse(classe, lab) {
     catch { return false; }
 }
 
-// --- PAGINA BLOCCATA ---
+// ============================================================
+// PAGINA BLOCCATA: HTML servito agli studenti su domini bloccati.
+// Personalizzabile editando `blocked.html`; fallback inline se mancante.
+// ============================================================
 let paginaBloccata;
 try { paginaBloccata = fs.readFileSync(BLOCKED_HTML_PATH, 'utf8'); }
 catch {
@@ -166,7 +274,12 @@ catch {
         + '<h1 style="color:#e74c3c">Accesso bloccato dal docente</h1></body></html>';
 }
 
-// --- IP LOCALE ---
+/**
+ * Restituisce il primo IPv4 non-loopback delle interfacce di rete locali.
+ * Usato solo per stampare a console un URL comodo all'avvio ("Apri il
+ * browser su http://<ipLocale>:9999"). Se niente e' disponibile, fallback
+ * a 127.0.0.1.
+ */
 function ipLocale() {
     const interfaces = os.networkInterfaces();
     for (const name of Object.keys(interfaces)) {
@@ -178,51 +291,93 @@ function ipLocale() {
 }
 const IP_SERVER = ipLocale();
 
-// --- STATO IN MEMORIA ---
+// ============================================================
+// STATO IN MEMORIA
+// ============================================================
+
+/** Capienza del ring buffer traffico. Oltre, le entry piu' vecchie vengono scartate. */
 const MAX_STORIA = 5000;
+
+/** @type {Array<{ora:string,ip:string,metodo:string,dominio:string,tipo:string,blocked:boolean}>} */
 const storia = [];
+
+/** @type {Set<string>} Domini in blocklist (persistiti in `_blocked_domains.txt`). */
 let bloccati = new Set();
+
+/** @type {Set<import('http').ServerResponse>} Response degli EventSource attualmente connessi. */
 const sseClients = new Set();
+
 // Lifecycle sessione esplicito: al boot la sessione NON e' attiva.
 // Il proxy instrada e blocca comunque, ma niente viene registrato finche'
 // l'utente non preme "Avvia sessione".
 let sessioneAttiva = false;
+/** @type {string|null} ISO timestamp dell'inizio della sessione corrente. */
 let sessioneInizio = null;
-let sessioneFineISO = null;  // timestamp del momento di "Ferma" (per durata congelata)
+/** @type {string|null} ISO timestamp del "Ferma" — usato per congelare la durata in UI. */
+let sessioneFineISO = null;
 let pausato = false;
+/** @type {string|null} ISO della scadenza programmata. */
 let deadlineISO = null;
+/** @type {NodeJS.Timeout|null} Handle del setTimeout che notifica lo scadere. */
 let deadlineTimer = null;
-const aliveMap = new Map(); // ip -> ultimo ping timestamp (ms)
+/** @type {Map<string, number>} IP -> ms dell'ultimo ping watchdog ricevuto. */
+const aliveMap = new Map();
 
+/**
+ * Registra un ping keepalive dallo script `proxy_on.bat` di uno studente.
+ * Aggiorna `aliveMap` e broadcastta ai client `{type:'alive', ip, ts}` per
+ * far colorare il dot in UI.
+ */
 function registraAlive(ip) {
     const ts = Date.now();
     aliveMap.set(ip, ts);
     broadcast({ type: 'alive', ip, ts });
 }
 
-// --- BLOCKLIST ---
+// ============================================================
+// BLOCKLIST: persistita su `_blocked_domains.txt`, una riga per dominio.
+// ============================================================
+
+/** Carica la blocklist da disco. Se il file non esiste, parte vuota. */
 function caricaLista() {
     try {
         const txt = fs.readFileSync(BLOCKED_FILE, 'utf8');
         bloccati = new Set(txt.split('\n').map(s => s.trim()).filter(Boolean));
     } catch { bloccati = new Set(); }
 }
+
+/** Scrive la blocklist corrente su disco. */
 function salvaLista() {
     fs.writeFileSync(BLOCKED_FILE, [...bloccati].join('\n') + '\n');
 }
 caricaLista();
 
+/**
+ * True se il dominio matcha un elemento di `config.dominiIgnorati` (per
+ * sostringa). I domini ignorati vengono droppati pre-log e passano
+ * sempre dal proxy, anche in pausa/allowlist.
+ */
 function isIgnorato(dominio) {
     const d = dominio.toLowerCase();
     const lista = config.dominiIgnorati || [];
     return lista.some(di => d.includes(di.toLowerCase()));
 }
 
+/**
+ * Decide se il proxy deve rispondere 403 per il dominio richiesto.
+ * Combina tre check nell'ordine:
+ *   1. Pausa globale: blocca tutto tranne `dominiIgnorati`.
+ *   2. Allowlist mode: blocca tutto tranne i domini in `bloccati` (lista
+ *      usata "al contrario") e quelli ignorati.
+ *   3. Blocklist mode (default): blocca solo se matcha `bloccati`.
+ *
+ * @param {string} dominio
+ * @returns {boolean}
+ */
 function dominioBloccato(dominio) {
     const d = dominio.toLowerCase();
     const ignorato = isIgnorato(dominio);
 
-    // Pausa globale: blocca tutto tranne ignorati
     if (pausato && !ignorato) return true;
 
     const matchInLista = [...bloccati].some(bl => d.includes(bl.toLowerCase()));
@@ -233,10 +388,22 @@ function dominioBloccato(dominio) {
     return matchInLista;
 }
 
-// --- TRAFFICO ---
+// ============================================================
+// TRAFFICO: log + ring buffer + broadcast SSE
+// ============================================================
+
+/**
+ * Registra una richiesta proxata: append al log file, push nel ring buffer,
+ * broadcast ai client SSE. No-op se la sessione non e' attiva (traffico
+ * "fuori sessione"). Domini in `dominiIgnorati` vengono loggati su file ma
+ * NON entrano nel buffer / SSE (rumore filtrato al primo giro).
+ *
+ * @param {string} ip - IP client del PC studente.
+ * @param {string} metodo - "GET"/"POST"/... per HTTP, "HTTPS" per CONNECT.
+ * @param {string} urlStr - URL completa (HTTP) o hostname (HTTPS).
+ * @param {boolean} blocked - True se la richiesta e' stata respinta con 403.
+ */
 function registraTraffico(ip, metodo, urlStr, blocked) {
-    // Quando la sessione e' ferma: proxy funzionante (blocchi applicati a monte)
-    // ma niente log, niente buffer, niente SSE. Il traffico e' "fuori sessione".
     if (!sessioneAttiva) return;
 
     const ora = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -264,6 +431,11 @@ function registraTraffico(ip, metodo, urlStr, blocked) {
     broadcast({ type: 'traffic', entry });
 }
 
+/**
+ * Invia un payload JSON a tutti gli EventSource connessi (formato SSE).
+ * Errori di write silenziati (client disconnesso a meta' flush).
+ * @param {Object} payload
+ */
 function broadcast(payload) {
     const data = `data: ${JSON.stringify(payload)}\n\n`;
     for (const res of sseClients) {
@@ -271,6 +443,7 @@ function broadcast(payload) {
     }
 }
 
+/** Risponde 403 con la pagina HTML di blocco. */
 function rispondiBloccato(res) {
     res.writeHead(403, {
         'Content-Type': 'text/html; charset=UTF-8',
@@ -280,11 +453,26 @@ function rispondiBloccato(res) {
     res.end(paginaBloccata);
 }
 
+/**
+ * Estrae l'IPv4 dal socket, rimuovendo il prefisso IPv6-mapped `::ffff:`
+ * che Node aggiunge quando il socket e' dual-stack.
+ */
 function getClientIp(socket) {
     return socket.remoteAddress?.replace('::ffff:', '') || 'unknown';
 }
 
-// --- DEADLINE ---
+// ============================================================
+// DEADLINE: conto alla rovescia programmato
+// ============================================================
+
+/**
+ * Imposta (o annulla con `null`) la scadenza. Cancella l'eventuale timer
+ * precedente. Schedula un `setTimeout` che broadcastta
+ * `{type: 'deadline-reached'}` allo scadere. Broadcast immediato del nuovo
+ * valore `{type: 'deadline'}` per sincronizzare i client.
+ * Nota: la deadline e' in-memory, si perde al restart.
+ * @param {string|null} iso
+ */
 function impostaDeadline(iso) {
     clearTimeout(deadlineTimer);
     deadlineISO = iso;
@@ -299,7 +487,21 @@ function impostaDeadline(iso) {
     broadcast({ type: 'deadline', deadlineISO });
 }
 
-// --- ARCHIVIO SESSIONI ---
+// ============================================================
+// ARCHIVIO SESSIONI
+// ============================================================
+
+/**
+ * Serializza il buffer corrente in `sessioni/<sessioneInizio>.json`.
+ * Chiamata da: `/api/session/stop`, `/api/session/start` (caso difensivo),
+ * `/api/sessioni/archivia`, graceful shutdown.
+ *
+ * Idempotente: chiamate ripetute scrivono lo stesso filename, solo
+ * `esportatoAlle` cambia. No-op se il buffer e' vuoto o se la sessione
+ * non e' mai stata avviata.
+ *
+ * @returns {string|null} Nome del file archiviato o null.
+ */
 function archiviaSessioneCorrente() {
     if (storia.length === 0 || !sessioneInizio) return null;
     const data = {
@@ -318,6 +520,7 @@ function archiviaSessioneCorrente() {
     catch { return null; }
 }
 
+/** Invia ai client SSE `{type:'session-state', ...}` con lo stato corrente. */
 function broadcastStatoSessione() {
     broadcast({
         type: 'session-state',
@@ -326,6 +529,12 @@ function broadcastStatoSessione() {
         sessioneFineISO,
     });
 }
+
+/**
+ * Elenca i file archivio in ordine cronologico inverso (piu' recenti prima).
+ * I nomi file sono timestamp-sorted lessicograficamente grazie al formato
+ * ISO-like (YYYY-MM-DD-HH-MM-SS.json).
+ */
 function listaSessioni() {
     try {
         return fs.readdirSync(SESSIONI_DIR)
@@ -333,6 +542,12 @@ function listaSessioni() {
             .sort().reverse();
     } catch { return []; }
 }
+
+/**
+ * Sanitizza un nome file archivio evitando path traversal (`../`).
+ * Accetta solo `[a-zA-Z0-9_.-]` e il suffisso `.json` obbligatorio.
+ * @returns {string|null} Nome safe oppure null se invalido.
+ */
 function nomeSessioneSafe(nome) {
     const safe = (nome || '').replace(/[^a-zA-Z0-9_.\-]/g, '');
     return (safe && safe.endsWith('.json')) ? safe : null;
@@ -342,11 +557,22 @@ function nomeSessioneSafe(nome) {
 // PROXY HTTP/HTTPS
 // ============================================================
 
+/**
+ * Proxy HTTP: inoltra le richieste non-CONNECT verso l'origin server.
+ *
+ * Percorso richiesta normale:
+ *   1. Check keepalive `/_alive` (risposta diretta, non proxata).
+ *   2. Parse URL (con fallback su `Host` header per client che mandano solo path).
+ *   3. Check `dominioBloccato()` -> 403 + log.
+ *   4. Forward con `http.request` (timeout 15s), stream bidirezionale.
+ *
+ * Il server NON fa MITM per HTTPS: vedi `.on('connect')` sotto per il
+ * tunneling CONNECT. Il blocco HTTPS e' basato solo sull'hostname target.
+ */
 const proxyServer = http.createServer((req, res) => {
     const ipClient = getClientIp(req.socket);
     const targetUrl = req.url;
 
-    // Endpoint keepalive: richiesta diretta al proxy (non proxata)
     if (targetUrl === '/_alive' || targetUrl.startsWith('/_alive?')) {
         registraAlive(ipClient);
         res.writeHead(200, {
@@ -405,6 +631,13 @@ const proxyServer = http.createServer((req, res) => {
     req.pipe(proxyReq);
 });
 
+/**
+ * Proxy HTTPS tramite tunneling CONNECT. Il browser apre un tunnel TCP
+ * attraverso il proxy; noi vediamo solo `CONNECT hostname:443` e il blocco
+ * viene deciso esclusivamente sulla base dell'hostname (niente MITM,
+ * niente certificati finti). Dopo il 200 Connection Established, i byte
+ * sono TLS opachi.
+ */
 proxyServer.on('connect', (req, clientSocket, head) => {
     const ipClient = getClientIp(clientSocket);
     const [host, portStr] = req.url.split(':');
@@ -445,6 +678,7 @@ proxyServer.listen(PORTA_PROXY, '0.0.0.0');
 // WEB SERVER
 // ============================================================
 
+/** Content-Type per estensione. I file senza match prendono `application/octet-stream`. */
 const MIME = {
     '.html': 'text/html; charset=UTF-8',
     '.css': 'text/css; charset=UTF-8',
@@ -452,6 +686,11 @@ const MIME = {
     '.json': 'application/json; charset=UTF-8',
 };
 
+/**
+ * Serve un file statico da `public/`. Blocca path traversal (`..`) con un
+ * check rudimentale (adeguato perche' non accettiamo upload o path
+ * parametrici). Fallback 404 se il file non esiste.
+ */
 function serveStatic(req, res) {
     let rel = req.url === '/' ? '/index.html' : req.url.split('?')[0];
     if (rel.includes('..')) { res.writeHead(400); res.end(); return; }
@@ -464,12 +703,25 @@ function serveStatic(req, res) {
     });
 }
 
+/**
+ * Helper per rispondere con JSON + status.
+ * @param {import('http').ServerResponse} res
+ * @param {Object} obj
+ * @param {number} [status=200]
+ */
 function jsonReply(res, obj, status = 200) {
     const body = JSON.stringify(obj);
     res.writeHead(status, { 'Content-Type': 'application/json; charset=UTF-8' });
     res.end(body);
 }
 
+/**
+ * Guard HTTP Basic: se `config.web.auth.enabled`, richiede credenziali.
+ * Letto ogni request (modifiche via UI applicate a caldo). Restituisce
+ * false se ha gia' scritto la response 401 (il caller deve semplicemente
+ * fare `return`).
+ * @returns {boolean} true se la richiesta puo' procedere.
+ */
 function controllaAuth(req, res) {
     const auth = config.web?.auth || { enabled: false };
     if (!auth.enabled) return true;
@@ -491,6 +743,7 @@ function controllaAuth(req, res) {
     return true;
 }
 
+/** Restituisce i nomi dei preset disponibili (senza suffisso `.json`). */
 function listaPresets() {
     try {
         return fs.readdirSync(PRESETS_DIR)
@@ -498,12 +751,24 @@ function listaPresets() {
             .map(f => f.replace(/\.json$/, ''));
     } catch { return []; }
 }
+
+/**
+ * Legge un preset da disco. Sanitizza il nome a `[a-zA-Z0-9_-]`.
+ * @returns {{nome:string,descrizione:string,domini:string[]}|null}
+ */
 function leggiPreset(nome) {
     const safe = (nome || '').replace(/[^a-zA-Z0-9_-]/g, '');
     if (!safe) return null;
     try { return JSON.parse(fs.readFileSync(path.join(PRESETS_DIR, safe + '.json'), 'utf8')); }
     catch { return null; }
 }
+
+/**
+ * Salva un preset (overwrites silenziosamente se esiste).
+ * @param {string} nome
+ * @param {string[]} domini
+ * @returns {boolean}
+ */
 function salvaPreset(nome, domini) {
     const safe = (nome || '').replace(/[^a-zA-Z0-9_-]/g, '');
     if (!safe) return false;
@@ -513,6 +778,12 @@ function salvaPreset(nome, domini) {
     return true;
 }
 
+/**
+ * Web server: serve la UI (`public/`), le API REST e lo stream SSE.
+ * Tutte le richieste passano da `controllaAuth`. Il router e' una sequenza
+ * di if/return su `p` (pathname). L'elenco completo degli endpoint e' in
+ * ARCHITECTURE.md sezione "API surface".
+ */
 const webServer = http.createServer(async (req, res) => {
     if (!controllaAuth(req, res)) return;
 
@@ -887,7 +1158,18 @@ const webServer = http.createServer(async (req, res) => {
     serveStatic(req, res);
 });
 
-// --- GRACEFUL SHUTDOWN ---
+// ============================================================
+// GRACEFUL SHUTDOWN
+// ============================================================
+
+/**
+ * Chiusura ordinata: notifica EventSource, archivia il buffer corrente se
+ * ha dati (salva anche quando la sessione e' "ferma"), chiude entrambi i
+ * server HTTP. Timeout di 500ms come safety net — poi `process.exit(0)`.
+ *
+ * Agganciato a SIGINT (Ctrl+C nella cmd) e SIGTERM.
+ * Casi NON coperti: `kill -9`, power loss — il buffer in RAM si perde.
+ */
 function spegni() {
     console.log('\nChiusura in corso...');
     for (const c of sseClients) { try { c.end(); } catch {} }

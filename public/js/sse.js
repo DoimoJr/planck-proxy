@@ -1,10 +1,28 @@
-// Connessione SSE con reconnect + heartbeat
+/**
+ * @file Connessione Server-Sent Events al backend.
+ *
+ * Gestisce:
+ * - Connessione a `/api/stream` con auto-reconnect (2s) su errore.
+ * - Dispatch dei vari tipi di messaggio (`traffic`, `blocklist`, `reset`,
+ *   `studenti`, `classi`, `settings`, `session-state`, `pausa`, `deadline`,
+ *   `deadline-reached`, `alive`) sulle mutazioni appropriate di `state`.
+ * - Feedback audio/visivo su rilevamento AI e scadenza deadline.
+ *
+ * Il server emette un heartbeat `: hb` ogni 20s per tenere la connessione
+ * viva dietro eventuali proxy/reverse-proxy; EventSource lo ignora.
+ */
 
 import { state, assorbiEntry, resetDatiTraffico } from './state.js';
 import { renderAll, aggiornaInputDeadline } from './render.js';
 import { $ } from './util.js';
 
 let audioCtx = null;
+
+/**
+ * Emette un beep sinusoidale a 880 Hz per 150ms. No-op se le notifiche sono
+ * disattivate o se il browser blocca l'AudioContext (autoplay policy).
+ * Lazy-inizializza l'AudioContext al primo uso.
+ */
 function beep() {
     if (!state.notifiche) return;
     try {
@@ -20,6 +38,12 @@ function beep() {
     } catch {}
 }
 
+/**
+ * Mostra il banner rosso lampeggiante per 5s con il dominio AI rilevato.
+ * Sparisce dopo 5s (timer reimpostato se arrivano nuove detection).
+ * Emette anche notifica desktop + beep se le notifiche sono attive.
+ * @param {string} dominio
+ */
 function lampeggiaBannerAI(dominio) {
     const b = $('ai-banner');
     b.textContent = `ATTENZIONE: accesso AI rilevato - ${dominio}`;
@@ -33,6 +57,10 @@ function lampeggiaBannerAI(dominio) {
     beep();
 }
 
+/**
+ * Mostra il banner "TEMPO SCADUTO" (resta visibile fino al prossimo reset),
+ * emette notifica desktop non silenziosa + tripla serie di beep.
+ */
 function lampeggiaBannerDeadline() {
     const b = $('ai-banner');
     b.textContent = 'TEMPO SCADUTO - fine verifica';
@@ -45,6 +73,10 @@ function lampeggiaBannerDeadline() {
     setTimeout(beep, 600);
 }
 
+/**
+ * Aggiorna il badge LIVE/OFF in base allo stato della connessione SSE.
+ * @param {boolean} connesso
+ */
 function setStato(connesso) {
     state.connesso = connesso;
     const card = $('stat-status').parentElement;
@@ -53,6 +85,25 @@ function setStato(connesso) {
     $('stat-status').textContent = connesso ? 'LIVE' : 'OFF';
 }
 
+/**
+ * Apre la connessione SSE a `/api/stream` e si auto-riconnette a 2s su errore.
+ * Esportata: chiamata una volta da `app.js::init()` al boot.
+ *
+ * I tipi di messaggio gestiti sono:
+ * | type               | Effetto                                                        |
+ * |--------------------|----------------------------------------------------------------|
+ * | `traffic`          | Incorpora l'entry, banner AI se tipo=ai non-bloccato, render.  |
+ * | `blocklist`        | Rimpiazza `state.bloccati`, render.                            |
+ * | `reset`            | Azzera buffer client, aggiorna `sessioneInizio`, render.       |
+ * | `studenti`         | Rimpiazza `state.cfg.studenti`, render.                        |
+ * | `classi`           | Rimpiazza `state.cfg.classi`, render.                          |
+ * | `settings`         | Rimpiazza `state.settings`, propaga i campi derivati.          |
+ * | `session-state`    | Aggiorna `sessioneAttiva`/`sessioneInizio`/`sessioneFineISO`.  |
+ * | `pausa`            | Aggiorna `state.pausato`, render.                              |
+ * | `deadline`         | Aggiorna `deadlineISO`, aggiorna input countdown, render.      |
+ * | `deadline-reached` | Mostra banner "TEMPO SCADUTO" + triplo beep + notifica.        |
+ * | `alive`            | Aggiorna `aliveMap[ip] = ts` (dot watchdog).                   |
+ */
 export function avviaSSE() {
     const es = new EventSource('/api/stream');
     es.onopen = () => setStato(true);
@@ -84,7 +135,6 @@ export function avviaSSE() {
             renderAll();
         } else if (msg.type === 'settings') {
             state.settings = msg.settings;
-            // Propaga ai campi derivati usati altrove nella UI
             if (msg.settings.titolo !== undefined) state.cfg.titolo = msg.settings.titolo;
             if (msg.settings.classe !== undefined) state.cfg.classe = msg.settings.classe;
             if (msg.settings.modo !== undefined) state.cfg.modo = msg.settings.modo;

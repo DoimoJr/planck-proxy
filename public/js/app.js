@@ -1,10 +1,38 @@
-// Entry point: init + event delegation
+/**
+ * @file Entry point dell'applicazione frontend.
+ *
+ * Due responsabilita':
+ *
+ * 1. **Boot (`init`)**: carica in parallelo `/api/config`, `/api/history`,
+ *    `/api/sessioni`, `/api/settings`; idrata `state`; applica toggle (tema,
+ *    collassi, tab); avvia la connessione SSE; imposta i timer di refresh.
+ *
+ * 2. **Event delegation** via tre listener sul body (`click`, `input`,
+ *    `change`) + uno per `keydown` nei campi di input: ogni elemento
+ *    interattivo porta un `data-action="..."` che viene dispathato alla
+ *    funzione corrispondente di `actions.js`. Zero `onclick` inline.
+ *
+ * Convenzione `data-*`:
+ * - `data-action="..."` identifica l'azione.
+ * - `data-dominio`, `data-ip`, `data-nome`, `data-tab`, `data-sezione` (e
+ *   simili) passano l'argomento corrispondente.
+ * - Per elementi "annidati cliccabili" (es. bottone blocca dentro card)
+ *   l'handler fa `e.stopPropagation()` nel suo case per evitare che il
+ *   click dell'outer (es. focus IP) si scateni anche.
+ */
 
 import { state, assorbiEntry } from './state.js';
 import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown } from './render.js';
 import { avviaSSE } from './sse.js';
 import * as actions from './actions.js';
 
+/**
+ * Carica tutti gli endpoint di boot in parallelo, idrata `state`, fa il primo
+ * render e apre la connessione SSE. Imposta anche due timer globali:
+ * - `renderCountdown` ogni 1s (economico, aggiorna solo la cella countdown).
+ * - `renderAll` ogni 5s (refresh di "ultima attivita'" e durata — campi
+ *   relativi che dipendono da `Date.now()`).
+ */
 async function init() {
     const [cfgRes, histRes, sesRes, setRes] = await Promise.all([
         fetch('/api/config').then(r => r.json()),
@@ -45,7 +73,12 @@ async function init() {
     setInterval(renderAll, 5000);
 }
 
-// Chiude il menu overflow (⋮) dopo un click su un item o al click fuori.
+/**
+ * Chiude qualsiasi `<details class="menu-overflow">` aperto.
+ * Invocato nei tre contesti: click fuori dal menu (capture phase),
+ * click su un item del menu (bubble, dopo l'azione), change sul select
+ * preset (che vive dentro il menu).
+ */
 function chiudiMenuOverflow() {
     document.querySelectorAll('details.menu-overflow[open]').forEach(d => { d.open = false; });
 }

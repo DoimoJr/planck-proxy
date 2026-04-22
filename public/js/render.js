@@ -1,16 +1,44 @@
-// Rendering UI - puri, leggono da state. renderAll() throttla con requestAnimationFrame.
+/**
+ * @file Funzioni di rendering della UI.
+ *
+ * Contratto: le funzioni esportate sono **pure rispetto al DOM**: leggono
+ * `state` e scrivono `innerHTML` / `textContent` sui nodi di riferimento.
+ * Nessuna mutazione di `state` avviene qui (vedi `actions.js` per le
+ * mutazioni e `sse.js` per quelle reattive).
+ *
+ * Throttling: `renderAll()` e' guardato da un flag + `requestAnimationFrame`
+ * — chiamate multiple nello stesso frame coalescono in un unico paint.
+ * Questo e' cruciale durante burst SSE (20+ studenti attivi): ogni entry
+ * invoca `renderAll()` ma si ridipinge una volta sola per frame.
+ *
+ * Eccezione: `renderCountdown()` ha il suo `setInterval(1000)` separato —
+ * aggiorna solo la cella countdown, no-alloc per il ticker a 1Hz.
+ */
 
 import { state, nomeStudente, aggregaPerReport } from './state.js';
 import { $, escapeHtml, attrEscape, ip2long, parseOra, formatDurata, formatRelativo } from './util.js';
 
+/** Numero massimo di entry mostrate nella card "Ultime richieste". */
 const MAX_RICHIESTE_UI = 100;
 
+/**
+ * @param {string} testo - Testo da confrontare col filtro corrente.
+ * @returns {boolean} true se il filtro e' vuoto o se `testo` lo contiene (case-insensitive).
+ */
 function matchFiltro(testo) {
     if (!state.filtro) return true;
     return String(testo).toLowerCase().includes(state.filtro.toLowerCase());
 }
 
-// ============== SIDEBAR ==============
+// ========================================================================
+// Sidebar domini (Live tab, colonna sinistra)
+// ========================================================================
+
+/**
+ * Rigenera l'intera sidebar: suddivide i domini visti in 5 sezioni
+ * (AI / Siti / Sistema / Bloccati / Nascosti), aggiorna i contatori,
+ * nasconde le sezioni vuote.
+ */
 export function renderSidebar() {
     const ai = [], utente = [], sistema = [], bloccatiList = [], nascostiList = [];
     const domOrdinati = [...state.perDominio.entries()].sort(([a], [b]) => a.localeCompare(b));
@@ -42,6 +70,13 @@ export function renderSidebar() {
     $('sezione-nascosti').style.display = nascostiList.length > 0 ? '' : 'none';
 }
 
+/**
+ * Rigenera il contenuto di una lista domini dentro la sidebar.
+ * @param {string} elId - ID del contenitore.
+ * @param {Array<[string, {count:number, tipo:string}]>} items
+ * @param {string} tipoClass - Classe CSS del tipo ("ai" | "utente" | "sistema" | "nascosto").
+ * @param {boolean} isNascosto - Se true, l'azione principale del click e' "mostra" invece di "nascondi".
+ */
 function renderListaDomini(elId, items, tipoClass, isNascosto) {
     const el = $(elId);
     if (!el) return;
@@ -59,6 +94,12 @@ function renderListaDomini(elId, items, tipoClass, isNascosto) {
     }).join('');
 }
 
+/**
+ * Variante di `renderListaDomini` per la sezione "Bloccati": mostra anche
+ * i domini in blocklist ma non ancora visti nel traffico (count=0).
+ * @param {string} elId
+ * @param {Array<[string, {count:number, tipo:string}]>} items
+ */
 function renderListaBloccati(elId, items) {
     const el = $(elId);
     const renderRiga = (dominio, count) => {
@@ -79,15 +120,28 @@ function renderListaBloccati(elId, items) {
     el.innerHTML = html;
 }
 
-// ============== STATS + STATO ==============
-// Conta solo attivita' "vera" (utente + ai): esclude il traffico di sistema/telemetria
-// per evitare che il rumore di background falsi il numero di richieste per studente.
+// ========================================================================
+// Stat row + stato sessione
+// ========================================================================
+
+/**
+ * Conta le entry "attive" (utente + ai), escludendo il traffico di sistema
+ * (telemetria, ad tech, ecc.). Rationale: il rumore di background falserebbe
+ * il numero di richieste per studente mostrato in UI.
+ * @param {import('./state.js').Entry[]} entries
+ * @returns {number}
+ */
 function contaAttive(entries) {
     let n = 0;
     for (const e of entries) if (e.tipo !== 'sistema') n++;
     return n;
 }
 
+/**
+ * Aggiorna la stat row (5 card) e l'etichetta "MODO / SESSIONE FERMA / IN PAUSA".
+ * In focus mode conta solo le entry dell'IP selezionato. La durata si
+ * congela quando la sessione e' ferma (usa `sessioneFineISO` al posto di now).
+ */
 export function renderStats() {
     const ips = state.focusIp ? 1 : state.perIp.size;
     const fonte = state.focusIp ? (state.perIp.get(state.focusIp) || []) : state.entries;
@@ -95,7 +149,6 @@ export function renderStats() {
     $('stat-domini').textContent = state.perDominio.size;
     $('stat-ip').textContent = ips;
 
-    // Durata: scorre solo se la sessione e' attiva; se fermata, si congela al momento del Ferma.
     if (state.sessioneInizio) {
         const fine = state.sessioneAttiva
             ? Date.now()
@@ -113,6 +166,10 @@ export function renderStats() {
     modoEl.textContent = label;
 }
 
+/**
+ * Aggiorna label/classe dei bottoni Pausa e Avvia/Ferma sessione in base
+ * allo stato, e mostra l'indicatore PAUSA in topbar se attivo.
+ */
 export function renderPausaEBottoni() {
     const btn = $('btn-pausa');
     const ind = $('pausa-indicator');
@@ -126,7 +183,6 @@ export function renderPausaEBottoni() {
         ind.classList.add('hidden');
     }
 
-    // Bottone sessione: toggle Avvia/Ferma, colori diversi per chiarire lo stato.
     const btnSes = $('btn-sessione');
     if (btnSes) {
         if (state.sessioneAttiva) {
@@ -141,7 +197,18 @@ export function renderPausaEBottoni() {
     }
 }
 
-// ============== COUNTDOWN ==============
+// ========================================================================
+// Countdown deadline
+// ========================================================================
+
+/**
+ * Aggiorna la cella countdown in topbar. Invocata sia dentro `renderAll`
+ * sia dal suo `setInterval(1000)` indipendente.
+ * Classi applicate:
+ * - `warning` se < 5 min
+ * - `critical` se < 1 min (aggiunge anche blink)
+ * - `scaduto` se tempo esaurito
+ */
 export function renderCountdown() {
     const el = $('countdown-display');
     if (!state.deadlineISO) {
@@ -166,7 +233,15 @@ export function renderCountdown() {
     el.className = 'countdown' + (secLeft < 300 ? ' warning' : '') + (secLeft < 60 ? ' critical' : '');
 }
 
-// ============== TABELLA IP ==============
+// ========================================================================
+// Tabella/Griglia IP (Live tab, pannello principale)
+// ========================================================================
+
+/**
+ * Determina stato + label del dot watchdog per un IP.
+ * @param {string} ip
+ * @returns {{classe:'verde'|'giallo'|'rosso'|'grigio', titolo:string}}
+ */
 function statoWatchdog(ip) {
     const ts = state.aliveMap.get(ip);
     if (!ts) return { classe: 'grigio', titolo: 'Watchdog mai visto' };
@@ -176,7 +251,23 @@ function statoWatchdog(ip) {
     return { classe: 'rosso', titolo: `OFFLINE da ${Math.round(age/1000)}s - possibile bypass` };
 }
 
-// Dati derivati per un singolo IP (condivisi tra vista lista e griglia)
+/**
+ * Calcola i dati derivati per una singola riga/card IP.
+ * Condiviso tra le due modalita' di rendering (lista e griglia).
+ *
+ * @param {string} ip
+ * @param {number} ora - `Date.now()` al momento del render (passato per coerenza tra righe).
+ * @param {number} soglia - Millisecondi di inattivita' per considerare l'IP inattivo.
+ * @returns {{
+ *   lista: import('./state.js').Entry[],
+ *   listaAttive: import('./state.js').Entry[],
+ *   dominiMap: Map<string, string>,
+ *   diffSec: number,
+ *   inattivo: boolean,
+ *   nome: string|null,
+ *   wd: {classe:string, titolo:string}
+ * }}
+ */
 function calcolaStatoIp(ip, ora, soglia) {
     const lista = state.perIp.get(ip) || [];
     const listaAttive = lista.filter(e => e.tipo !== 'sistema');
@@ -191,6 +282,13 @@ function calcolaStatoIp(ip, ora, soglia) {
     return { lista, listaAttive, dominiMap, diffSec, inattivo, nome, wd };
 }
 
+/**
+ * Genera l'HTML di un tag dominio cliccabile. Applica le classi
+ * `blocked` o `nascosto` se presenti nel rispettivo set.
+ * @param {string} d
+ * @param {string} tipo
+ * @returns {string}
+ */
 function tagDominioHtml(d, tipo) {
     const classi = ['dominio-tag', tipo];
     if (state.bloccati.has(d)) classi.push('blocked');
@@ -198,8 +296,15 @@ function tagDominioHtml(d, tipo) {
     return `<span class="${classi.join(' ')}" data-action="blocca" data-dominio="${attrEscape(d)}" title="Click per bloccare">${escapeHtml(d)}</span>`;
 }
 
+/**
+ * Dispatcher del pannello IP: sceglie tra vista lista e vista griglia
+ * in base a `state.vistaIp` e aggiorna lo stato dei due bottoni toggle.
+ *
+ * L'unione `perIp.keys() + aliveMap.keys()` assicura che anche gli IP che
+ * pingano ma non hanno ancora generato traffico compaiano nella lista
+ * (riga/card con 0 richieste + dot watchdog).
+ */
 export function renderTabellaIp() {
-    // Dispatcher: lista o griglia in base a state.vistaIp.
     const container = $('ip-container');
     if (!container) return;
     const tuttiIps = new Set([...state.perIp.keys(), ...state.aliveMap.keys()]);
@@ -207,7 +312,6 @@ export function renderTabellaIp() {
     const ora = Date.now();
     const soglia = state.cfg.inattivitaSogliaSec * 1000;
 
-    // Bottoni vista: stato attivo
     const btnG = $('btn-vista-griglia');
     const btnL = $('btn-vista-lista');
     if (btnG) btnG.classList.toggle('attivo', state.vistaIp === 'griglia');
@@ -220,6 +324,13 @@ export function renderTabellaIp() {
     }
 }
 
+/**
+ * Costruisce l'HTML della vista a tabella (5 colonne: WD / Studente / N / Ultima / Domini).
+ * @param {string[]} ips
+ * @param {number} ora
+ * @param {number} soglia
+ * @returns {string}
+ */
 function renderListaIp(ips, ora, soglia) {
     const righe = ips.map(ip => {
         const s = calcolaStatoIp(ip, ora, soglia);
@@ -247,13 +358,20 @@ function renderListaIp(ips, ora, soglia) {
     </table>`;
 }
 
+/** Numero massimo di tag dominio mostrati dentro una singola card della griglia. */
 const DOMINI_CARD_MAX = 6;
 
+/**
+ * Costruisce l'HTML della vista a griglia (card per IP).
+ * @param {string[]} ips
+ * @param {number} ora
+ * @param {number} soglia
+ * @returns {string}
+ */
 function renderGrigliaIp(ips, ora, soglia) {
     if (ips.length === 0) return '<div class="ip-grid-vuota">Nessun IP ancora rilevato.</div>';
     const card = ips.map(ip => {
         const s = calcolaStatoIp(ip, ora, soglia);
-        // Top domini per la card: i piu' recenti in ordine inverso (ultimo in cima)
         const dominiOrdinati = [...s.dominiMap.entries()].reverse();
         const dominiVisibili = dominiOrdinati.slice(0, DOMINI_CARD_MAX);
         const extra = dominiOrdinati.length - dominiVisibili.length;
@@ -285,6 +403,10 @@ function renderGrigliaIp(ips, ora, soglia) {
     return `<div class="ip-grid">${card}</div>`;
 }
 
+/**
+ * Riempie il pannello "Ultime richieste" con le ultime N entry in ordine
+ * temporale inverso. In focus mode mostra solo le entry dell'IP selezionato.
+ */
 export function renderUltimeRichieste() {
     const el = $('lista-richieste');
     let fonte = state.entries;
@@ -305,6 +427,10 @@ export function renderUltimeRichieste() {
     }).join('');
 }
 
+/**
+ * Aggiorna il titolo del pannello IP: "Traffico per IP" o "Focus: NOME (ip)"
+ * con bottone di clear quando un IP e' in focus.
+ */
 export function renderFocus() {
     const titolo = $('panel-ip-titolo');
     if (state.focusIp) {
@@ -316,7 +442,11 @@ export function renderFocus() {
     }
 }
 
-// ============== TAB MANAGEMENT ==============
+// ========================================================================
+// Tab management + controlli minori
+// ========================================================================
+
+/** Attiva il tab e il pannello corrispondenti a `state.tabAttivo`. */
 export function renderTabs() {
     document.querySelectorAll('.tab-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.tab === state.tabAttivo);
@@ -326,7 +456,11 @@ export function renderTabs() {
     });
 }
 
-// ============== SELECT / CONTROLLI MINORI ==============
+/**
+ * Rigenera le opzioni del select preset preservando l'opzione selezionata.
+ * Chiamata esplicitamente dopo salvaPreset (non parte di renderAll perche'
+ * e' usato anche prima del primo render in init).
+ */
 export function aggiornaSelectPresets() {
     const sel = $('preset-select');
     const val = sel.value;
@@ -335,20 +469,23 @@ export function aggiornaSelectPresets() {
     sel.value = val;
 }
 
+/**
+ * Aggiorna i due bottoni toggle (tema + notifiche) in topbar:
+ * - Icona riflette lo stato attuale: ☀️/🌙, 🔔/🔕.
+ * - Background verde `.attivo` solo sul bottone notifiche (il cambio
+ *   campana/campana-barrata e' sottile, aiuta evidenziarlo).
+ * - Classe `dark` applicata/rimossa da `<body>`.
+ */
 export function aggiornaToggleButtons() {
     const btnT = $('btn-darkmode');
     const btnN = $('btn-notifiche');
-    // Icona riflette lo stato attuale: sole quando e' scuro (click per chiaro), luna viceversa.
-    // Campana se notifiche attive (click per disattivare), campana barrata altrimenti.
     btnT.textContent = state.darkmode ? '☀️' : '🌙';
     btnN.textContent = state.notifiche ? '🔔' : '🔕';
-    // Lo stato "acceso" e' gia' leggibile dall'icona stessa; evito il background verde
-    // che sulle icone colorate aggiunge solo rumore. Mantengo .attivo solo per le notifiche
-    // perche' il cambio 🔔↔🔕 e' sottile e un'evidenziazione aiuta.
     btnN.classList.toggle('attivo', state.notifiche);
     document.body.classList.toggle('dark', state.darkmode);
 }
 
+/** Sincronizza il valore dell'input time con `state.deadlineISO`. */
 export function aggiornaInputDeadline() {
     const input = $('input-deadline');
     if (!state.deadlineISO) { input.value = ''; return; }
@@ -358,19 +495,31 @@ export function aggiornaInputDeadline() {
     input.value = `${hh}:${mm}`;
 }
 
-// ============== TAB REPORT ==============
+// ========================================================================
+// Tab Report (riepiloghi + grafici a barre)
+// ========================================================================
+
+/**
+ * Aggiorna il tab Report. Opera sulla sessione corrente OPPURE su un
+ * archivio caricato (`state.datiSessioneVisualizzata`). La durata viene
+ * calcolata differentemente nei tre casi:
+ * - archivio: esportatoAlle - sessioneInizio
+ * - corrente attiva: now - sessioneInizio
+ * - corrente ferma: sessioneFineISO - sessioneInizio (congelata)
+ *
+ * "Top studenti" usa `perIpAttive` (escluso sistema) per riflettere
+ * l'attivita' reale, non il rumore di telemetria.
+ */
 export function renderReport() {
     const tab = $('tab-report');
     if (!tab.classList.contains('active') && state.tabAttivo !== 'report') return;
 
-    // Dati: sessione corrente oppure archivio caricato
     const usaArchivio = !!state.datiSessioneVisualizzata;
     const entries = usaArchivio ? state.datiSessioneVisualizzata.entries : state.entries;
     const sessioneInizio = usaArchivio ? state.datiSessioneVisualizzata.sessioneInizio : state.sessioneInizio;
     const bloccatiList = usaArchivio ? (state.datiSessioneVisualizzata.bloccati || []) : [...state.bloccati];
     const studentiMap = usaArchivio ? (state.datiSessioneVisualizzata.studenti || {}) : state.cfg.studenti;
 
-    // Titolo
     const titoloEl = $('report-titolo');
     if (usaArchivio) {
         const d = new Date(sessioneInizio);
@@ -382,7 +531,6 @@ export function renderReport() {
     }
 
     const agg = aggregaPerReport(entries);
-    // Durata: archivio = inizio -> esportatoAlle; corrente attiva = now; corrente ferma = fine.
     const fine = usaArchivio
         ? new Date(state.datiSessioneVisualizzata.esportatoAlle || Date.now()).getTime()
         : (state.sessioneAttiva ? Date.now() : (state.sessioneFineISO ? new Date(state.sessioneFineISO).getTime() : Date.now()));
@@ -390,7 +538,6 @@ export function renderReport() {
         ? Math.max(0, Math.floor((fine - new Date(sessioneInizio).getTime()) / 1000))
         : 0;
 
-    // Riepilogo
     const riepilogo = $('report-riepilogo');
     const pctBloccate = agg.totale > 0 ? Math.round((agg.bloccate / agg.totale) * 100) : 0;
     riepilogo.innerHTML = `
@@ -406,20 +553,17 @@ export function renderReport() {
         <dt>In blocklist</dt><dd>${bloccatiList.length}</dd>
     `;
 
-    // Top AI
     const dominiOrdinati = [...agg.perDominio.entries()].sort((a, b) => b[1].count - a[1].count);
     const soloAI = dominiOrdinati.filter(([, info]) => info.tipo === 'ai').slice(0, 10);
     $('report-top-ai').innerHTML = soloAI.length > 0
         ? renderBarre(soloAI.map(([d, i]) => [d, i.count]), true)
         : '<p class="hint">Nessuna richiesta AI in questa sessione.</p>';
 
-    // Top 10 domini totali
     const top10 = dominiOrdinati.slice(0, 10).map(([d, i]) => [d, i.count]);
     $('report-top-domini').innerHTML = top10.length > 0
         ? renderBarre(top10, false)
         : '<p class="hint">Nessuna richiesta.</p>';
 
-    // Top studenti (solo attivita' vera: esclude sistema)
     const ipOrdinati = [...agg.perIpAttive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
     const barreStudenti = ipOrdinati.map(([ip, n]) => {
         const nome = studentiMap[ip];
@@ -431,6 +575,13 @@ export function renderReport() {
         : '<p class="hint">Nessuna attivita\'.</p>';
 }
 
+/**
+ * Genera un grafico a barre orizzontali. La barra piu' lunga e' al 100%,
+ * le altre in proporzione.
+ * @param {Array<[string, number]>} items - Coppie [label, count].
+ * @param {boolean} isAi - Se true, applica uno styling rosso distintivo.
+ * @returns {string}
+ */
 function renderBarre(items, isAi) {
     if (items.length === 0) return '';
     const max = Math.max(...items.map(([, n]) => n));
@@ -447,26 +598,43 @@ function renderBarre(items, isAi) {
     }).join('');
 }
 
-// ============== TAB IMPOSTAZIONI ==============
+// ========================================================================
+// Tab Impostazioni
+// ========================================================================
+
+/**
+ * Naviga un oggetto tramite un path dotted (es. "web.auth.enabled").
+ * Safe rispetto a segmenti mancanti.
+ * @param {Object} obj
+ * @param {string} path
+ */
 function getDeep(obj, path) {
     return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
 }
 
+/**
+ * Aggiorna il valore di un singolo campo settings se l'utente NON lo sta
+ * attualmente editando (altrimenti perderebbe il typing).
+ * Caso speciale password: non la inietta mai; imposta solo il placeholder
+ * a seconda di `passwordSet`.
+ */
 function aggiornaSettingsInput(el, val) {
     if (document.activeElement === el) return;
     if (el.type === 'checkbox') el.checked = !!val;
     else if (el.type === 'password') {
-        // Non popolare mai; placeholder segnala lo stato
         el.placeholder = val === '' && state.settings?.web?.auth?.passwordSet ? '(impostata — scrivi per cambiare)' : '(non impostata)';
-        // lascia el.value intatto se utente sta scrivendo
     }
     else el.value = val ?? '';
 }
 
+/**
+ * Rigenera il tab Impostazioni: sincronizza il form settings, banner
+ * "riavvio richiesto", lista domini ignorati, mappa studenti, dropdown
+ * combo classe+lab, lista sessioni archiviate.
+ */
 export function renderImpostazioni() {
     if (state.tabAttivo !== 'impostazioni') return;
 
-    // Form settings
     if (state.settings) {
         document.querySelectorAll('[data-action="settings-field"]').forEach(el => {
             const key = el.dataset.key;
@@ -477,9 +645,7 @@ export function renderImpostazioni() {
     const banner = $('riavvio-banner');
     if (banner) banner.classList.toggle('hidden', !state.riavvioRichiesto);
 
-    // Domini ignorati
     renderIgnorati();
-
     renderMappaStudenti();
 
     const sessioniEl = $('sessioni-list');
@@ -497,6 +663,7 @@ export function renderImpostazioni() {
         : '<li class="hint">Archivio vuoto. Ogni "Nuova sessione" archivia la precedente.</li>';
 }
 
+/** Rigenera la lista dei domini ignorati nel tab Impostazioni. */
 function renderIgnorati() {
     const el = $('ignorati-list');
     if (!el) return;
@@ -509,11 +676,16 @@ function renderIgnorati() {
         : '<li class="hint">Nessun dominio ignorato.</li>';
 }
 
+/**
+ * Rigenera la tabella mappa studenti preservando il focus/selezione se
+ * l'utente sta attualmente editando un input. Senza questa preservazione,
+ * ogni SSE `studenti` broadcast (inclusi quelli triggerati dal typing
+ * dell'utente stesso) ruberebbe il focus a meta' parola.
+ */
 function renderMappaStudenti() {
     const tbody = $('studenti-tbody');
     if (!tbody) return;
 
-    // Se l'utente sta editando un input, salva IP focalizzato per ripristino
     const active = document.activeElement;
     const activeIp = (active && active.classList.contains('edit-studente')) ? active.dataset.ip : null;
     const activeSel = activeIp ? [active.selectionStart, active.selectionEnd] : null;
@@ -529,7 +701,6 @@ function renderMappaStudenti() {
         </tr>`).join('')
         : '<tr><td colspan="3" class="hint-cell">Nessuno studente mappato. Aggiungi una riga sotto o carica una classe.</td></tr>';
 
-    // Ripristina il focus se stavamo editando
     if (activeIp) {
         const nuovoInput = tbody.querySelector(`.edit-studente[data-ip="${CSS.escape(activeIp)}"]`);
         if (nuovoInput) {
@@ -541,6 +712,10 @@ function renderMappaStudenti() {
     renderSelectCombo();
 }
 
+/**
+ * Rigenera i due dropdown classe/lab dalla lista `state.cfg.classi`.
+ * Abilita Load/Delete solo se la combinazione selezionata esiste in archivio.
+ */
 function renderSelectCombo() {
     const tutte = state.cfg.classi || [];
     const classi = [...new Set(tutte.map(c => c.classe))].sort();
@@ -561,14 +736,17 @@ function renderSelectCombo() {
         + lab.map(l => `<option value="${attrEscape(l)}">${escapeHtml(l)}</option>`).join('');
     selLab.value = lab.includes(valLab) ? valLab : '';
 
-    // Abilita Load/Delete solo se la combinazione esiste
     const esiste = selClasse.value && selLab.value
         && tutte.some(c => c.classe === selClasse.value && c.lab === selLab.value);
     $('btn-combo-load').disabled = !esiste;
     $('btn-combo-delete').disabled = !esiste;
 }
 
-// ============== RENDER COMPLETO (throttled) ==============
+// ========================================================================
+// Render completo (throttled)
+// ========================================================================
+
+/** Esegue tutti i renderer sincronamente. Chiamato da `renderAll` dentro RAF. */
 function _renderAllSync() {
     renderSidebar();
     renderStats();
@@ -582,6 +760,12 @@ function _renderAllSync() {
 }
 
 let rafPending = false;
+
+/**
+ * Richiede un ri-render completo coalescente per frame. Chiamate multiple
+ * nello stesso frame diventano un singolo render — essenziale durante burst
+ * SSE (es. 20 studenti che generano traffico simultaneamente).
+ */
 export function renderAll() {
     if (rafPending) return;
     rafPending = true;

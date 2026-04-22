@@ -1,8 +1,22 @@
-// ============================================================
-// Liste domini per classificazione del traffico
-// Unica fonte di verita' (usato da server.js, esposto al client via /api/config)
-// Match per SOSTRINGA: "openai.com" cattura anche "chat.openai.com", "api.openai.com"
-// ============================================================
+/**
+ * @file Liste domini per la classificazione del traffico.
+ *
+ * Unica fonte di verita' per le due categorie principali:
+ * - `DOMINI_AI`: pattern di servizi di chatbot/assistenti/code AI/ricerca
+ *   accademica AI/ecc. I match generano un banner di allarme in UI.
+ * - `PATTERN_SISTEMA`: traffico di rumore (telemetria, ad tech, CMP, push
+ *   services, update channel) che non e' attivita' reale dello studente.
+ *   La UI esclude queste entry dai conteggi per-studente per non falsare il
+ *   segnale.
+ *
+ * La terza categoria ("utente") e' la default quando nessun pattern combacia.
+ *
+ * **Match per sottostringa**: inserire "openai.com" cattura `chat.openai.com`,
+ * `api.openai.com`, ecc. Scegliere il pattern piu' corto ma specifico possibile.
+ *
+ * Queste liste vengono esposte al client via `/api/config` ma il match
+ * definitivo avviene sempre server-side in `classifica()`.
+ */
 
 const DOMINI_AI = [
     // --- Chatbot principali (USA/Europa) ---
@@ -232,6 +246,14 @@ const PATTERN_SISTEMA = [
     'api-engage-eu.sitecorecloud.io', '.sitecorecloud.io',
 ];
 
+/**
+ * Classifica un dominio in una delle tre categorie: `ai`, `sistema`, `utente`.
+ * Ordine di priorita': AI > sistema > utente (i match AI vincono sempre,
+ * anche se il dominio matcherebbe anche un pattern di sistema).
+ *
+ * @param {string} dominio - Hostname completo (es. `www.example.com`).
+ * @returns {'ai'|'sistema'|'utente'}
+ */
 function classifica(dominio) {
     const d = dominio.toLowerCase();
     for (const ai of DOMINI_AI) {

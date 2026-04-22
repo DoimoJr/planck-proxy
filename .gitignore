@@ -30,5 +30,5 @@ desktop.ini
 *.swo
 *~
 
-# Directory Claude Code (stato locale della sessione di lavoro)
+# Directory editor / stato locale della sessione di lavoro
 .claude/

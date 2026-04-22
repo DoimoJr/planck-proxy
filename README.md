@@ -88,7 +88,7 @@ planck-proxy/
 └── sessioni/               Archivio automatico sessioni (escluse da git)
 ```
 
-Il file `CLAUDE.md` contiene la documentazione architetturale dettagliata (per contributori e per [Claude Code](https://claude.com/claude-code)).
+Il file [`ARCHITECTURE.md`](./ARCHITECTURE.md) contiene la documentazione tecnica dettagliata: API, lifecycle sessioni, convenzioni, gotcha.
 
 ## Modi: blocklist / allowlist / pausa
 
@@ -103,7 +103,7 @@ Modificabili dalla UI (tab Impostazioni).
 - **Hotspot bypass**: se uno studente si collega al suo hotspot mobile, esce dalla LAN e bypassa il proxy. Il watchdog rileva la disconnessione (dot rosso dopo 60s), ma non previene l'uso. La sorveglianza visiva del docente resta necessaria.
 - **Auth HTTP Basic**: non TLS. Pensato per LAN di fiducia. Disabilitato di default.
 - **Archivio salvato allo Stop e allo shutdown grazioso**. `kill -9` o power loss perdono il buffer in RAM.
-- **No tests, no CI**: validare con [smoke tests in CLAUDE.md](./CLAUDE.md) e con test manuale nel browser.
+- **No tests, no CI**: validare con [smoke tests in ARCHITECTURE.md](./ARCHITECTURE.md#run--test) e con test manuale nel browser.
 
 ## Licenza
 

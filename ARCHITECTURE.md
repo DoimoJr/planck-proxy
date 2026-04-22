@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Architettura
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Reference tecnica del progetto: struttura, convenzioni, API, lifecycle delle sessioni, gotcha. Pensata come lettura di orientamento per chi mette mano al codice.
 
 ## Purpose
 

@@ -393,10 +393,10 @@ function dominioBloccato(dominio) {
 // ============================================================
 
 /**
- * Registra una richiesta proxata: append al log file, push nel ring buffer,
- * broadcast ai client SSE. No-op se la sessione non e' attiva (traffico
- * "fuori sessione"). Domini in `dominiIgnorati` vengono loggati su file ma
- * NON entrano nel buffer / SSE (rumore filtrato al primo giro).
+ * Registra una richiesta proxata: append al log file + stampa a console
+ * sempre; ring buffer e broadcast SSE solo a sessione attiva (il monitor
+ * UI resta "pulito" finche' non si avvia una sessione). Domini in
+ * `dominiIgnorati` vengono loggati ma NON entrano nel buffer / SSE.
  *
  * @param {string} ip - IP client del PC studente.
  * @param {string} metodo - "GET"/"POST"/... per HTTP, "HTTPS" per CONNECT.
@@ -404,8 +404,6 @@ function dominioBloccato(dominio) {
  * @param {boolean} blocked - True se la richiesta e' stata respinta con 403.
  */
 function registraTraffico(ip, metodo, urlStr, blocked) {
-    if (!sessioneAttiva) return;
-
     const ora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const rigaLog = `${ora} | ${ip} | ${metodo} | ${urlStr}${blocked ? ' | BLOCKED' : ''}\n`;
     fs.appendFile(LOG_FILE, rigaLog, () => {});
@@ -413,20 +411,22 @@ function registraTraffico(ip, metodo, urlStr, blocked) {
     let dominio;
     try { dominio = new URL(urlStr).hostname; } catch { dominio = urlStr; }
 
+    const oraCorta = ora.substring(11);
+
     if (isIgnorato(dominio)) {
-        const oraCorta = ora.substring(11);
         console.log(`${oraCorta} [${ip}] ${metodo} ${dominio}${blocked ? ' [BLOCKED]' : ''} (ignorato)`);
         return;
     }
+
+    console.log(`${oraCorta} [${ip}] ${metodo} ${dominio}${blocked ? ' [BLOCKED]' : ''}`);
+
+    if (!sessioneAttiva) return;
 
     const tipo = classifica(dominio);
     const entry = { ora, ip, metodo, dominio, tipo, blocked };
 
     storia.push(entry);
     if (storia.length > MAX_STORIA) storia.shift();
-
-    const oraCorta = ora.substring(11);
-    console.log(`${oraCorta} [${ip}] ${metodo} ${dominio}${blocked ? ' [BLOCKED]' : ''}`);
 
     broadcast({ type: 'traffic', entry });
 }

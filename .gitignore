@@ -32,3 +32,6 @@ desktop.ini
 
 # Directory editor / stato locale della sessione di lavoro
 .claude/
+
+# Versione precedente tenuta in locale per confronto
+old/

@@ -19,6 +19,28 @@ import { $ } from './util.js';
 let audioCtx = null;
 
 /**
+ * Batching dei messaggi `traffic`: SSE arriva uno-per-entry (potenzialmente
+ * 100+/s con 20 studenti attivi), ma `renderAll` fa comunque un lavoro
+ * significativo. Accumuliamo le entries in un buffer e le applichiamo in
+ * blocco ogni ~250ms — la UI passa da ~60 render/s a ~4, senza perdere
+ * nulla (l'animazione delle nuove entry resta reattiva al limite della
+ * percezione umana).
+ */
+const TRAFFIC_BATCH_MS = 250;
+let trafficBatch = [];
+let trafficFlushTimer = null;
+function scheduleTrafficFlush() {
+    if (trafficFlushTimer) return;
+    trafficFlushTimer = setTimeout(() => {
+        trafficFlushTimer = null;
+        const batch = trafficBatch;
+        trafficBatch = [];
+        for (const e of batch) assorbiEntry(e);
+        renderAll();
+    }, TRAFFIC_BATCH_MS);
+}
+
+/**
  * Emette un beep sinusoidale a 880 Hz per 150ms. No-op se le notifiche sono
  * disattivate o se il browser blocca l'AudioContext (autoplay policy).
  * Lazy-inizializza l'AudioContext al primo uso.
@@ -115,15 +137,17 @@ export function avviaSSE() {
     es.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'traffic') {
-            assorbiEntry(msg.entry);
+            trafficBatch.push(msg.entry);
             if (msg.entry.tipo === 'ai' && !state.bloccati.has(msg.entry.dominio)) {
                 lampeggiaBannerAI(msg.entry.dominio);
             }
-            renderAll();
+            scheduleTrafficFlush();
         } else if (msg.type === 'blocklist') {
             state.bloccati = new Set(msg.list);
             renderAll();
         } else if (msg.type === 'reset') {
+            trafficBatch.length = 0;
+            if (trafficFlushTimer) { clearTimeout(trafficFlushTimer); trafficFlushTimer = null; }
             resetDatiTraffico();
             if (msg.sessioneInizio) state.sessioneInizio = msg.sessioneInizio;
             renderAll();

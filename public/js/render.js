@@ -1,22 +1,27 @@
 /**
  * @file Funzioni di rendering della UI.
  *
- * Contratto: le funzioni esportate sono **pure rispetto al DOM**: leggono
- * `state` e scrivono `innerHTML` / `textContent` sui nodi di riferimento.
- * Nessuna mutazione di `state` avviene qui (vedi `actions.js` per le
- * mutazioni e `sse.js` per quelle reattive).
+ * Contratto: le funzioni esportate sono pure rispetto allo `state`
+ * (leggono, non mutano — vedi `actions.js` / `sse.js` per le mutazioni).
  *
- * Throttling: `renderAll()` e' guardato da un flag + `requestAnimationFrame`
- * — chiamate multiple nello stesso frame coalescono in un unico paint.
- * Questo e' cruciale durante burst SSE (20+ studenti attivi): ogni entry
- * invoca `renderAll()` ma si ridipinge una volta sola per frame.
+ * Strategia anti-flicker: le liste frequentemente aggiornate (sidebar
+ * domini, ultime richieste, tabella IP in entrambe le viste) usano
+ * `syncChildren` — riconciliazione keyed dei figli DOM. I nodi vengono
+ * riutilizzati tra un render e l'altro: cambia solo cio' che e' davvero
+ * cambiato (textContent di un counter, classi per stato), preservando
+ * scroll, hover e focus anche sotto raffiche di aggiornamenti.
+ *
+ * Coalescing: `renderAll()` e' guardato da `requestAnimationFrame` — piu'
+ * chiamate nello stesso frame diventano un singolo paint. In aggiunta,
+ * `sse.js` batcha le entries `traffic` ogni ~250ms, abbattendo i render
+ * da decine al secondo a ~4/s durante burst (20+ studenti attivi).
  *
  * Eccezione: `renderCountdown()` ha il suo `setInterval(1000)` separato —
  * aggiorna solo la cella countdown, no-alloc per il ticker a 1Hz.
  */
 
 import { state, nomeStudente, aggregaPerReport } from './state.js';
-import { $, escapeHtml, attrEscape, ip2long, parseOra, formatDurata, formatRelativo } from './util.js';
+import { $, escapeHtml, attrEscape, ip2long, parseOra, formatDurata, formatRelativo, syncChildren } from './util.js';
 
 /** Numero massimo di entry mostrate nella card "Ultime richieste". */
 const MAX_RICHIESTE_UI = 100;
@@ -71,7 +76,10 @@ export function renderSidebar() {
 }
 
 /**
- * Rigenera il contenuto di una lista domini dentro la sidebar.
+ * Rigenera il contenuto di una lista domini dentro la sidebar usando
+ * `syncChildren`: nodi riutilizzati per dominio, solo `count` e classi
+ * cambiano al volo. Evita il flicker da innerHTML-wipe.
+ *
  * @param {string} elId - ID del contenitore.
  * @param {Array<[string, {count:number, tipo:string}]>} items
  * @param {string} tipoClass - Classe CSS del tipo ("ai" | "utente" | "sistema" | "nascosto").
@@ -80,18 +88,36 @@ export function renderSidebar() {
 function renderListaDomini(elId, items, tipoClass, isNascosto) {
     const el = $(elId);
     if (!el) return;
-    el.innerHTML = items.map(([dominio, info]) => {
-        const d = escapeHtml(dominio);
-        const da = attrEscape(dominio);
-        const extraClass = isNascosto ? ' nascosto-item' : '';
-        const hidden = matchFiltro(dominio) ? '' : ' filtro-hidden';
-        const azionePrincipale = isNascosto ? 'mostra-dominio' : 'nascondi-dominio';
-        return `<div class="dominio-item ${tipoClass}${extraClass}${hidden}" data-action="${azionePrincipale}" data-dominio="${da}">
-            <span class="nome">${d}</span>
-            <span class="count">${info.count}</span>
-            <button class="btn-block" data-action="blocca" data-dominio="${da}" title="Blocca">X</button>
-        </div>`;
-    }).join('');
+    const azionePrincipale = isNascosto ? 'mostra-dominio' : 'nascondi-dominio';
+    syncChildren(el, items,
+        ([d]) => d,
+        ([dominio]) => {
+            const div = document.createElement('div');
+            div.dataset.action = azionePrincipale;
+            div.dataset.dominio = dominio;
+            const nome = document.createElement('span');
+            nome.className = 'nome';
+            nome.textContent = dominio;
+            const count = document.createElement('span');
+            count.className = 'count';
+            const btn = document.createElement('button');
+            btn.className = 'btn-block';
+            btn.dataset.action = 'blocca';
+            btn.dataset.dominio = dominio;
+            btn.title = 'Blocca';
+            btn.textContent = 'X';
+            div.append(nome, count, btn);
+            return div;
+        },
+        (div, [dominio, info]) => {
+            const extra = isNascosto ? ' nascosto-item' : '';
+            const hidden = matchFiltro(dominio) ? '' : ' filtro-hidden';
+            div.className = `dominio-item ${tipoClass}${extra}${hidden}`;
+            const countEl = div.querySelector('.count');
+            const nuovo = String(info.count);
+            if (countEl.textContent !== nuovo) countEl.textContent = nuovo;
+        }
+    );
 }
 
 /**
@@ -102,22 +128,38 @@ function renderListaDomini(elId, items, tipoClass, isNascosto) {
  */
 function renderListaBloccati(elId, items) {
     const el = $(elId);
-    const renderRiga = (dominio, count) => {
-        const d = escapeHtml(dominio);
-        const da = attrEscape(dominio);
-        const hidden = matchFiltro(dominio) ? '' : ' filtro-hidden';
-        return `<div class="dominio-item blocked-item${hidden}">
-            <span class="nome">${d}</span>
-            <span class="count">${count}</span>
-            <button class="btn-unblock" data-action="sblocca" data-dominio="${da}" title="Sblocca">OK</button>
-        </div>`;
-    };
-    let html = items.map(([d, info]) => renderRiga(d, info.count)).join('');
+    if (!el) return;
+    const rows = items.map(([d, info]) => ({ dominio: d, count: info.count }));
     const visti = new Set(items.map(([d]) => d));
     for (const b of state.bloccati) {
-        if (!visti.has(b)) html += renderRiga(b, 0);
+        if (!visti.has(b)) rows.push({ dominio: b, count: 0 });
     }
-    el.innerHTML = html;
+    syncChildren(el, rows,
+        r => r.dominio,
+        r => {
+            const div = document.createElement('div');
+            const nome = document.createElement('span');
+            nome.className = 'nome';
+            nome.textContent = r.dominio;
+            const count = document.createElement('span');
+            count.className = 'count';
+            const btn = document.createElement('button');
+            btn.className = 'btn-unblock';
+            btn.dataset.action = 'sblocca';
+            btn.dataset.dominio = r.dominio;
+            btn.title = 'Sblocca';
+            btn.textContent = 'OK';
+            div.append(nome, count, btn);
+            return div;
+        },
+        (div, r) => {
+            const hidden = matchFiltro(r.dominio) ? '' : ' filtro-hidden';
+            div.className = `dominio-item blocked-item${hidden}`;
+            const countEl = div.querySelector('.count');
+            const nuovo = String(r.count);
+            if (countEl.textContent !== nuovo) countEl.textContent = nuovo;
+        }
+    );
 }
 
 // ========================================================================
@@ -283,20 +325,6 @@ function calcolaStatoIp(ip, ora, soglia) {
 }
 
 /**
- * Genera l'HTML di un tag dominio cliccabile. Applica le classi
- * `blocked` o `nascosto` se presenti nel rispettivo set.
- * @param {string} d
- * @param {string} tipo
- * @returns {string}
- */
-function tagDominioHtml(d, tipo) {
-    const classi = ['dominio-tag', tipo];
-    if (state.bloccati.has(d)) classi.push('blocked');
-    else if (state.nascosti.has(d)) classi.push('nascosto');
-    return `<span class="${classi.join(' ')}" data-action="blocca" data-dominio="${attrEscape(d)}" title="Click per bloccare">${escapeHtml(d)}</span>`;
-}
-
-/**
  * Dispatcher del pannello IP: sceglie tra vista lista e vista griglia
  * in base a `state.vistaIp` e aggiorna lo stato dei due bottoni toggle.
  *
@@ -318,89 +346,235 @@ export function renderTabellaIp() {
     if (btnL) btnL.classList.toggle('attivo', state.vistaIp === 'lista');
 
     if (state.vistaIp === 'lista') {
-        container.innerHTML = renderListaIp(ips, ora, soglia);
+        renderListaIp(container, ips, ora, soglia);
     } else {
-        container.innerHTML = renderGrigliaIp(ips, ora, soglia);
+        renderGrigliaIp(container, ips, ora, soglia);
     }
 }
 
 /**
- * Costruisce l'HTML della vista a tabella (5 colonne: WD / Studente / N / Ultima / Domini).
- * @param {string[]} ips
- * @param {number} ora
- * @param {number} soglia
- * @returns {string}
+ * Garantisce lo "scheletro" del contenitore per una certa vista. Se la
+ * vista cambia (o il contenitore e' vuoto), ricostruisce l'involucro e
+ * ritorna il nodo in cui inserire le righe/card. Per vista uguale,
+ * restituisce l'involucro gia' presente (senza toccare il DOM).
+ *
+ * @param {HTMLElement} container
+ * @param {string} vista
+ * @returns {HTMLElement} target su cui chiamare syncChildren
  */
-function renderListaIp(ips, ora, soglia) {
-    const righe = ips.map(ip => {
-        const s = calcolaStatoIp(ip, ora, soglia);
-        const tagsHtml = [...s.dominiMap.entries()].map(([d, t]) => tagDominioHtml(d, t)).join('');
-        const label = s.nome
-            ? `<span class="nome-studente">${escapeHtml(s.nome)}</span> <span class="ip-sub">${escapeHtml(ip)}</span>`
-            : `<span class="ip-label">${escapeHtml(ip)}</span>`;
-        const wdDot = `<span class="watchdog-dot ${s.wd.classe}" title="${escapeHtml(s.wd.titolo)}"></span>`;
-        const ultimaCella = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '<span class="ip-sub">-</span>';
-        const rowClass = [];
-        if (s.inattivo) rowClass.push('inattivo');
-        if (state.focusIp === ip) rowClass.push('focus');
-        if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
-        return `<tr class="${rowClass.join(' ')}" data-action="focus-ip" data-ip="${attrEscape(ip)}">
-            <td>${wdDot}</td>
-            <td>${label}</td>
-            <td>${s.listaAttive.length}</td>
-            <td><span class="ultima-attivita${s.inattivo ? ' inattivo' : ''}">${ultimaCella}</span></td>
-            <td>${tagsHtml}</td>
-        </tr>`;
-    }).join('');
-    return `<table>
-        <thead><tr><th title="Watchdog">WD</th><th>Studente / IP</th><th>N</th><th>Ultima</th><th>Domini</th></tr></thead>
-        <tbody>${righe}</tbody>
-    </table>`;
+function scheletroVistaIp(container, vista) {
+    if (container.dataset.vista === vista && container.firstElementChild) {
+        if (vista === 'lista') return container.firstElementChild.querySelector('tbody');
+        return container.firstElementChild;
+    }
+    container.textContent = '';
+    container.dataset.vista = vista;
+    if (vista === 'lista') {
+        const table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th title="Watchdog">WD</th><th>Studente / IP</th><th>N</th><th>Ultima</th><th>Domini</th></tr></thead><tbody></tbody>';
+        container.appendChild(table);
+        return table.querySelector('tbody');
+    }
+    const grid = document.createElement('div');
+    grid.className = 'ip-grid';
+    container.appendChild(grid);
+    return grid;
+}
+
+/**
+ * Riempie un nodo con i tag dominio per un IP, riutilizzando gli span
+ * esistenti (`syncChildren` per chiave = dominio). Un eventuale
+ * `+N` finale viene gestito come nodo statico appeso dopo il sync.
+ * @param {HTMLElement} container
+ * @param {Array<[string,string]>} domini - Entries dominio -> tipo.
+ * @param {number} extra - Quantita' "+N" da mostrare in coda, 0 per niente.
+ */
+function syncTagsDominio(container, domini, extra) {
+    syncChildren(container, domini,
+        ([d]) => d,
+        ([d]) => {
+            const span = document.createElement('span');
+            span.dataset.action = 'blocca';
+            span.dataset.dominio = d;
+            span.title = 'Click per bloccare';
+            span.textContent = d;
+            return span;
+        },
+        (span, [d, tipo]) => {
+            const classi = ['dominio-tag', tipo];
+            if (state.bloccati.has(d)) classi.push('blocked');
+            else if (state.nascosti.has(d)) classi.push('nascosto');
+            const nuova = classi.join(' ');
+            if (span.className !== nuova) span.className = nuova;
+        }
+    );
+    // Gestione pastiglia "+N": ultimo child se presente, rimossa/aggiornata qui.
+    let extraEl = container.querySelector(':scope > .ip-card-extra');
+    if (extra > 0) {
+        if (!extraEl) {
+            extraEl = document.createElement('span');
+            extraEl.className = 'ip-card-extra';
+            container.appendChild(extraEl);
+        } else {
+            container.appendChild(extraEl);
+        }
+        const txt = `+${extra}`;
+        if (extraEl.textContent !== txt) extraEl.textContent = txt;
+    } else if (extraEl) {
+        extraEl.remove();
+    }
+}
+
+/**
+ * Costruisce/aggiorna la vista a tabella nel tbody: una riga per IP,
+ * riusa le `<tr>` esistenti tramite syncChildren.
+ */
+function renderListaIp(container, ips, ora, soglia) {
+    const body = scheletroVistaIp(container, 'lista');
+    syncChildren(body, ips,
+        ip => ip,
+        ip => {
+            const tr = document.createElement('tr');
+            tr.dataset.action = 'focus-ip';
+            tr.dataset.ip = ip;
+            tr.innerHTML = '<td><span class="watchdog-dot"></span></td>'
+                + '<td></td>'
+                + '<td class="col-n"></td>'
+                + '<td><span class="ultima-attivita"></span></td>'
+                + '<td class="col-tags"></td>';
+            return tr;
+        },
+        (tr, ip) => {
+            const s = calcolaStatoIp(ip, ora, soglia);
+            const rowClass = [];
+            if (s.inattivo) rowClass.push('inattivo');
+            if (state.focusIp === ip) rowClass.push('focus');
+            if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
+            const nuova = rowClass.join(' ');
+            if (tr.className !== nuova) tr.className = nuova;
+
+            const tds = tr.children;
+            const wd = tds[0].firstElementChild;
+            const wdClass = `watchdog-dot ${s.wd.classe}`;
+            if (wd.className !== wdClass) wd.className = wdClass;
+            if (wd.title !== s.wd.titolo) wd.title = s.wd.titolo;
+
+            const labelTd = tds[1];
+            // Ricostruisci solo se cambia la presenza del nome (cambio raro).
+            const hasNome = labelTd.firstElementChild?.classList?.contains('nome-studente');
+            if (!!s.nome !== !!hasNome || (s.nome && labelTd.firstElementChild.textContent !== s.nome)) {
+                labelTd.textContent = '';
+                if (s.nome) {
+                    const a = document.createElement('span'); a.className = 'nome-studente'; a.textContent = s.nome;
+                    const b = document.createElement('span'); b.className = 'ip-sub'; b.textContent = ip;
+                    labelTd.append(a, ' ', b);
+                } else {
+                    const a = document.createElement('span'); a.className = 'ip-label'; a.textContent = ip;
+                    labelTd.append(a);
+                }
+            }
+
+            const nStr = String(s.listaAttive.length);
+            if (tds[2].textContent !== nStr) tds[2].textContent = nStr;
+
+            const ultimaSpan = tds[3].firstElementChild;
+            const ultimaTxt = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '-';
+            if (ultimaSpan.textContent !== ultimaTxt) ultimaSpan.textContent = ultimaTxt;
+            const ultimaCls = `ultima-attivita${s.inattivo ? ' inattivo' : ''}`;
+            if (ultimaSpan.className !== ultimaCls) ultimaSpan.className = ultimaCls;
+
+            syncTagsDominio(tds[4], [...s.dominiMap.entries()], 0);
+        }
+    );
 }
 
 /** Numero massimo di tag dominio mostrati dentro una singola card della griglia. */
 const DOMINI_CARD_MAX = 6;
 
 /**
- * Costruisce l'HTML della vista a griglia (card per IP).
- * @param {string[]} ips
- * @param {number} ora
- * @param {number} soglia
- * @returns {string}
+ * Costruisce/aggiorna la vista a griglia (card per IP), con riuso nodi.
  */
-function renderGrigliaIp(ips, ora, soglia) {
-    if (ips.length === 0) return '<div class="ip-grid-vuota">Nessun IP ancora rilevato.</div>';
-    const card = ips.map(ip => {
-        const s = calcolaStatoIp(ip, ora, soglia);
-        const dominiOrdinati = [...s.dominiMap.entries()].reverse();
-        const dominiVisibili = dominiOrdinati.slice(0, DOMINI_CARD_MAX);
-        const extra = dominiOrdinati.length - dominiVisibili.length;
-        const tagsHtml = dominiVisibili.map(([d, t]) => tagDominioHtml(d, t)).join('');
-        const extraHtml = extra > 0 ? `<span class="ip-card-extra">+${extra}</span>` : '';
-        const ultimaTxt = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '-';
+function renderGrigliaIp(container, ips, ora, soglia) {
+    const grid = scheletroVistaIp(container, 'griglia');
+    if (ips.length === 0) {
+        grid.textContent = '';
+        if (!grid.querySelector(':scope > .ip-grid-vuota')) {
+            const v = document.createElement('div');
+            v.className = 'ip-grid-vuota';
+            v.textContent = 'Nessun IP ancora rilevato.';
+            grid.appendChild(v);
+        }
+        return;
+    }
+    // Rimuovi eventuale placeholder "vuoto" ereditato da un render precedente.
+    const vuoto = grid.querySelector(':scope > .ip-grid-vuota');
+    if (vuoto) vuoto.remove();
 
-        const classi = ['ip-card'];
-        if (s.inattivo) classi.push('inattivo');
-        if (state.focusIp === ip) classi.push('focus');
-        if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
+    syncChildren(grid, ips,
+        ip => ip,
+        ip => {
+            const card = document.createElement('div');
+            card.dataset.action = 'focus-ip';
+            card.dataset.ip = ip;
+            card.innerHTML = '<div class="ip-card-head">'
+                + '<span class="watchdog-dot"></span>'
+                + '<div class="nome-wrap"></div>'
+                + '</div>'
+                + '<div class="ip-card-metriche">'
+                + '<div class="ip-card-num"></div>'
+                + '<div class="ip-card-ultima"></div>'
+                + '</div>'
+                + '<div class="ip-card-tags"></div>';
+            return card;
+        },
+        (card, ip) => {
+            const s = calcolaStatoIp(ip, ora, soglia);
+            const classi = ['ip-card'];
+            if (s.inattivo) classi.push('inattivo');
+            if (state.focusIp === ip) classi.push('focus');
+            if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
+            const nuova = classi.join(' ');
+            if (card.className !== nuova) card.className = nuova;
 
-        const nomeHtml = s.nome
-            ? `<div class="ip-card-nome">${escapeHtml(s.nome)}</div><div class="ip-card-ip">${escapeHtml(ip)}</div>`
-            : `<div class="ip-card-nome ip-card-nome-solo">${escapeHtml(ip)}</div>`;
+            const head = card.firstElementChild;
+            const wd = head.firstElementChild;
+            const wdClass = `watchdog-dot ${s.wd.classe}`;
+            if (wd.className !== wdClass) wd.className = wdClass;
+            if (wd.title !== s.wd.titolo) wd.title = s.wd.titolo;
 
-        return `<div class="${classi.join(' ')}" data-action="focus-ip" data-ip="${attrEscape(ip)}">
-            <div class="ip-card-head">
-                <span class="watchdog-dot ${s.wd.classe}" title="${escapeHtml(s.wd.titolo)}"></span>
-                ${nomeHtml}
-            </div>
-            <div class="ip-card-metriche">
-                <div class="ip-card-num">${s.listaAttive.length}</div>
-                <div class="ip-card-ultima${s.inattivo ? ' inattivo' : ''}">${ultimaTxt}</div>
-            </div>
-            <div class="ip-card-tags">${tagsHtml}${extraHtml}</div>
-        </div>`;
-    }).join('');
-    return `<div class="ip-grid">${card}</div>`;
+            const nomeWrap = head.children[1];
+            const hasNome = nomeWrap.firstElementChild?.classList?.contains('ip-card-nome')
+                && !nomeWrap.firstElementChild.classList.contains('ip-card-nome-solo');
+            const needNome = !!s.nome;
+            if (needNome !== hasNome || (needNome && nomeWrap.firstElementChild.textContent !== s.nome)) {
+                nomeWrap.textContent = '';
+                if (s.nome) {
+                    const a = document.createElement('div'); a.className = 'ip-card-nome'; a.textContent = s.nome;
+                    const b = document.createElement('div'); b.className = 'ip-card-ip'; b.textContent = ip;
+                    nomeWrap.append(a, b);
+                } else {
+                    const a = document.createElement('div'); a.className = 'ip-card-nome ip-card-nome-solo'; a.textContent = ip;
+                    nomeWrap.append(a);
+                }
+            }
+
+            const metriche = card.children[1];
+            const numEl = metriche.firstElementChild;
+            const numStr = String(s.listaAttive.length);
+            if (numEl.textContent !== numStr) numEl.textContent = numStr;
+            const ultimaEl = metriche.children[1];
+            const ultimaTxt = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '-';
+            if (ultimaEl.textContent !== ultimaTxt) ultimaEl.textContent = ultimaTxt;
+            const ultimaCls = `ip-card-ultima${s.inattivo ? ' inattivo' : ''}`;
+            if (ultimaEl.className !== ultimaCls) ultimaEl.className = ultimaCls;
+
+            const tags = card.children[2];
+            const dominiOrd = [...s.dominiMap.entries()].reverse();
+            const visibili = dominiOrd.slice(0, DOMINI_CARD_MAX);
+            const extra = dominiOrd.length - visibili.length;
+            syncTagsDominio(tags, visibili, extra);
+        }
+    );
 }
 
 /**
@@ -413,18 +587,36 @@ export function renderUltimeRichieste() {
     if (state.focusIp) fonte = state.perIp.get(state.focusIp) || [];
     const ultime = fonte.slice(-MAX_RICHIESTE_UI).reverse();
 
-    el.innerHTML = ultime.map(e => {
-        const aiClass = e.tipo === 'ai' ? 'ai-alert' : '';
-        const nome = nomeStudente(e.ip);
-        const ipLabel = nome ? `${nome} .${e.ip.split('.').pop()}` : e.ip;
-        const match = matchFiltro(e.dominio) || matchFiltro(e.ip) || (nome && matchFiltro(nome));
-        const hidden = match ? '' : ' filtro-hidden';
-        return `<div class="traffico-entry${hidden}">
-            <span class="orario">${e.ora.substring(11)}</span>
-            <span class="ip-label">[${escapeHtml(ipLabel)}]</span>
-            <span class="dominio-txt ${aiClass}">${escapeHtml(e.dominio)}</span>
-        </div>`;
-    }).join('');
+    // Chiave stabile: indice origine nel buffer (combinato con ora+ip+dominio
+    // per robustezza in caso di reset). Le entries non mutano una volta
+    // inserite, quindi `update` si limita a rivalutare il filtro.
+    syncChildren(el, ultime,
+        e => `${e.ora}|${e.ip}|${e.dominio}|${e.metodo}`,
+        e => {
+            const div = document.createElement('div');
+            const nome = nomeStudente(e.ip);
+            const ipLabel = nome ? `${nome} .${e.ip.split('.').pop()}` : e.ip;
+            const aiClass = e.tipo === 'ai' ? ' ai-alert' : '';
+            const oraSpan = document.createElement('span');
+            oraSpan.className = 'orario';
+            oraSpan.textContent = e.ora.substring(11);
+            const ipSpan = document.createElement('span');
+            ipSpan.className = 'ip-label';
+            ipSpan.textContent = `[${ipLabel}]`;
+            const domSpan = document.createElement('span');
+            domSpan.className = `dominio-txt${aiClass}`;
+            domSpan.textContent = e.dominio;
+            div.append(oraSpan, ipSpan, domSpan);
+            return div;
+        },
+        (div, e) => {
+            const nome = nomeStudente(e.ip);
+            const match = matchFiltro(e.dominio) || matchFiltro(e.ip) || (nome && matchFiltro(nome));
+            const hidden = match ? '' : ' filtro-hidden';
+            const nuova = `traffico-entry${hidden}`;
+            if (div.className !== nuova) div.className = nuova;
+        }
+    );
 }
 
 /**

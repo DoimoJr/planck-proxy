@@ -82,3 +82,44 @@ export function formatRelativo(secFa) {
     if (secFa < 3600) return `${Math.floor(secFa / 60)}m fa`;
     return `${Math.floor(secFa / 3600)}h fa`;
 }
+
+/**
+ * Riconcilia i figli di `container` con la lista `items` usando `getKey`
+ * come chiave stabile. Nodi con chiavi gia' presenti vengono riutilizzati
+ * (aggiornati via `update`) invece di essere ricreati: niente `innerHTML`
+ * wipe, niente flicker, scroll/hover/focus preservati.
+ *
+ * @template T
+ * @param {HTMLElement} container
+ * @param {T[]} items
+ * @param {(item: T) => string} getKey
+ * @param {(item: T) => HTMLElement} create - Costruisce il nodo (chiamato la prima volta per una chiave).
+ * @param {(el: HTMLElement, item: T) => void} update - Aggiorna in-place (chiamato anche sul nodo appena creato).
+ */
+export function syncChildren(container, items, getKey, create, update) {
+    const keyToEl = new Map();
+    for (const child of Array.from(container.children)) {
+        const k = child.dataset.key;
+        if (k != null) keyToEl.set(k, child);
+    }
+    const wantedKeys = new Set();
+    for (const item of items) wantedKeys.add(getKey(item));
+    for (const [k, el] of keyToEl) {
+        if (!wantedKeys.has(k)) { el.remove(); keyToEl.delete(k); }
+    }
+    let anchor = container.firstChild;
+    for (const item of items) {
+        const key = getKey(item);
+        let el = keyToEl.get(key);
+        if (!el) {
+            el = create(item);
+            el.dataset.key = key;
+            container.insertBefore(el, anchor);
+        } else if (el === anchor) {
+            anchor = anchor.nextSibling;
+        } else {
+            container.insertBefore(el, anchor);
+        }
+        update(el, item);
+    }
+}

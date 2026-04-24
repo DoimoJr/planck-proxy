@@ -8,6 +8,7 @@ _blocked_domains.txt
 
 # Sessioni archiviate (contengono IP + domini visitati dagli studenti = dati sensibili)
 sessioni/*.json
+sessioni/*.ndjson
 sessioni/_archivio_privato/
 
 # Mappe classi salvate (contengono nomi studenti reali)

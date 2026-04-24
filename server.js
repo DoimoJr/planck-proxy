@@ -37,6 +37,11 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const PRESETS_DIR = path.join(__dirname, 'presets');
 const SESSIONI_DIR = path.join(__dirname, 'sessioni');
 const CLASSI_DIR = path.join(__dirname, 'classi');
+// File NDJSON append-only con TUTTE le entries della sessione in corso.
+// Slegato dal ring buffer `storia` (che ha cap per limiti memoria/UI):
+// l'archivio a `stop` viene costruito leggendo da qui, cosi' il report
+// contiene sempre l'intera sessione anche se il buffer si e' saturato.
+const SESSIONE_CORRENTE_NDJSON = path.join(SESSIONI_DIR, '_corrente.ndjson');
 
 // --- CONFIG ---
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -295,7 +300,13 @@ const IP_SERVER = ipLocale();
 // STATO IN MEMORIA
 // ============================================================
 
-/** Capienza del ring buffer traffico. Oltre, le entry piu' vecchie vengono scartate. */
+/**
+ * Capienza del ring buffer usato dalla UI live (`/api/state`, broadcast SSE).
+ * Limita memoria e dimensione della risposta iniziale al client — NON
+ * influisce sull'archivio, che legge dal file NDJSON append-only (vedi
+ * `SESSIONE_CORRENTE_NDJSON`), quindi e' completo anche se il buffer
+ * satura. Il report della sessione non perde piu' dati col cap.
+ */
 const MAX_STORIA = 5000;
 
 /** @type {Array<{ora:string,ip:string,metodo:string,dominio:string,tipo:string,blocked:boolean}>} */
@@ -393,10 +404,47 @@ function dominioBloccato(dominio) {
 // ============================================================
 
 /**
+ * Append sincrono di una singola entry al file NDJSON della sessione
+ * corrente (una riga = un JSON.stringify). Chiamato dentro
+ * `registraTraffico` a sessione attiva. Scelta di `appendFileSync`:
+ * writes piccoli (<300 byte), volumi tipici <200 req/s — costo
+ * trascurabile, in cambio garantiamo che a `stop` il file sia
+ * completo senza dover drenare una coda asincrona.
+ * @param {Object} entry
+ */
+function appendSessioneCorrente(entry) {
+    try { fs.appendFileSync(SESSIONE_CORRENTE_NDJSON, JSON.stringify(entry) + '\n'); } catch {}
+}
+
+/**
+ * Rilegge il file NDJSON e restituisce l'array completo delle entries
+ * della sessione corrente. Righe malformate vengono ignorate
+ * (robustezza contro crash / write parziali). Se il file non esiste,
+ * restituisce `[]`.
+ * @returns {Array<Object>}
+ */
+function leggiSessioneCorrente() {
+    let raw;
+    try { raw = fs.readFileSync(SESSIONE_CORRENTE_NDJSON, 'utf8'); }
+    catch { return []; }
+    const out = [];
+    for (const line of raw.split('\n')) {
+        if (!line) continue;
+        try { out.push(JSON.parse(line)); } catch {}
+    }
+    return out;
+}
+
+/** Azzera il file NDJSON della sessione corrente. Chiamato su start/reset. */
+function resetSessioneCorrente() {
+    try { fs.writeFileSync(SESSIONE_CORRENTE_NDJSON, ''); } catch {}
+}
+
+/**
  * Registra una richiesta proxata: append al log file + stampa a console
- * sempre; ring buffer e broadcast SSE solo a sessione attiva (il monitor
- * UI resta "pulito" finche' non si avvia una sessione). Domini in
- * `dominiIgnorati` vengono loggati ma NON entrano nel buffer / SSE.
+ * sempre; ring buffer, NDJSON append e broadcast SSE solo a sessione
+ * attiva (il monitor UI resta "pulito" finche' non si avvia una sessione).
+ * Domini in `dominiIgnorati` vengono loggati ma NON entrano nel buffer / SSE.
  *
  * @param {string} ip - IP client del PC studente.
  * @param {string} metodo - "GET"/"POST"/... per HTTP, "HTTPS" per CONNECT.
@@ -424,6 +472,8 @@ function registraTraffico(ip, metodo, urlStr, blocked) {
 
     const tipo = classifica(dominio);
     const entry = { ora, ip, metodo, dominio, tipo, blocked };
+
+    appendSessioneCorrente(entry);
 
     storia.push(entry);
     if (storia.length > MAX_STORIA) storia.shift();
@@ -503,7 +553,13 @@ function impostaDeadline(iso) {
  * @returns {string|null} Nome del file archiviato o null.
  */
 function archiviaSessioneCorrente() {
-    if (storia.length === 0 || !sessioneInizio) return null;
+    if (!sessioneInizio) return null;
+    // Fonte primaria: NDJSON append-only (completo, non limitato da MAX_STORIA).
+    // Fallback: ring buffer `storia` — copre il caso in cui il file sia
+    // illeggibile (disk error, permessi) ma la RAM abbia ancora dati.
+    let entries = leggiSessioneCorrente();
+    if (entries.length === 0 && storia.length > 0) entries = storia.slice();
+    if (entries.length === 0) return null;
     const data = {
         sessioneInizio,
         esportatoAlle: new Date().toISOString(),
@@ -512,7 +568,7 @@ function archiviaSessioneCorrente() {
         modo: config.modo,
         studenti,
         bloccati: [...bloccati],
-        entries: storia.slice(),
+        entries,
     };
     const nome = sessioneInizio.replace(/[:T.]/g, '-').substring(0, 19) + '.json';
     const dest = path.join(SESSIONI_DIR, nome);
@@ -893,6 +949,7 @@ const webServer = http.createServer(async (req, res) => {
         let archiviata = null;
         if (sessioneAttiva) archiviata = archiviaSessioneCorrente();
         storia.length = 0;
+        resetSessioneCorrente();
         try { fs.writeFileSync(LOG_FILE, ''); } catch {}
         sessioneInizio = new Date().toISOString();
         sessioneFineISO = null;
@@ -940,7 +997,7 @@ const webServer = http.createServer(async (req, res) => {
             modo: config.modo,
             studenti,
             bloccati: [...bloccati],
-            entries: storia,
+            entries: leggiSessioneCorrente(),
         };
         const filename = `sessione_${sessioneInizio.replace(/[:T]/g, '-').substring(0, 19)}.json`;
         res.writeHead(200, {
@@ -952,6 +1009,7 @@ const webServer = http.createServer(async (req, res) => {
     }
     if (p === '/api/reset') {
         storia.length = 0;
+        resetSessioneCorrente();
         try { fs.writeFileSync(LOG_FILE, ''); } catch {}
         broadcast({ type: 'reset', sessioneInizio });
         jsonReply(res, { ok: true });

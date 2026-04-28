@@ -15,6 +15,14 @@ coverage.txt
 # Stato runtime (rigenerato ad ogni avvio)
 _traffico_log.txt
 _blocked_domains.txt
+config.json
+studenti.json
+
+# Script studenti auto-generati a ogni boot da Planck v2 (IP della
+# rete locale → ogni macchina ha valori diversi). I template sono
+# in internal/scripts/scripts.go.
+/proxy_on.bat
+/proxy_off.bat
 
 # Sessioni archiviate (contengono IP + domini visitati dagli studenti = dati sensibili)
 sessioni/*.json

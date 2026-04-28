@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	Versione = "2.0.0-phase1"
-	Fase     = "1.7"
+	Versione = "2.0.0-alpha.1"
+	Fase     = "alpha.1"
 )
 
 // dataDirDefault risolve la directory dati: env var PLANCK_DATA_DIR

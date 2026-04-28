@@ -31,13 +31,26 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/classify"
 )
 
-// Recorder e' l'interfaccia che il proxy usa per registrare gli eventi
-// di traffico e watchdog. Tipicamente implementata da *state.State, ma
-// astratta per semplificare i test (vedi server_test.go).
+// Recorder e' l'interfaccia che il proxy usa per:
+//   - Registrare gli eventi di traffico e watchdog (Phase 1.3)
+//   - Decidere se un dominio va bloccato con 403 (Phase 1.5)
+//
+// Tipicamente implementata da *state.State, ma astratta per semplificare
+// i test (vedi server_test.go).
 type Recorder interface {
 	RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo classify.Tipo)
 	RegistraAlive(ip string)
+	DominioBloccato(dominio string) bool
 }
+
+// paginaBloccata e' l'HTML servito allo studente sui domini bloccati.
+// In Phase 1.7 verra' embedded da public/blocked.html; per ora inline.
+const paginaBloccata = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8">` +
+	`<title>Accesso bloccato</title>` +
+	`<style>body{font-family:'Segoe UI',sans-serif;text-align:center;padding:80px;background:#1a1d23;color:#e0e0e0}` +
+	`h1{color:#e74c3c;font-size:2em}p{color:#888;margin-top:20px}</style></head>` +
+	`<body><h1>Accesso bloccato dal docente</h1>` +
+	`<p>Il dominio richiesto non e' consentito durante questa sessione.</p></body></html>`
 
 // Server e' il proxy HTTP/HTTPS in ascolto su una porta.
 type Server struct {
@@ -101,6 +114,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.handleHTTP(w, r, ipClient)
 }
 
+// rispondiBloccato scrive una risposta 403 con la pagina HTML di blocco.
+// Usata per le richieste HTTP normali (per HTTPS si scrive direttamente
+// sul socket prima del tunneling — vedi handleConnect).
+func rispondiBloccato(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+	w.Header().Set("Connection", "close")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(paginaBloccata))
+}
+
 // handleAlive risponde al ping watchdog dello studente.
 // Aggiorna aliveMap dello state e broadcasta `{type:"alive",...}` via SSE.
 func (s *Server) handleAlive(w http.ResponseWriter, r *http.Request, ip string) {
@@ -125,7 +148,14 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, ip string) {
 	}
 
 	tipo := classify.Classifica(dominio)
-	// Phase 1.3: blocked sempre false. I blocchi arriveranno in 1.4.
+
+	// Check blocco (Phase 1.5): se il dominio e' bloccato, registra come
+	// blocked=true e rispondi con la pagina 403, niente forwarding.
+	if s.recorder.DominioBloccato(dominio) {
+		s.recorder.RegistraTraffic(ip, r.Method, dominio, true, tipo)
+		rispondiBloccato(w)
+		return
+	}
 	s.recorder.RegistraTraffic(ip, r.Method, dominio, false, tipo)
 
 	// Header pulito: rimuovo gli hop-by-hop "proxy-*"
@@ -185,6 +215,19 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, ip string
 	}
 
 	tipo := classify.Classifica(dominio)
+
+	// Check blocco (Phase 1.5): per HTTPS rispondiamo "HTTP/1.1 403" sul
+	// client socket prima dell'handshake TLS. Il browser mostrera' un
+	// errore di connessione (non puo' renderizzare la pagina HTML perche'
+	// si aspettava TLS), ma il blocco e' effettivo e visibile in UI.
+	if s.recorder.DominioBloccato(dominio) {
+		s.recorder.RegistraTraffic(ip, "HTTPS", dominio, true, tipo)
+		_, _ = w.Write([]byte("HTTP/1.1 403 Forbidden\r\n" +
+			"Content-Type: text/html; charset=UTF-8\r\n" +
+			"Connection: close\r\n\r\n"))
+		_, _ = w.Write([]byte(paginaBloccata))
+		return
+	}
 	s.recorder.RegistraTraffic(ip, "HTTPS", dominio, false, tipo)
 
 	target, err := net.DialTimeout("tcp", host, 10*time.Second)

@@ -22,14 +22,14 @@ import (
 
 const (
 	Versione = "2.0.0-phase1"
-	Fase     = "1.4"
+	Fase     = "1.5"
 )
 
 const indexHTML = `<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Planck Proxy v2 — Phase 1.4</title>
+<title>Planck Proxy v2 — Phase 1.5</title>
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; max-width: 760px; margin: 0 auto; background: #1a1d23; color: #e0e0e0; line-height: 1.6; }
   h1 { color: #b77dd4; margin-bottom: 8px; }
@@ -42,13 +42,15 @@ const indexHTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Planck Proxy v2</h1>
-<p class="tag">Phase 1.4 — API GET (read-only)</p>
+<p class="tag">Phase 1.5 — API REST completa + auth + blocchi attivi</p>
 
 <p class="status">Backend Go in ascolto.</p>
 
-<p>Proxy HTTP/HTTPS attivo, state condiviso, broker SSE su <code>/api/stream</code>,
-API GET di lettura disponibili. Le mutazioni (POST) arrivano in 1.5,
-la persistenza in 1.6, la UI completa in 1.7.</p>
+<p>Proxy attivo con applicazione blocchi (403 su domini in blocklist o
+in modo allowlist non-matching, dominiIgnorati passano sempre, pausa
+globale blocca tutto). API REST GET+POST disponibili, auth HTTP Basic
+opzionale (default off; abilitabile via /api/settings/update).
+La persistenza disco arriva in 1.6, la UI completa in 1.7.</p>
 
 <h3>Endpoint web (porta 9999)</h3>
 <ul>

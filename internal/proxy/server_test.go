@@ -11,13 +11,15 @@ import (
 )
 
 // stubRecorder e' una Recorder no-op che registra le chiamate per
-// assertion in test, senza dipendenza da internal/state (evita import
-// ciclico e tiene i test focalizzati sulla logica del proxy).
+// assertion in test, senza dipendenza da internal/state.
 type stubRecorder struct {
 	mu          sync.Mutex
 	traffic     []trafficCall
 	aliveCount  int
 	aliveLastIP string
+	// blocca: lista di stringhe che, se contained nel dominio, fanno
+	// ritornare true a DominioBloccato. Vuoto = niente bloccato.
+	blocca []string
 }
 
 type trafficCall struct {
@@ -37,6 +39,26 @@ func (s *stubRecorder) RegistraAlive(ip string) {
 	defer s.mu.Unlock()
 	s.aliveCount++
 	s.aliveLastIP = ip
+}
+
+func (s *stubRecorder) DominioBloccato(dominio string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, b := range s.blocca {
+		if b != "" && contains(dominio, b) {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *stubRecorder) trafficCount() int {
@@ -129,5 +151,29 @@ func TestHandleHTTPMissingHostname(t *testing.T) {
 	}
 	if rec.trafficCount() != 0 {
 		t.Errorf("recorder.trafficCount = %d, atteso 0 (hostname invalido)", rec.trafficCount())
+	}
+}
+
+// TestHandleHTTPBlocked verifica che una richiesta verso un dominio
+// considerato "bloccato" dal recorder ritorni 403 + pagina HTML, e che
+// il recorder venga chiamato con blocked=true.
+func TestHandleHTTPBlocked(t *testing.T) {
+	rec := &stubRecorder{blocca: []string{"instagram"}}
+	s := New(":0", rec)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://www.instagram.com/", nil)
+	req.RemoteAddr = "192.168.1.50:54321"
+
+	s.handleHTTP(w, req, "192.168.1.50")
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, atteso 403", w.Code)
+	}
+	if rec.trafficCount() != 1 {
+		t.Fatalf("trafficCount = %d, atteso 1", rec.trafficCount())
+	}
+	if !rec.traffic[0].Blocked {
+		t.Errorf("traffic[0].Blocked = false, atteso true")
 	}
 }

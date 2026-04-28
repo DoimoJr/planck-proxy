@@ -68,14 +68,15 @@ func (s *stubRecorder) trafficCount() int {
 }
 
 // TestGetClientIP copre i formati di RemoteAddr che vediamo in pratica:
-// IPv4 con porta, IPv6 mapped, IPv6 puro, fallback senza porta.
+// IPv4 con porta, IPv6 mapped (formato canonico Go con brackets),
+// IPv6 puro, fallback senza porta.
 func TestGetClientIP(t *testing.T) {
 	casi := map[string]string{
-		"192.168.1.50:54321":       "192.168.1.50",
-		"127.0.0.1:9999":           "127.0.0.1",
-		"::ffff:192.168.1.50:1234": "192.168.1.50",
-		"[::1]:8080":               "::1",
-		"hostonly":                 "hostonly",
+		"192.168.1.50:54321":         "192.168.1.50",
+		"127.0.0.1:9999":             "127.0.0.1",
+		"[::ffff:192.168.1.50]:1234": "192.168.1.50", // canonico per IPv4-mapped
+		"[::1]:8080":                 "::1",
+		"hostonly":                   "hostonly",
 	}
 	for in, atteso := range casi {
 		if got := getClientIP(in); got != atteso {

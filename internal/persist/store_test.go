@@ -156,10 +156,27 @@ func TestPresetCRUD(t *testing.T) {
 }
 
 func TestPresetNomeInvalido(t *testing.T) {
+	// Nome che dopo sanitizzazione e' vuoto (solo caratteri non ammessi)
+	// → ErrNomeInvalido.
 	s := tempStore(t)
-	err := s.SavePreset(PresetFile{Nome: "../../etc/passwd"})
+	err := s.SavePreset(PresetFile{Nome: "../@/"})
 	if err != ErrNomeInvalido {
 		t.Errorf("err = %v, atteso ErrNomeInvalido", err)
+	}
+}
+
+func TestPresetNomeStrappo(t *testing.T) {
+	// Nome con caratteri non ammessi mischiati a validi: i caratteri
+	// invalidi vengono strippati, il resto viene salvato (path traversal
+	// non possibile perche' "/" e "." sono droppati). Comportamento v1.
+	s := tempStore(t)
+	if err := s.SavePreset(PresetFile{Nome: "../etc/passwd"}); err != nil {
+		t.Errorf("save: %v", err)
+	}
+	// "../etc/passwd" -> "etcpasswd" dopo sanitizzazione
+	lista, _ := s.ListaPresets()
+	if len(lista) != 1 || lista[0] != "etcpasswd" {
+		t.Errorf("lista = %v, atteso [etcpasswd]", lista)
 	}
 }
 

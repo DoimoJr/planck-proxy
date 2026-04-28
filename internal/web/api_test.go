@@ -247,45 +247,44 @@ func TestSettingsUpdateMixed(t *testing.T) {
 }
 
 func TestStudentCRUD(t *testing.T) {
-	api, _ := newTestAPI()
+	api, s := newTestAPI()
+
+	// Helper: legge la mappa studenti correntemente in state via snapshot.
+	// Evita di passare per /api/config + json.Unmarshal (che farebbe merge
+	// in mappa preesistente, comportamento standard di encoding/json).
+	studenti := func() map[string]string {
+		return s.ConfigSnapshotData().Studenti
+	}
 
 	// Add
 	post(api, "/api/students/set", map[string]any{"ip": "192.168.1.50", "nome": "Mario"}, api.handleStudentSet)
 	post(api, "/api/students/set", map[string]any{"ip": "192.168.1.51", "nome": "Luca"}, api.handleStudentSet)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	api.handleConfig(rec, req)
-	var cfg state.ConfigSnapshot
-	json.Unmarshal(rec.Body.Bytes(), &cfg)
-	if cfg.Studenti["192.168.1.50"] != "Mario" || cfg.Studenti["192.168.1.51"] != "Luca" {
-		t.Errorf("studenti dopo SET: %+v", cfg.Studenti)
+	if got := studenti(); got["192.168.1.50"] != "Mario" || got["192.168.1.51"] != "Luca" {
+		t.Errorf("studenti dopo SET: %+v", got)
 	}
 
 	// Delete
 	post(api, "/api/students/delete", map[string]any{"ip": "192.168.1.50"}, api.handleStudentDelete)
-	rec = httptest.NewRecorder()
-	api.handleConfig(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-	json.Unmarshal(rec.Body.Bytes(), &cfg)
-	if _, ok := cfg.Studenti["192.168.1.50"]; ok {
-		t.Errorf("dopo delete, Mario ancora presente")
+	if _, ok := studenti()["192.168.1.50"]; ok {
+		t.Errorf("dopo delete, Mario ancora presente: %+v", studenti())
 	}
 
 	// Clear
 	post(api, "/api/students/clear", nil, api.handleStudentClear)
-	rec = httptest.NewRecorder()
-	api.handleConfig(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-	json.Unmarshal(rec.Body.Bytes(), &cfg)
-	if len(cfg.Studenti) != 0 {
-		t.Errorf("dopo clear, studenti = %d, atteso 0", len(cfg.Studenti))
+	if got := studenti(); len(got) != 0 {
+		t.Errorf("dopo clear, studenti = %d, atteso 0: %+v", len(got), got)
 	}
 }
 
-func TestNotImplementedStub(t *testing.T) {
+func TestPresetSaveBasic(t *testing.T) {
+	// In Phase 1.6 lo stub 501 e' stato sostituito da un handler reale.
+	// Con lo state default (NoOpStore), Save ritorna ok ma non scrive
+	// nulla a disco — verifichiamo solo che la chiamata venga accettata.
 	api, _ := newTestAPI()
-	rec := post(api, "/api/preset/save", map[string]any{"nome": "x"}, api.handleNotImplemented)
-	if rec.Code != http.StatusNotImplemented {
-		t.Errorf("status = %d, atteso 501", rec.Code)
+	rec := post(api, "/api/preset/save", map[string]any{"nome": "test"}, api.handlePresetSave)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, atteso 200 (NoOp store accetta), body=%s", rec.Code, rec.Body.String())
 	}
 }
 

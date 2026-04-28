@@ -1,6 +1,16 @@
-# Binario Node.js bundled (91 MB). L'utente lo scarica separatamente (vedi README).
+# Binario Node.js bundled (91 MB, solo v1). L'utente lo scarica separatamente (vedi README).
 node.exe
 *.exe
+
+# Binari Go (planck su Linux/macOS — niente estensione)
+/planck
+/planck-darwin
+/planck-linux
+
+# Artefatti test Go
+*.test
+*.out
+coverage.txt
 
 # Stato runtime (rigenerato ad ogni avvio)
 _traffico_log.txt

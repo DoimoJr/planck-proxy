@@ -1,5 +1,9 @@
 # Planck Proxy
 
+> **Stato dei branch**:
+> - `main` — Planck v1 (Node.js), funzionante e testato in produzione. Quanto descritto sotto si riferisce alla v1.
+> - `v2-go` — rewrite v2 in Go in corso, vedi [`SPEC.md`](./SPEC.md). v2 portera' integrazione Veyon, single binary e SQLite.
+
 Toolkit leggero per la **vigilanza durante le verifiche in aula di informatica**. Il PC del docente fa da proxy HTTP/HTTPS per tutti i PC degli studenti: una dashboard web mostra in tempo reale chi visita cosa, segnala eventuali domini AI, permette di bloccare siti al volo e archivia le sessioni.
 
 **Pensato per rete LAN di fiducia**, non è una soluzione di sicurezza enterprise: rileva e disincentiva, non è impossibile da aggirare (vedi [Limiti strutturali](#limiti-strutturali)).

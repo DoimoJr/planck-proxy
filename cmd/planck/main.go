@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/DoimoJr/planck-proxy/internal/classify"
 )
 
 const Versione = "2.0.0-phase0"
@@ -53,6 +55,7 @@ successive.</p>
 <ul>
 <li><code>GET /</code> &mdash; questa pagina</li>
 <li><code>GET /api/version</code> &mdash; versione corrente in JSON</li>
+<li><code>GET /api/classifica?dominio=X</code> &mdash; classifica un dominio (smoke test, sara' rimosso in 1.4)</li>
 </ul>
 </body>
 </html>`
@@ -70,7 +73,23 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 // versionHandler espone la versione del binario in JSON.
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"0"}`, Versione)
+	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1"}`, Versione)
+}
+
+// classificaHandler espone la classificazione di un dominio passato come
+// query param. Smoke test integrato per verificare che il package classify
+// funzioni end-to-end (sara' rimosso in Phase 1.4 quando l'API completa
+// sara' in piedi).
+func classificaHandler(w http.ResponseWriter, r *http.Request) {
+	dominio := r.URL.Query().Get("dominio")
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	if dominio == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"ok":false,"error":"parametro 'dominio' richiesto"}`)
+		return
+	}
+	tipo := classify.Classifica(dominio)
+	fmt.Fprintf(w, `{"ok":true,"dominio":%q,"tipo":%q}`, dominio, tipo)
 }
 
 // envOrDefault legge una env var o ritorna il default fornito.
@@ -87,6 +106,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", indexHandler)
 	mux.HandleFunc("/api/version", versionHandler)
+	mux.HandleFunc("/api/classifica", classificaHandler)
 
 	log.Printf("Planck Proxy v%s", Versione)
 	log.Printf("Web: http://localhost:%s", webPort)

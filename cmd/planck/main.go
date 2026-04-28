@@ -2,11 +2,10 @@
 //
 // Avvia in parallelo:
 //   - il proxy HTTP/HTTPS (default :9090) che instrada il traffico studenti
-//   - il web server (default :9999) che serve UI + API REST
+//   - il web server (default :9999) che serve UI + API REST + SSE
 //
-// In Phase 1.2 il proxy fa solo forwarding + watchdog (niente blocchi,
-// niente persistenza, niente broadcast SSE). Lo state condiviso tra i due
-// server arrivera' in Phase 1.3.
+// Wiring: broker (SSE) -> state (mutazioni e snapshot) -> proxy (eventi)
+//                                                     -> api (handler GET)
 package main
 
 import (
@@ -16,59 +15,65 @@ import (
 	"os"
 	"sync"
 
-	"github.com/DoimoJr/planck-proxy/internal/classify"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/web"
 )
 
-const Versione = "2.0.0-phase1"
+const (
+	Versione = "2.0.0-phase1"
+	Fase     = "1.4"
+)
 
 const indexHTML = `<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Planck Proxy v2 — Phase 1</title>
+<title>Planck Proxy v2 — Phase 1.4</title>
 <style>
-  body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; max-width: 720px; margin: 0 auto; background: #1a1d23; color: #e0e0e0; line-height: 1.6; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; max-width: 760px; margin: 0 auto; background: #1a1d23; color: #e0e0e0; line-height: 1.6; }
   h1 { color: #b77dd4; margin-bottom: 8px; }
   .tag { display: inline-block; background: #252a33; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; color: #888; }
   code { background: #252a33; padding: 2px 6px; border-radius: 3px; font-family: Consolas, monospace; }
+  pre { background: #252a33; padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
   .status { color: #27ae60; font-weight: 600; }
   ul { padding-left: 20px; }
-  a { color: #b77dd4; }
 </style>
 </head>
 <body>
 <h1>Planck Proxy v2</h1>
-<p class="tag">Phase 1.3 — state condiviso + SSE</p>
+<p class="tag">Phase 1.4 — API GET (read-only)</p>
 
 <p class="status">Backend Go in ascolto.</p>
 
-<p>Proxy HTTP/HTTPS attivo, state condiviso in piedi, broadcast SSE su
-<code>/api/stream</code>. Le API REST complete arrivano in 1.4, la UI
-completa in 1.7.</p>
-
-<p>Per testare lo stream SSE:</p>
-<pre>curl -N http://localhost:9999/api/stream</pre>
-<p>Mentre lo stream e' aperto, ogni richiesta proxata produce un messaggio
-<code>traffic</code>; ogni ping <code>/_alive</code> produce un messaggio
-<code>alive</code>.</p>
+<p>Proxy HTTP/HTTPS attivo, state condiviso, broker SSE su <code>/api/stream</code>,
+API GET di lettura disponibili. Le mutazioni (POST) arrivano in 1.5,
+la persistenza in 1.6, la UI completa in 1.7.</p>
 
 <h3>Endpoint web (porta 9999)</h3>
 <ul>
-<li><code>GET /</code> &mdash; questa pagina</li>
-<li><code>GET /api/version</code> &mdash; versione corrente in JSON</li>
-<li><code>GET /api/classifica?dominio=X</code> &mdash; classifica un dominio (smoke test, sara' rimosso in 1.4)</li>
-<li><code>GET /api/stream</code> &mdash; SSE: messaggi <code>traffic</code> e <code>alive</code> in tempo reale</li>
+<li><code>GET /api/version</code> — metadata binario</li>
+<li><code>GET /api/config</code> — boot data: titolo, modo, liste AI/sistema, mappa studenti</li>
+<li><code>GET /api/history</code> — snapshot completo per idratazione UI</li>
+<li><code>GET /api/session/status</code> — stato sessione + durata calcolata</li>
+<li><code>GET /api/settings</code> — config completa (password mascherata)</li>
+<li><code>GET /api/sessioni</code> — archivio sessioni (vuoto in 1.4)</li>
+<li><code>GET /api/presets</code> — preset blocklist (vuoto in 1.4)</li>
+<li><code>GET /api/classi</code> — combo classe+lab (vuoto in 1.4)</li>
+<li><code>GET /api/stream</code> — SSE: <code>traffic</code> + <code>alive</code> in tempo reale</li>
 </ul>
 
 <h3>Proxy (porta 9090)</h3>
 <ul>
-<li><code>GET http://example.com/...</code> &mdash; HTTP forwarding (URL assoluto)</li>
-<li><code>CONNECT example.com:443</code> &mdash; HTTPS tunneling</li>
-<li><code>GET /_alive</code> (diretto al proxy) &mdash; watchdog keepalive</li>
+<li>HTTP forwarding via URL assoluto + HTTPS via CONNECT</li>
+<li><code>GET /_alive</code> watchdog keepalive</li>
 </ul>
+
+<h3>Smoke test</h3>
+<pre>curl http://localhost:9999/api/config | head -c 500
+curl http://localhost:9999/api/history
+curl -N http://localhost:9999/api/stream &amp;
+curl -x http://localhost:9090 http://example.com/</pre>
 </body>
 </html>`
 
@@ -80,26 +85,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 	fmt.Fprint(w, indexHTML)
-}
-
-// versionHandler espone la versione del binario in JSON.
-func versionHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1.3"}`, Versione)
-}
-
-// classificaHandler espone la classificazione di un dominio passato come
-// query param. Smoke test integrato (verra' rimosso in Phase 1.4).
-func classificaHandler(w http.ResponseWriter, r *http.Request) {
-	dominio := r.URL.Query().Get("dominio")
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	if dominio == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"ok":false,"error":"parametro 'dominio' richiesto"}`)
-		return
-	}
-	tipo := classify.Classifica(dominio)
-	fmt.Fprintf(w, `{"ok":true,"dominio":%q,"tipo":%q}`, dominio, tipo)
 }
 
 // envOrDefault legge una env var o ritorna il default fornito.
@@ -114,24 +99,26 @@ func main() {
 	webPort := envOrDefault("PLANCK_WEB_PORT", "9999")
 	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 
-	// Wiring: broker (SSE) → state (registra eventi + broadcasta) → proxy (chiama state)
+	// Wiring: broker (SSE) → state (mutazioni e snapshot)
 	broker := web.NewBroker()
 	st := state.New(broker)
+
+	// Proxy: registra eventi sullo state
 	proxySrv := proxy.New(":"+proxyPort, st)
 
+	// API HTTP: handler GET registrati su mux + /api/stream del broker
+	api := web.NewAPI(st, broker, Versione, Fase)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", indexHandler)
-	mux.HandleFunc("/api/version", versionHandler)
-	mux.HandleFunc("/api/classifica", classificaHandler)
-	mux.HandleFunc("/api/stream", broker.HandleStream)
+	api.Register(mux)
 
-	log.Printf("Planck Proxy v%s", Versione)
+	log.Printf("Planck Proxy v%s (fase %s)", Versione, Fase)
 	log.Printf("Web:   http://localhost:%s", webPort)
 	log.Printf("Proxy: http://localhost:%s", proxyPort)
 	log.Printf("In ascolto...")
 
-	// Lancio i due server in parallelo. Se uno dei due fallisce all'avvio
-	// (es. porta occupata), l'intero processo termina.
+	// Lancio i due server in parallelo. Se uno fallisce (es. porta occupata),
+	// l'intero processo termina via log.Fatalf.
 	var wg sync.WaitGroup
 	wg.Add(2)
 

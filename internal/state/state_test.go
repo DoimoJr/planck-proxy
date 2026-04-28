@@ -97,6 +97,78 @@ func TestSnapshotIndipendente(t *testing.T) {
 	}
 }
 
+func TestConfigSnapshot(t *testing.T) {
+	b := &mockBroker{}
+	s := New(b)
+
+	cfg := s.ConfigSnapshotData()
+	if cfg.Modo != "blocklist" {
+		t.Errorf("modo default = %q, atteso blocklist", cfg.Modo)
+	}
+	if cfg.InattivitaSogliaSec != 180 {
+		t.Errorf("inattivitaSogliaSec default = %d, atteso 180", cfg.InattivitaSogliaSec)
+	}
+	if len(cfg.DominiAI) < 50 {
+		t.Errorf("DominiAI nel snapshot = %d, atteso >= 50", len(cfg.DominiAI))
+	}
+	if cfg.Studenti == nil {
+		t.Errorf("Studenti deve essere mappa vuota, non nil")
+	}
+}
+
+func TestHistorySnapshot(t *testing.T) {
+	b := &mockBroker{}
+	s := New(b)
+	s.RegistraTraffic("ip1", "GET", "x.com", false, classify.TipoUtente)
+	s.RegistraAlive("ip2")
+
+	h := s.HistorySnapshotData()
+	if len(h.Entries) != 1 {
+		t.Errorf("Entries len = %d, atteso 1", len(h.Entries))
+	}
+	if len(h.Alive) != 1 || h.Alive["ip2"] == 0 {
+		t.Errorf("Alive snapshot non corretta: %+v", h.Alive)
+	}
+	if h.Bloccati == nil {
+		t.Errorf("Bloccati deve essere slice vuoto, non nil")
+	}
+}
+
+func TestSettingsSnapshotPasswordMasked(t *testing.T) {
+	b := &mockBroker{}
+	s := New(b)
+	// Forzo manualmente un hash per simulare auth con password impostata.
+	s.authPasswordHash = "$2a$10$some-fake-bcrypt-hash"
+
+	settings := s.SettingsSnapshotData()
+	if settings.Web.Auth.Password != "" {
+		t.Errorf("Password leakata: %q (atteso stringa vuota)", settings.Web.Auth.Password)
+	}
+	if !settings.Web.Auth.PasswordSet {
+		t.Errorf("PasswordSet = false ma hash e' impostato")
+	}
+}
+
+func TestSessionStatusDurata(t *testing.T) {
+	b := &mockBroker{}
+	s := New(b)
+
+	// Sessione mai avviata -> durata 0
+	if got := s.SessionStatusData(); got.DurataSec != 0 {
+		t.Errorf("durata sessione mai avviata = %d, atteso 0", got.DurataSec)
+	}
+
+	// Sessione "ferma" con inizio + fine impostati a mano
+	s.sessioneInizio = "2026-04-22T10:00:00Z"
+	s.sessioneFineISO = "2026-04-22T11:30:00Z"
+	s.sessioneAttiva = false
+
+	got := s.SessionStatusData()
+	if got.DurataSec != 5400 { // 1h 30m
+		t.Errorf("durata = %d, atteso 5400 (1h30m)", got.DurataSec)
+	}
+}
+
 func TestConcorrenza(t *testing.T) {
 	// 100 goroutine x 100 registrazioni: verifica che il count totale sia
 	// coerente e nessuna race rompa il ring buffer.

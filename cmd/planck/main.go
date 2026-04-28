@@ -12,9 +12,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
@@ -24,8 +26,8 @@ import (
 )
 
 const (
-	Versione = "2.0.0-alpha.1"
-	Fase     = "alpha.1"
+	Versione = "2.0.0-alpha.2"
+	Fase     = "alpha.2"
 )
 
 // dataDirDefault risolve la directory dati: env var PLANCK_DATA_DIR
@@ -46,6 +48,63 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// openBrowserAppMode lancia il browser in modalita' "app" (finestra senza
+// barra URL, senza tab, senza menu) puntato sull'URL fornito. Comportamento
+// "single-page-app desktop look" per Planck.
+//
+// Su Windows preferisce Edge (sempre installato su 10/11), poi Chrome,
+// poi fallback alla shell `start <url>` che apre il default browser
+// in modalita' tab normale.
+//
+// Skipped se PLANCK_NO_BROWSER=1 (utile per server headless).
+// Skipped silenziosamente se il sub-process fallisce (Planck continua).
+func openBrowserAppMode(url string) {
+	if os.Getenv("PLANCK_NO_BROWSER") == "1" {
+		return
+	}
+
+	// Candidati Edge (preferito perche' presente su ogni Win10/11)
+	edgePaths := []string{
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+	}
+	if p, err := exec.LookPath("msedge.exe"); err == nil {
+		edgePaths = append([]string{p}, edgePaths...)
+	}
+	for _, p := range edgePaths {
+		if _, err := os.Stat(p); err == nil {
+			if err := exec.Command(p, "--app="+url).Start(); err == nil {
+				log.Printf("Aperta finestra Edge in modalita' app su %s", url)
+				return
+			}
+		}
+	}
+
+	// Candidati Chrome
+	chromePaths := []string{
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+	}
+	if p, err := exec.LookPath("chrome.exe"); err == nil {
+		chromePaths = append([]string{p}, chromePaths...)
+	}
+	for _, p := range chromePaths {
+		if _, err := os.Stat(p); err == nil {
+			if err := exec.Command(p, "--app="+url).Start(); err == nil {
+				log.Printf("Aperta finestra Chrome in modalita' app su %s", url)
+				return
+			}
+		}
+	}
+
+	// Fallback: default browser via cmd start (apre come tab normale)
+	if err := exec.Command("cmd", "/c", "start", "", url).Start(); err == nil {
+		log.Printf("Aperto default browser su %s", url)
+		return
+	}
+	log.Printf("Nessun browser disponibile per aprire %s automaticamente", url)
 }
 
 func main() {
@@ -104,6 +163,13 @@ func main() {
 	log.Printf("Proxy: http://localhost:%s", proxyPort)
 	log.Printf("Data:  %s", dataDir)
 	log.Printf("In ascolto...")
+
+	// Apri il browser (Edge in modalita' app) dopo un breve delay,
+	// per dare tempo ai server HTTP di completare il bind.
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		openBrowserAppMode("http://localhost:" + webPort)
+	}()
 
 	// Lancio i due server in parallelo. Se uno fallisce (es. porta occupata),
 	// l'intero processo termina via log.Fatalf.

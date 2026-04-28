@@ -5,6 +5,28 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.2] — 2026-04-29
+
+Patch QoL su alpha.1 — feel desktop app + shutdown dalla UI.
+
+### Aggiunto
+
+- **Auto-launch browser in modalita' app** al boot: Planck cerca Edge
+  (poi Chrome) e lo apre con `--app=http://localhost:9999` su una finestra
+  senza barra URL, senza tab, senza menu. Il risultato e' una "vera"
+  finestra app desktop, non un tab del browser. Override:
+  `PLANCK_NO_BROWSER=1` per server headless.
+- **Endpoint `POST /api/shutdown`**: spegne il binario via os.Exit dopo
+  aver risposto al client (graceful HTTP, 200ms delay per garantire la
+  risposta).
+- **Bottone ⏻ in topbar** (UI): chiede conferma e chiama `/api/shutdown`,
+  poi mostra un overlay "Planck spento". Permette di chiudere il server
+  senza dover andare in console.
+
+### Cambiato
+
+- Niente: alpha.1 resta compatibile, nessuna API rimossa.
+
 ## [v2.0.0-alpha.1] — 2026-04-29
 
 Primo release del rewrite v2 in Go. Pensato per uso interno scuola e per

@@ -425,4 +425,27 @@ export async function eliminaSessioneArchiviata(filename) {
     }
 }
 
+// ========================================================================
+// Shutdown server (Phase 1.7+)
+// ========================================================================
+
+/**
+ * Spegne il server Planck dopo conferma. La risposta HTTP arriva prima
+ * che il processo esca; quando il binario muore la finestra app perde
+ * la connessione (vedi banner "OFF" della stat row).
+ */
+export async function spegniServer() {
+    if (!confirm('Spegnere il server Planck?\n\nLa registrazione corrente verra\' interrotta. Per riavviare, doppio click su planck.exe.')) return;
+    try {
+        await fetch('/api/shutdown', { method: 'POST' });
+    } catch {
+        // La fetch puo' fallire se il server muore prima di risponderci. OK.
+    }
+    // Mostra un overlay di "spento" per chiarire lo stato all'utente.
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);color:#e0e0e0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui;z-index:99999';
+    overlay.innerHTML = '<h1 style="color:#b77dd4">Planck spento.</h1><p style="opacity:0.7">Puoi chiudere questa finestra.</p>';
+    document.body.appendChild(overlay);
+}
+
 export { aggiornaInputDeadline };

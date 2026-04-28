@@ -101,6 +101,9 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/scripts/proxy_on.bat", auth(a.handleScriptProxyOn))
 	mux.HandleFunc("/api/scripts/proxy_off.bat", auth(a.handleScriptProxyOff))
 
+	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
+	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
+
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
 	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))
@@ -474,6 +477,31 @@ func (a *API) handleStudentClear(w http.ResponseWriter, r *http.Request) {
 	}
 	a.state.ClearStudents()
 	writeOK(w, nil)
+}
+
+// ============================================================
+// Shutdown (Phase 1.7+)
+// ============================================================
+
+// handleShutdown spegne il binario via os.Exit(0) dopo aver risposto al
+// client. Risponde subito, fa exit dopo 200ms in goroutine cosi' la
+// risposta HTTP arriva al browser (che chiude la finestra app
+// automaticamente quando perde la connessione).
+//
+// Note: os.Exit non chiama defers / hook. Va bene per Phase 1: il
+// principale "cleanup" e' la rotazione del NDJSON al successivo boot
+// via RecoverNDJSONIfAny. Per Phase 8 (release) si potra' aggiungere
+// un graceful shutdown reale.
+func (a *API) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	writeOK(w, nil)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		log.Println("Shutdown via API")
+		os.Exit(0)
+	}()
 }
 
 // ============================================================

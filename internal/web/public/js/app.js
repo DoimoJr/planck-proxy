@@ -121,6 +121,7 @@ document.body.addEventListener('click', (e) => {
         case 'preset-save': actions.salvaPreset(); break;
         case 'darkmode': actions.toggleDarkmode(); break;
         case 'notifiche': actions.toggleNotifiche(); break;
+        case 'spegni-server': actions.spegniServer(); break;
         case 'pausa-toggle': actions.togglePausa(); break;
         case 'clear-deadline': actions.annullaDeadline(); break;
         case 'tab': actions.cambiaTab(el.dataset.tab); break;

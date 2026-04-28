@@ -31,16 +31,26 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/classify"
 )
 
-// Server e' il proxy HTTP/HTTPS in ascolto su una porta.
-type Server struct {
-	addr string
-	srv  *http.Server
+// Recorder e' l'interfaccia che il proxy usa per registrare gli eventi
+// di traffico e watchdog. Tipicamente implementata da *state.State, ma
+// astratta per semplificare i test (vedi server_test.go).
+type Recorder interface {
+	RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo classify.Tipo)
+	RegistraAlive(ip string)
 }
 
-// New costruisce un nuovo proxy server in ascolto su addr (es. ":9090").
+// Server e' il proxy HTTP/HTTPS in ascolto su una porta.
+type Server struct {
+	addr     string
+	srv      *http.Server
+	recorder Recorder
+}
+
+// New costruisce un nuovo proxy server in ascolto su addr (es. ":9090")
+// che registra gli eventi su `recorder`.
 // Il server non viene avviato finche' non si chiama Start().
-func New(addr string) *Server {
-	s := &Server{addr: addr}
+func New(addr string, recorder Recorder) *Server {
+	s := &Server{addr: addr, recorder: recorder}
 	s.srv = &http.Server{
 		Addr:    addr,
 		Handler: http.HandlerFunc(s.handle),
@@ -92,9 +102,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAlive risponde al ping watchdog dello studente.
-// In Phase 1.3 sara' arricchito con aggiornamento aliveMap + broadcast SSE.
+// Aggiorna aliveMap dello state e broadcasta `{type:"alive",...}` via SSE.
 func (s *Server) handleAlive(w http.ResponseWriter, r *http.Request, ip string) {
-	log.Printf("[%s] alive", ip)
+	s.recorder.RegistraAlive(ip)
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Length", "2")
 	w.Header().Set("Connection", "close")
@@ -105,7 +115,8 @@ func (s *Server) handleAlive(w http.ResponseWriter, r *http.Request, ip string) 
 
 // handleHTTP forwarda una richiesta HTTP normale (URL assoluto stile proxy).
 // Costruisce una nuova richiesta verso l'origin con http.Client, copia
-// header e body, ritorna la response al client.
+// header e body, ritorna la response al client. Registra l'evento sullo
+// state (logged + broadcast SSE).
 func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, ip string) {
 	dominio := r.URL.Hostname()
 	if dominio == "" {
@@ -114,7 +125,8 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, ip string) {
 	}
 
 	tipo := classify.Classifica(dominio)
-	log.Printf("%s [%s] %s %s (%s)", time.Now().Format("15:04:05"), ip, r.Method, dominio, tipo)
+	// Phase 1.3: blocked sempre false. I blocchi arriveranno in 1.4.
+	s.recorder.RegistraTraffic(ip, r.Method, dominio, false, tipo)
 
 	// Header pulito: rimuovo gli hop-by-hop "proxy-*"
 	headers := make(http.Header, len(r.Header))
@@ -173,7 +185,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, ip string
 	}
 
 	tipo := classify.Classifica(dominio)
-	log.Printf("%s [%s] HTTPS %s (%s)", time.Now().Format("15:04:05"), ip, dominio, tipo)
+	s.recorder.RegistraTraffic(ip, "HTTPS", dominio, false, tipo)
 
 	target, err := net.DialTimeout("tcp", host, 10*time.Second)
 	if err != nil {

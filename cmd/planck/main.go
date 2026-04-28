@@ -18,6 +18,8 @@ import (
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
+	"github.com/DoimoJr/planck-proxy/internal/state"
+	"github.com/DoimoJr/planck-proxy/internal/web"
 )
 
 const Versione = "2.0.0-phase1"
@@ -39,19 +41,26 @@ const indexHTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Planck Proxy v2</h1>
-<p class="tag">Phase 1.2 — proxy in piedi</p>
+<p class="tag">Phase 1.3 — state condiviso + SSE</p>
 
 <p class="status">Backend Go in ascolto.</p>
 
-<p>Proxy HTTP/HTTPS attivo. La classificazione del traffico viene loggata
-in console: lo state condiviso e il broadcast SSE arriveranno in Phase 1.3.
-La UI completa in Phase 1.7.</p>
+<p>Proxy HTTP/HTTPS attivo, state condiviso in piedi, broadcast SSE su
+<code>/api/stream</code>. Le API REST complete arrivano in 1.4, la UI
+completa in 1.7.</p>
+
+<p>Per testare lo stream SSE:</p>
+<pre>curl -N http://localhost:9999/api/stream</pre>
+<p>Mentre lo stream e' aperto, ogni richiesta proxata produce un messaggio
+<code>traffic</code>; ogni ping <code>/_alive</code> produce un messaggio
+<code>alive</code>.</p>
 
 <h3>Endpoint web (porta 9999)</h3>
 <ul>
 <li><code>GET /</code> &mdash; questa pagina</li>
 <li><code>GET /api/version</code> &mdash; versione corrente in JSON</li>
 <li><code>GET /api/classifica?dominio=X</code> &mdash; classifica un dominio (smoke test, sara' rimosso in 1.4)</li>
+<li><code>GET /api/stream</code> &mdash; SSE: messaggi <code>traffic</code> e <code>alive</code> in tempo reale</li>
 </ul>
 
 <h3>Proxy (porta 9090)</h3>
@@ -76,7 +85,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 // versionHandler espone la versione del binario in JSON.
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1.2"}`, Versione)
+	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1.3"}`, Versione)
 }
 
 // classificaHandler espone la classificazione di un dominio passato come
@@ -105,14 +114,16 @@ func main() {
 	webPort := envOrDefault("PLANCK_WEB_PORT", "9999")
 	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 
-	// Web server
+	// Wiring: broker (SSE) → state (registra eventi + broadcasta) → proxy (chiama state)
+	broker := web.NewBroker()
+	st := state.New(broker)
+	proxySrv := proxy.New(":"+proxyPort, st)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", indexHandler)
 	mux.HandleFunc("/api/version", versionHandler)
 	mux.HandleFunc("/api/classifica", classificaHandler)
-
-	// Proxy server
-	proxySrv := proxy.New(":" + proxyPort)
+	mux.HandleFunc("/api/stream", broker.HandleStream)
 
 	log.Printf("Planck Proxy v%s", Versione)
 	log.Printf("Web:   http://localhost:%s", webPort)

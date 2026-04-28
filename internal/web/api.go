@@ -39,10 +39,24 @@ func NewAPI(s *state.State, b *Broker, version, fase string) *API {
 }
 
 // Register monta tutti gli handler dell'API sul mux fornito.
-// Tutti gli endpoint passano attraverso il middleware RequireAuth.
-// /api/stream e' eccezione: gestito direttamente dal broker.
+// Tutti gli endpoint /api/* passano attraverso il middleware RequireAuth.
+// I file statici della UI (root "/") usano lo stesso middleware: il
+// browser ricevera' un challenge HTTP Basic prima di poter caricare
+// la dashboard se l'auth e' abilitata.
+//
+// /api/stream e' un caso particolare: gestito dal broker, ma sempre
+// dietro auth.
 func (a *API) Register(mux *http.ServeMux) {
 	auth := func(h http.HandlerFunc) http.HandlerFunc { return RequireAuth(a.state, h) }
+
+	// Root catch-all → file statici embeddati (index.html, css, js).
+	// http.FileServer serve "/" come index.html; gli altri path matchano
+	// i file in public/. Il mux instrada qui tutto cio' che non matcha
+	// /api/*.
+	staticH := StaticHandler()
+	mux.Handle("/", auth(func(w http.ResponseWriter, r *http.Request) {
+		staticH.ServeHTTP(w, r)
+	}))
 
 	// Read-only (Phase 1.4)
 	mux.HandleFunc("/api/version", auth(a.handleVersion))

@@ -9,7 +9,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -37,70 +36,6 @@ func dataDirDefault() string {
 		return filepath.Dir(exe)
 	}
 	return "."
-}
-
-const indexHTML = `<!DOCTYPE html>
-<html lang="it">
-<head>
-<meta charset="UTF-8">
-<title>Planck Proxy v2 — Phase 1.6</title>
-<style>
-  body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; max-width: 760px; margin: 0 auto; background: #1a1d23; color: #e0e0e0; line-height: 1.6; }
-  h1 { color: #b77dd4; margin-bottom: 8px; }
-  .tag { display: inline-block; background: #252a33; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; color: #888; }
-  code { background: #252a33; padding: 2px 6px; border-radius: 3px; font-family: Consolas, monospace; }
-  pre { background: #252a33; padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
-  .status { color: #27ae60; font-weight: 600; }
-  ul { padding-left: 20px; }
-</style>
-</head>
-<body>
-<h1>Planck Proxy v2</h1>
-<p class="tag">Phase 1.6 — persistenza file-based + recovery NDJSON</p>
-
-<p class="status">Backend Go in ascolto.</p>
-
-<p>Proxy attivo con applicazione blocchi (403 su domini in blocklist o
-in modo allowlist non-matching, dominiIgnorati passano sempre, pausa
-globale blocca tutto). API REST GET+POST disponibili, auth HTTP Basic
-opzionale (default off; abilitabile via /api/settings/update).
-La persistenza disco arriva in 1.6, la UI completa in 1.7.</p>
-
-<h3>Endpoint web (porta 9999)</h3>
-<ul>
-<li><code>GET /api/version</code> — metadata binario</li>
-<li><code>GET /api/config</code> — boot data: titolo, modo, liste AI/sistema, mappa studenti</li>
-<li><code>GET /api/history</code> — snapshot completo per idratazione UI</li>
-<li><code>GET /api/session/status</code> — stato sessione + durata calcolata</li>
-<li><code>GET /api/settings</code> — config completa (password mascherata)</li>
-<li><code>GET /api/sessioni</code> — archivio sessioni (vuoto in 1.4)</li>
-<li><code>GET /api/presets</code> — preset blocklist (vuoto in 1.4)</li>
-<li><code>GET /api/classi</code> — combo classe+lab (vuoto in 1.4)</li>
-<li><code>GET /api/stream</code> — SSE: <code>traffic</code> + <code>alive</code> in tempo reale</li>
-</ul>
-
-<h3>Proxy (porta 9090)</h3>
-<ul>
-<li>HTTP forwarding via URL assoluto + HTTPS via CONNECT</li>
-<li><code>GET /_alive</code> watchdog keepalive</li>
-</ul>
-
-<h3>Smoke test</h3>
-<pre>curl http://localhost:9999/api/config | head -c 500
-curl http://localhost:9999/api/history
-curl -N http://localhost:9999/api/stream &amp;
-curl -x http://localhost:9090 http://example.com/</pre>
-</body>
-</html>`
-
-// indexHandler serve la pagina HTML di benvenuto.
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-	fmt.Fprint(w, indexHTML)
 }
 
 // envOrDefault legge una env var o ritorna il default fornito.
@@ -145,8 +80,7 @@ func main() {
 	// API HTTP: handler GET registrati su mux + /api/stream del broker
 	api := web.NewAPI(st, broker, Versione, Fase)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", indexHandler)
-	api.Register(mux)
+	api.Register(mux) // monta /api/* + root "/" → static files embeddati
 
 	log.Printf("Planck Proxy v%s (fase %s)", Versione, Fase)
 	log.Printf("Web:   http://localhost:%s", webPort)

@@ -11,11 +11,13 @@
 package state
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
+	"github.com/DoimoJr/planck-proxy/internal/persist"
 )
 
 // Entry rappresenta una richiesta loggata dal proxy.
@@ -68,8 +70,9 @@ var dominiIgnoratiDefault = []string{
 type State struct {
 	mu     sync.RWMutex
 	broker Broker
+	store  *persist.Store // mai nil: e' NoOpStore se persistenza disabilitata
 
-	// --- Config (settabile via /api/settings/update; persistita in 1.6) ---
+	// --- Config (settabile via /api/settings/update; persistita in config.json) ---
 	titolo              string
 	classe              string
 	modo                string // "blocklist" | "allowlist"
@@ -100,13 +103,22 @@ type State struct {
 	deadlineTimer *time.Timer
 }
 
-// New costruisce uno State con default sensati.
+// New costruisce uno State con default sensati e store NoOp (in-memory).
+// Per persistenza usa NewWithStore.
 func New(broker Broker) *State {
+	return NewWithStore(broker, persist.NoOpStore())
+}
+
+// NewWithStore costruisce uno State con un Store di persistenza.
+// I dati vengono caricati dal disco al boot (config, studenti, bloccati);
+// se i file non esistono si parte coi default.
+func NewWithStore(broker Broker, store *persist.Store) *State {
 	ignorati := make([]string, len(dominiIgnoratiDefault))
 	copy(ignorati, dominiIgnoratiDefault)
 
-	return &State{
+	s := &State{
 		broker:              broker,
+		store:               store,
 		titolo:              "Planck Proxy",
 		classe:              "",
 		modo:                "blocklist",
@@ -122,7 +134,83 @@ func New(broker Broker) *State {
 		storia:              make([]Entry, 0, 256),
 		aliveMap:            map[string]int64{},
 	}
+
+	// Carica config persistita (se esiste)
+	if cfg, exists, err := store.LoadConfig(); err == nil && exists {
+		if cfg.Titolo != "" {
+			s.titolo = cfg.Titolo
+		}
+		s.classe = cfg.Classe
+		if cfg.Modo == "blocklist" || cfg.Modo == "allowlist" {
+			s.modo = cfg.Modo
+		}
+		if cfg.InattivitaSogliaSec > 0 {
+			s.inattivitaSogliaSec = cfg.InattivitaSogliaSec
+		}
+		if cfg.ProxyPort > 0 {
+			s.proxyPort = cfg.ProxyPort
+		}
+		if cfg.WebPort > 0 {
+			s.webPort = cfg.WebPort
+		}
+		s.authEnabled = cfg.AuthEnabled
+		if cfg.AuthUser != "" {
+			s.authUser = cfg.AuthUser
+		}
+		s.authPasswordHash = cfg.AuthPasswordHash
+		if len(cfg.DominiIgnorati) > 0 {
+			s.dominiIgnorati = cfg.DominiIgnorati
+		}
+	} else if err != nil {
+		log.Printf("state: errore lettura config: %v", err)
+	}
+
+	// Carica mappa studenti
+	if stud, err := store.LoadStudenti(); err == nil {
+		s.studenti = stud
+	} else {
+		log.Printf("state: errore lettura studenti: %v", err)
+	}
+
+	// Carica blocklist
+	if blocs, err := store.LoadBloccati(); err == nil {
+		for _, d := range blocs {
+			s.bloccati[d] = struct{}{}
+		}
+	} else {
+		log.Printf("state: errore lettura blocklist: %v", err)
+	}
+
+	return s
 }
+
+// saveConfigLocked serializza i campi config correnti su disco.
+// **Deve essere chiamato col lock gia' tenuto** (uso da UpdateSettings,
+// AddIgnorato, ecc.).
+func (s *State) saveConfigLocked() {
+	if s.store.Disabled() {
+		return
+	}
+	cfg := persist.ConfigFile{
+		Titolo:              s.titolo,
+		Classe:              s.classe,
+		Modo:                s.modo,
+		InattivitaSogliaSec: s.inattivitaSogliaSec,
+		ProxyPort:           s.proxyPort,
+		WebPort:             s.webPort,
+		AuthEnabled:         s.authEnabled,
+		AuthUser:            s.authUser,
+		AuthPasswordHash:    s.authPasswordHash,
+		DominiIgnorati:      append([]string{}, s.dominiIgnorati...),
+	}
+	if err := s.store.SaveConfig(cfg); err != nil {
+		log.Printf("state: errore save config: %v", err)
+	}
+}
+
+// Store esposto per i handler API che hanno bisogno di operare direttamente
+// sul filesystem (es. CRUD presets, archive listing).
+func (s *State) Store() *persist.Store { return s.store }
 
 // ============================================================
 // Mutazioni runtime di base (chiamate dal proxy)
@@ -147,6 +235,7 @@ func (s *State) RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo c
 	if len(s.storia) > MaxStoria {
 		s.storia = append(s.storia[:0:0], s.storia[len(s.storia)-MaxStoria:]...)
 	}
+	persistTraffic := s.sessioneAttiva
 	s.mu.Unlock()
 
 	bm := ""
@@ -154,6 +243,17 @@ func (s *State) RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo c
 		bm = " [BLOCKED]"
 	}
 	log.Printf("%s [%s] %s %s (%s)%s", now.Format("15:04:05"), ip, metodo, dominio, tipo, bm)
+
+	// Persistenza: se sessione attiva, append entry al NDJSON corrente.
+	// Solo se tipo != sistema (vedi SPEC §3.2: il rumore non finisce
+	// nel session log per non gonfiare).
+	if persistTraffic && tipo != classify.TipoSistema {
+		if data, err := json.Marshal(entry); err == nil {
+			if err := s.store.NDJSONAppend(data); err != nil {
+				log.Printf("state: errore append NDJSON: %v", err)
+			}
+		}
+	}
 
 	s.broker.Broadcast(struct {
 		Type  string `json:"type"`

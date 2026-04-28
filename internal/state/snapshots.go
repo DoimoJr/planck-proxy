@@ -26,14 +26,14 @@ type ConfigSnapshot struct {
 }
 
 // ConfigSnapshotData ritorna il payload per /api/config.
+// In Phase 1.6 legge presets e classi dal Store (su disco).
 func (s *State) ConfigSnapshotData() ConfigSnapshot {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	studCopy := make(map[string]string, len(s.studenti))
 	for k, v := range s.studenti {
 		studCopy[k] = v
 	}
-	return ConfigSnapshot{
+	snap := ConfigSnapshot{
 		Titolo:              s.titolo,
 		Classe:              s.classe,
 		Modo:                s.modo,
@@ -41,9 +41,23 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 		DominiAI:            classify.DominiAI,
 		PatternSistema:      classify.PatternSistema,
 		Studenti:            studCopy,
-		Presets:             []string{}, // populated in 1.6
-		Classi:              []Combo{},  // populated in 1.6
+		Presets:             []string{},
+		Classi:              []Combo{},
 	}
+	s.mu.RUnlock()
+
+	// Letture disco fuori dal lock (le file ops sono lente).
+	if presets, err := s.store.ListaPresets(); err == nil {
+		snap.Presets = presets
+	}
+	if combo, err := s.store.ListaClassi(); err == nil {
+		out := make([]Combo, len(combo))
+		for i, c := range combo {
+			out[i] = Combo{Classe: c.Classe, Lab: c.Lab, File: c.File}
+		}
+		snap.Classi = out
+	}
+	return snap
 }
 
 // HistorySnapshot e' il payload di /api/history per l'idratazione UI.

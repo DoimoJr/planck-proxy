@@ -18,7 +18,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 )
 
@@ -77,15 +80,16 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/students/delete", auth(a.handleStudentDelete))
 	mux.HandleFunc("/api/students/clear", auth(a.handleStudentClear))
 
-	// Stub (501 Not Implemented) per endpoint che richiedono persistenza disco.
-	// Saranno implementati in Phase 1.6.
-	for _, path := range []string{
-		"/api/preset/save", "/api/preset/load", "/api/preset/delete",
-		"/api/classi/save", "/api/classi/load", "/api/classi/delete",
-		"/api/sessioni/archivia",
-	} {
-		mux.HandleFunc(path, auth(a.handleNotImplemented))
-	}
+	// Persistence-backed (Phase 1.6)
+	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
+	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))
+	mux.HandleFunc("/api/preset/delete", auth(a.handlePresetDelete))
+	mux.HandleFunc("/api/classi/save", auth(a.handleClassiSave))
+	mux.HandleFunc("/api/classi/load", auth(a.handleClassiLoad))
+	mux.HandleFunc("/api/classi/delete", auth(a.handleClassiDelete))
+	mux.HandleFunc("/api/sessioni/archivia", auth(a.handleSessioniArchivia))
+	mux.HandleFunc("/api/sessioni/load", auth(a.handleSessioniLoad))
+	mux.HandleFunc("/api/sessioni/delete", auth(a.handleSessioniDelete))
 }
 
 // ============================================================
@@ -183,21 +187,36 @@ func (a *API) handleSessioni(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessioni": []string{}})
+	lista, err := a.state.Store().ListaSessioni()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Errore lettura archivio: "+err.Error(), "STORE_ERROR")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessioni": lista})
 }
 
 func (a *API) handlePresets(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"presets": []string{}})
+	lista, err := a.state.Store().ListaPresets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Errore lettura presets: "+err.Error(), "STORE_ERROR")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": lista})
 }
 
 func (a *API) handleClassi(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"classi": []state.Combo{}})
+	combo, err := a.state.Store().ListaClassi()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Errore lettura classi: "+err.Error(), "STORE_ERROR")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"classi": combo})
 }
 
 // ============================================================
@@ -437,11 +456,218 @@ func (a *API) handleStudentClear(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
-// Stub handler per endpoint persistence-required (Phase 1.6)
+// POST handlers — Preset (Phase 1.6, persistence-backed)
 // ============================================================
 
-func (a *API) handleNotImplemented(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented,
-		"Endpoint disponibile da Phase 1.6 (richiede persistenza disco)",
-		"NOT_IMPLEMENTED")
+type presetSaveBody struct {
+	Nome        string `json:"nome"`
+	Descrizione string `json:"descrizione"`
+}
+
+type nomeBody struct {
+	Nome string `json:"nome"`
+}
+
+func (a *API) handlePresetSave(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body presetSaveBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Nome == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {nome}", "BAD_BODY")
+		return
+	}
+	// Snapshot della blocklist corrente
+	bloccatiSnap := a.state.HistorySnapshotData().Bloccati
+	p := persist.PresetFile{
+		Nome:        body.Nome,
+		Descrizione: body.Descrizione,
+		Domini:      bloccatiSnap,
+		CreatedAt:   time.Now().UnixMilli(),
+	}
+	if err := a.state.Store().SavePreset(p); err != nil {
+		if err == persist.ErrNomeInvalido {
+			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	writeOK(w, map[string]any{"nome": body.Nome})
+}
+
+func (a *API) handlePresetLoad(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body nomeBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Nome == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {nome}", "BAD_BODY")
+		return
+	}
+	p, err := a.state.Store().LoadPreset(body.Nome)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+		return
+	}
+	// Sostituisce la blocklist corrente con quella del preset.
+	a.state.ClearBlocklist()
+	for _, d := range p.Domini {
+		a.state.Block(d)
+	}
+	writeOK(w, map[string]any{"caricati": len(p.Domini)})
+}
+
+func (a *API) handlePresetDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body nomeBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Nome == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {nome}", "BAD_BODY")
+		return
+	}
+	if err := a.state.Store().DeletePreset(body.Nome); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	writeOK(w, nil)
+}
+
+// ============================================================
+// POST handlers — Classi (Phase 1.6, persistence-backed)
+// ============================================================
+
+type classeBody struct {
+	Classe string `json:"classe"`
+	Lab    string `json:"lab"`
+}
+
+func (a *API) handleClassiSave(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body classeBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
+		return
+	}
+	// Salva la mappa studenti corrente come snapshot per quella combo.
+	cfg := a.state.ConfigSnapshotData()
+	c := persist.ClasseFile{
+		Classe:    body.Classe,
+		Lab:       body.Lab,
+		Mappa:     cfg.Studenti,
+		UpdatedAt: time.Now().UnixMilli(),
+	}
+	if err := a.state.Store().SaveClasse(c); err != nil {
+		if err == persist.ErrNomeInvalido {
+			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	writeOK(w, map[string]any{"classe": body.Classe, "lab": body.Lab})
+}
+
+func (a *API) handleClassiLoad(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body classeBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
+		return
+	}
+	c, err := a.state.Store().LoadClasse(body.Classe, body.Lab)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+		return
+	}
+	a.state.SetStudenti(c.Mappa)
+	writeOK(w, map[string]any{"caricati": len(c.Mappa)})
+}
+
+func (a *API) handleClassiDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body classeBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
+		return
+	}
+	if err := a.state.Store().DeleteClasse(body.Classe, body.Lab); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	writeOK(w, nil)
+}
+
+// ============================================================
+// POST handlers — Sessioni archivio (Phase 1.6)
+// ============================================================
+
+// handleSessioniArchivia forza l'archivio della sessione corrente senza
+// fermarla. Utile come "checkpoint" durante una sessione lunga.
+func (a *API) handleSessioniArchivia(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	// La logica di archivio vive nello state (legge NDJSON + scrive snapshot).
+	// Esponiamo un wrapper read-only che chiama internamente.
+	fn := a.state.ArchiviaCorrente()
+	if fn == "" {
+		writeError(w, http.StatusBadRequest,
+			"Niente da archiviare (sessione non avviata o buffer vuoto)",
+			"NOTHING_TO_ARCHIVE")
+		return
+	}
+	writeOK(w, map[string]any{"archiviata": fn})
+}
+
+type filenameBody struct {
+	Filename string `json:"filename"`
+}
+
+// handleSessioniLoad carica una sessione archiviata dal nome file.
+// Body: {filename:"2026-04-22-10-23-45.json"}.
+func (a *API) handleSessioniLoad(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body filenameBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Filename == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {filename}", "BAD_BODY")
+		return
+	}
+	archive, err := a.state.Store().LoadArchive(body.Filename)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, archive)
+}
+
+// handleSessioniDelete elimina una sessione archiviata.
+// Body: {filename:"..."}
+func (a *API) handleSessioniDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body filenameBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Filename == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {filename}", "BAD_BODY")
+		return
+	}
+	if !strings.HasSuffix(body.Filename, ".json") {
+		writeError(w, http.StatusBadRequest, "Filename deve terminare con .json", "BAD_BODY")
+		return
+	}
+	if err := a.state.Store().DeleteArchive(body.Filename); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	writeOK(w, nil)
 }

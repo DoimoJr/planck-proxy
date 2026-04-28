@@ -1,11 +1,14 @@
 package state
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
+	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -28,6 +31,7 @@ func (s *State) Block(dominio string) {
 	s.bloccati[d] = struct{}{}
 	list := s.bloccatiSortedLocked()
 	s.mu.Unlock()
+	s.persistBloccati(list)
 	s.broadcastBlocklist(list)
 }
 
@@ -42,6 +46,7 @@ func (s *State) Unblock(dominio string) {
 	delete(s.bloccati, d)
 	list := s.bloccatiSortedLocked()
 	s.mu.Unlock()
+	s.persistBloccati(list)
 	s.broadcastBlocklist(list)
 }
 
@@ -53,6 +58,7 @@ func (s *State) BlockAllAI() {
 	}
 	list := s.bloccatiSortedLocked()
 	s.mu.Unlock()
+	s.persistBloccati(list)
 	s.broadcastBlocklist(list)
 }
 
@@ -64,6 +70,7 @@ func (s *State) UnblockAllAI() {
 	}
 	list := s.bloccatiSortedLocked()
 	s.mu.Unlock()
+	s.persistBloccati(list)
 	s.broadcastBlocklist(list)
 }
 
@@ -72,7 +79,16 @@ func (s *State) ClearBlocklist() {
 	s.mu.Lock()
 	s.bloccati = map[string]struct{}{}
 	s.mu.Unlock()
+	s.persistBloccati([]string{})
 	s.broadcastBlocklist([]string{})
+}
+
+// persistBloccati e' un wrapper che serializza la blocklist su disco
+// con error logging. Helper per non duplicare la riga dopo ogni mutate.
+func (s *State) persistBloccati(list []string) {
+	if err := s.store.SaveBloccati(list); err != nil {
+		log.Printf("state: errore save blocklist: %v", err)
+	}
 }
 
 func (s *State) broadcastBlocklist(list []string) {
@@ -234,6 +250,7 @@ func (s *State) SetStudent(ip, nome string) {
 	s.studenti[ip] = nome
 	stud := s.studentiCopyLocked()
 	s.mu.Unlock()
+	s.persistStudenti(stud)
 	s.broadcastStudenti(stud)
 }
 
@@ -247,6 +264,7 @@ func (s *State) DeleteStudent(ip string) {
 	delete(s.studenti, ip)
 	stud := s.studentiCopyLocked()
 	s.mu.Unlock()
+	s.persistStudenti(stud)
 	s.broadcastStudenti(stud)
 }
 
@@ -255,7 +273,28 @@ func (s *State) ClearStudents() {
 	s.mu.Lock()
 	s.studenti = map[string]string{}
 	s.mu.Unlock()
+	s.persistStudenti(map[string]string{})
 	s.broadcastStudenti(map[string]string{})
+}
+
+// SetStudenti sostituisce in blocco la mappa studenti corrente. Usato
+// dall'endpoint /api/classi/load (carica una combo salvata).
+func (s *State) SetStudenti(stud map[string]string) {
+	s.mu.Lock()
+	s.studenti = make(map[string]string, len(stud))
+	for k, v := range stud {
+		s.studenti[k] = v
+	}
+	cp := s.studentiCopyLocked()
+	s.mu.Unlock()
+	s.persistStudenti(cp)
+	s.broadcastStudenti(cp)
+}
+
+func (s *State) persistStudenti(stud map[string]string) {
+	if err := s.store.SaveStudenti(stud); err != nil {
+		log.Printf("state: errore save studenti: %v", err)
+	}
 }
 
 func (s *State) studentiCopyLocked() map[string]string {
@@ -291,6 +330,7 @@ func (s *State) AddIgnorato(dominio string) {
 		}
 	}
 	s.dominiIgnorati = append(s.dominiIgnorati, d)
+	s.saveConfigLocked()
 	settings := s.settingsSnapshotLocked()
 	s.mu.Unlock()
 	s.broadcastSettings(settings)
@@ -310,6 +350,7 @@ func (s *State) RemoveIgnorato(dominio string) {
 		}
 	}
 	s.dominiIgnorati = out
+	s.saveConfigLocked()
 	settings := s.settingsSnapshotLocked()
 	s.mu.Unlock()
 	s.broadcastSettings(settings)
@@ -368,12 +409,74 @@ func (s *State) SessionStop() (archiviata, fineISO string) {
 	return archiviata, fine
 }
 
-// archiveLocked scrive la sessione corrente su disco.
-// **Stub in Phase 1.5**: ritorna sempre "" (nessun archivio).
-// In Phase 1.6 leggera' NDJSON e produrra' un JSON snapshot in sessioni/.
+// ArchiviaCorrente forza l'archivio della sessione corrente senza fermarla.
+// Usato dall'endpoint /api/sessioni/archivia come "checkpoint".
+// Ritorna il filename dell'archivio prodotto, o "" se niente da archiviare.
+func (s *State) ArchiviaCorrente() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.archiveLocked()
+}
+
+// archiveLocked legge il NDJSON corrente, lo serializza in un JSON
+// snapshot completo (con metadata della sessione) e lo scrive in
+// sessioni/<timestamp>.json. Tronca poi il NDJSON.
+//
+// **Deve essere chiamato col lock gia' tenuto.**
+//
+// Ritorna il filename dell'archivio prodotto, o "" se niente da archiviare
+// (sessione mai avviata, NDJSON vuoto, store disabilitato, errore).
 func (s *State) archiveLocked() string {
-	// TODO Phase 1.6: serialize NDJSON + write sessioni/<timestamp>.json
-	return ""
+	if s.store.Disabled() || s.sessioneInizio == "" {
+		return ""
+	}
+
+	// Leggi le entries del NDJSON corrente
+	entries, err := s.store.NDJSONReadAll()
+	if err != nil {
+		log.Printf("state: errore lettura NDJSON: %v", err)
+		return ""
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+
+	// Snapshot studenti + bloccati al momento dell'archive
+	studentiSnap := make(map[string]string, len(s.studenti))
+	for k, v := range s.studenti {
+		studentiSnap[k] = v
+	}
+	bloccatiSnap := s.bloccatiSortedLocked()
+
+	rawEntries := make([]json.RawMessage, len(entries))
+	for i, e := range entries {
+		rawEntries[i] = e
+	}
+
+	archivio := persist.ArchiveFile{
+		SessioneInizio:  s.sessioneInizio,
+		SessioneFineISO: s.sessioneFineISO,
+		EsportatoAlle:   time.Now().UTC().Format(time.RFC3339),
+		Titolo:          s.titolo,
+		Classe:          s.classe,
+		Modo:            s.modo,
+		Studenti:        studentiSnap,
+		Bloccati:        bloccatiSnap,
+		Entries:         rawEntries,
+	}
+
+	fn, err := s.store.SaveArchive(archivio)
+	if err != nil {
+		log.Printf("state: errore save archive: %v", err)
+		return ""
+	}
+
+	// Tronca NDJSON dopo archiviazione riuscita
+	if err := s.store.NDJSONReset(); err != nil {
+		log.Printf("state: errore reset NDJSON dopo archive: %v", err)
+	}
+
+	return fn
 }
 
 func (s *State) broadcastSessionState() {
@@ -485,6 +588,7 @@ func (s *State) UpdateSettings(updates map[string]any) (updated, rejected, richi
 
 	var settings SettingsSnapshot
 	if len(updated) > 0 {
+		s.saveConfigLocked()
 		settings = s.settingsSnapshotLocked()
 	}
 	s.mu.Unlock()

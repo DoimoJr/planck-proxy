@@ -18,6 +18,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +96,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/students/set", auth(a.handleStudentSet))
 	mux.HandleFunc("/api/students/delete", auth(a.handleStudentDelete))
 	mux.HandleFunc("/api/students/clear", auth(a.handleStudentClear))
+
+	// Download script studenti (Phase 1.7)
+	mux.HandleFunc("/api/scripts/proxy_on.bat", auth(a.handleScriptProxyOn))
+	mux.HandleFunc("/api/scripts/proxy_off.bat", auth(a.handleScriptProxyOff))
 
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
@@ -467,6 +474,43 @@ func (a *API) handleStudentClear(w http.ResponseWriter, r *http.Request) {
 	}
 	a.state.ClearStudents()
 	writeOK(w, nil)
+}
+
+// ============================================================
+// Download script studenti (Phase 1.7)
+// ============================================================
+
+func (a *API) handleScriptProxyOn(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	a.serveScriptDownload(w, "proxy_on.bat")
+}
+
+func (a *API) handleScriptProxyOff(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	a.serveScriptDownload(w, "proxy_off.bat")
+}
+
+// serveScriptDownload manda il file .bat come download (Content-Disposition
+// attachment) leggendolo dalla data dir.
+func (a *API) serveScriptDownload(w http.ResponseWriter, filename string) {
+	dataDir := a.state.Store().DataDir()
+	if dataDir == "" {
+		writeError(w, http.StatusInternalServerError, "DataDir non configurata", "NO_DATADIR")
+		return
+	}
+	body, err := os.ReadFile(filepath.Join(dataDir, filename))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Script non trovato: "+err.Error(), "NOT_FOUND")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-bat; charset=UTF-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
 // ============================================================

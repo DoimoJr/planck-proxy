@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
+	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/web"
 )
@@ -72,6 +74,21 @@ func main() {
 		log.Printf("Recovery NDJSON fallita: %v", err)
 	} else if recovered != "" {
 		log.Printf("Sessione interrotta recuperata in archivio: %s", recovered)
+	}
+
+	// Genera proxy_on.bat / proxy_off.bat con IP+porta corretti per la
+	// rete corrente. Sovrascrive ogni boot (riflette IP che potrebbe
+	// cambiare con DHCP). Override IP via env var PLANCK_LAN_IP se
+	// l'auto-detection sbaglia su macchine multi-interfaccia.
+	lanIP := os.Getenv("PLANCK_LAN_IP")
+	if lanIP == "" {
+		lanIP = scripts.LocalLANIP()
+	}
+	proxyPortInt, _ := strconv.Atoi(proxyPort)
+	if onPath, offPath, err := scripts.Generate(dataDir, Versione, lanIP, proxyPortInt); err != nil {
+		log.Printf("Generazione script studenti fallita: %v", err)
+	} else {
+		log.Printf("Script studenti pronti: %s + %s (IP %s:%d)", onPath, offPath, lanIP, proxyPortInt)
 	}
 
 	// Proxy: registra eventi sullo state

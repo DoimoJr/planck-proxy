@@ -1,9 +1,12 @@
-// Planck Proxy v2 — Phase 0 skeleton
+// Planck Proxy v2 — entry point del binario.
 //
-// Entry point del binario. In Phase 0 e' uno stub: avvia un web server
-// minimale su :9999 che serve una pagina di benvenuto. La logica reale
-// (proxy, classificazione, sessioni, Veyon) arriva nelle fasi successive
-// secondo SPEC.md sezione 8.
+// Avvia in parallelo:
+//   - il proxy HTTP/HTTPS (default :9090) che instrada il traffico studenti
+//   - il web server (default :9999) che serve UI + API REST
+//
+// In Phase 1.2 il proxy fa solo forwarding + watchdog (niente blocchi,
+// niente persistenza, niente broadcast SSE). Lo state condiviso tra i due
+// server arrivera' in Phase 1.3.
 package main
 
 import (
@@ -11,17 +14,19 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
+	"github.com/DoimoJr/planck-proxy/internal/proxy"
 )
 
-const Versione = "2.0.0-phase0"
+const Versione = "2.0.0-phase1"
 
 const indexHTML = `<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Planck Proxy v2 — Phase 0</title>
+<title>Planck Proxy v2 — Phase 1</title>
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; max-width: 720px; margin: 0 auto; background: #1a1d23; color: #e0e0e0; line-height: 1.6; }
   h1 { color: #b77dd4; margin-bottom: 8px; }
@@ -34,33 +39,31 @@ const indexHTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Planck Proxy v2</h1>
-<p class="tag">Phase 0 — skeleton</p>
+<p class="tag">Phase 1.2 — proxy in piedi</p>
 
 <p class="status">Backend Go in ascolto.</p>
 
-<p>Questo e' lo scheletro iniziale del rewrite v2 (vedi <code>SPEC.md</code>
-nella radice del repo). Le funzionalita' reali (proxy, classificazione,
-sessioni, integrazione Veyon, dashboard) arriveranno con le fasi
-successive.</p>
+<p>Proxy HTTP/HTTPS attivo. La classificazione del traffico viene loggata
+in console: lo state condiviso e il broadcast SSE arriveranno in Phase 1.3.
+La UI completa in Phase 1.7.</p>
 
-<h3>Fasi successive</h3>
-<ul>
-<li>Phase 1: porting backend + Monitor sempre attivo</li>
-<li>Phase 2: persistenza SQLite</li>
-<li>Phase 3-4: integrazione Veyon</li>
-<li>Phase 8: release v2.0.0</li>
-</ul>
-
-<h3>Endpoint disponibili</h3>
+<h3>Endpoint web (porta 9999)</h3>
 <ul>
 <li><code>GET /</code> &mdash; questa pagina</li>
 <li><code>GET /api/version</code> &mdash; versione corrente in JSON</li>
 <li><code>GET /api/classifica?dominio=X</code> &mdash; classifica un dominio (smoke test, sara' rimosso in 1.4)</li>
 </ul>
+
+<h3>Proxy (porta 9090)</h3>
+<ul>
+<li><code>GET http://example.com/...</code> &mdash; HTTP forwarding (URL assoluto)</li>
+<li><code>CONNECT example.com:443</code> &mdash; HTTPS tunneling</li>
+<li><code>GET /_alive</code> (diretto al proxy) &mdash; watchdog keepalive</li>
+</ul>
 </body>
 </html>`
 
-// indexHandler serve la pagina HTML di benvenuto del Phase 0.
+// indexHandler serve la pagina HTML di benvenuto.
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -73,13 +76,11 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 // versionHandler espone la versione del binario in JSON.
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1"}`, Versione)
+	fmt.Fprintf(w, `{"version":"%s","stack":"go","fase":"1.2"}`, Versione)
 }
 
 // classificaHandler espone la classificazione di un dominio passato come
-// query param. Smoke test integrato per verificare che il package classify
-// funzioni end-to-end (sara' rimosso in Phase 1.4 quando l'API completa
-// sara' in piedi).
+// query param. Smoke test integrato (verra' rimosso in Phase 1.4).
 func classificaHandler(w http.ResponseWriter, r *http.Request) {
 	dominio := r.URL.Query().Get("dominio")
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -102,18 +103,40 @@ func envOrDefault(key, def string) string {
 
 func main() {
 	webPort := envOrDefault("PLANCK_WEB_PORT", "9999")
+	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 
+	// Web server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", indexHandler)
 	mux.HandleFunc("/api/version", versionHandler)
 	mux.HandleFunc("/api/classifica", classificaHandler)
 
+	// Proxy server
+	proxySrv := proxy.New(":" + proxyPort)
+
 	log.Printf("Planck Proxy v%s", Versione)
-	log.Printf("Web: http://localhost:%s", webPort)
+	log.Printf("Web:   http://localhost:%s", webPort)
+	log.Printf("Proxy: http://localhost:%s", proxyPort)
 	log.Printf("In ascolto...")
 
-	addr := ":" + webPort
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Errore avvio server web: %v", err)
-	}
+	// Lancio i due server in parallelo. Se uno dei due fallisce all'avvio
+	// (es. porta occupata), l'intero processo termina.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		if err := http.ListenAndServe(":"+webPort, mux); err != nil {
+			log.Fatalf("Errore avvio server web: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		if err := proxySrv.Start(); err != nil {
+			log.Fatalf("Errore avvio proxy: %v", err)
+		}
+	}()
+
+	wg.Wait()
 }

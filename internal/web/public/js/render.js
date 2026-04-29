@@ -449,6 +449,7 @@ function renderListaIp(container, ips, ora, soglia) {
             const rowClass = [];
             if (s.inattivo) rowClass.push('inattivo');
             if (state.focusIp === ip) rowClass.push('focus');
+            if (state.selectedIps.has(ip)) rowClass.push('selected');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
             const nuova = rowClass.join(' ');
             if (tr.className !== nuova) tr.className = nuova;
@@ -536,6 +537,7 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const classi = ['ip-card'];
             if (s.inattivo) classi.push('inattivo');
             if (state.focusIp === ip) classi.push('focus');
+            if (state.selectedIps.has(ip)) classi.push('selected');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
             const nuova = classi.join(' ');
             if (card.className !== nuova) card.className = nuova;
@@ -942,12 +944,39 @@ function renderSelectCombo() {
 // Render completo (throttled)
 // ========================================================================
 
+/**
+ * Aggiorna la "selection bar" sopra il pannello IP. Visibile solo se
+ * c'e' una multi-selezione attiva. Mostra count + bottoni per le azioni
+ * Veyon piu' comuni (lock/messaggio) e un "Deseleziona tutti".
+ */
+export function renderSelectionBar() {
+    const bar = $('selection-bar');
+    if (!bar) return;
+    const n = state.selectedIps.size;
+    if (n === 0) {
+        bar.classList.add('hidden');
+        bar.textContent = '';
+        return;
+    }
+    bar.classList.remove('hidden');
+    // Bottoni Veyon nella bar appaiono solo se Veyon e' configurato.
+    const veyonOn = !!state.veyonConfigured;
+    bar.innerHTML =
+        '<span class="selection-count">' + n + ' selezionat' + (n === 1 ? 'o' : 'i') + '</span>'
+        + (veyonOn
+            ? '<button class="btn" data-action="veyon-classe-lock" title="Blocca schermo">🔒 Lock</button>'
+            + '<button class="btn" data-action="veyon-classe-msg" title="Messaggio">💬 Msg</button>'
+            : '')
+        + '<button class="btn" data-action="clear-selection">Deseleziona tutti</button>';
+}
+
 /** Esegue tutti i renderer sincronamente. Chiamato da `renderAll` dentro RAF. */
 function _renderAllSync() {
     renderSidebar();
     renderStats();
     renderPausaEBottoni();
     renderTabellaIp();
+    renderSelectionBar();
     renderUltimeRichieste();
     renderFocus();
     renderReport();

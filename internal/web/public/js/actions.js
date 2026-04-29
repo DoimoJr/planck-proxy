@@ -133,6 +133,54 @@ export function resetNascosti() { state.nascosti.clear(); salvaNascosti(); rende
 export function setFocus(ip) { state.focusIp = state.focusIp === ip ? null : ip; renderAll(); }
 export function clearFocus() { state.focusIp = null; renderAll(); }
 
+/** Lista IP nello stesso ordine usato dal render (sortati per IP numerico). */
+function ipsInOrder() {
+    const ips = new Set([...state.perIp.keys(), ...state.aliveMap.keys()]);
+    return [...ips].sort((a, b) => {
+        const A = a.split('.').reduce((n, p) => n * 256 + parseInt(p, 10), 0);
+        const B = b.split('.').reduce((n, p) => n * 256 + parseInt(p, 10), 0);
+        return A - B;
+    });
+}
+
+/**
+ * Gestisce il click su una card studente con i modificatori della tastiera:
+ *   - plain click       : focus singolo (toggle), clear selezione multipla
+ *   - Ctrl/Cmd + click  : aggiunge/rimuove dalla selezione
+ *   - Shift + click     : range da selectionAnchor (escluso) fino a `ip` (incluso)
+ */
+export function handleCardClick(ip, ev) {
+    if (ev && ev.shiftKey && state.selectionAnchor) {
+        const list = ipsInOrder();
+        const i1 = list.indexOf(state.selectionAnchor);
+        const i2 = list.indexOf(ip);
+        if (i1 >= 0 && i2 >= 0) {
+            const [lo, hi] = i1 < i2 ? [i1, i2] : [i2, i1];
+            for (let k = lo; k <= hi; k++) state.selectedIps.add(list[k]);
+            renderAll();
+            return;
+        }
+    }
+    if (ev && (ev.ctrlKey || ev.metaKey)) {
+        if (state.selectedIps.has(ip)) state.selectedIps.delete(ip);
+        else state.selectedIps.add(ip);
+        state.selectionAnchor = ip;
+        renderAll();
+        return;
+    }
+    // plain click: comportamento legacy (toggle focus) + clear selezione
+    state.selectedIps.clear();
+    state.selectionAnchor = ip;
+    setFocus(ip);
+}
+
+/** Svuota la selezione multipla. */
+export function clearSelection() {
+    state.selectedIps.clear();
+    state.selectionAnchor = null;
+    renderAll();
+}
+
 export function setFiltro(val) { state.filtro = val; renderAll(); }
 
 export function toggleSezione(nome) {
@@ -556,14 +604,29 @@ function ipAttivi() {
     return [...state.aliveMap.keys()];
 }
 
-/** Esegue una callback async per ogni IP attivo, raccoglie ok/fail. */
-async function veyonForEachAttivo(label, fn) {
-    const ips = ipAttivi();
+/**
+ * Determina su quali IP applicare un'azione di classe:
+ * - se c'e' una multi-selezione, usa quella
+ * - altrimenti usa tutti gli IP attivi (watchdog)
+ *
+ * Ritorna anche un'etichetta descrittiva da mettere nel confirm().
+ */
+function targetIps() {
+    if (state.selectedIps.size > 0) {
+        return { ips: [...state.selectedIps], desc: state.selectedIps.size + ' studenti selezionati' };
+    }
+    const a = ipAttivi();
+    return { ips: a, desc: a.length + ' studenti attivi' };
+}
+
+/** Esegue una callback async per ogni IP target, raccoglie ok/fail. */
+async function veyonForEachTarget(label, fn) {
+    const { ips, desc } = targetIps();
     if (!ips.length) {
         alert('Nessuno studente attivo nel monitor (nessun ping watchdog ricevuto).');
         return;
     }
-    if (!confirm(label + ' su ' + ips.length + ' studenti attivi?')) return;
+    if (!confirm(label + ' su ' + desc + '?')) return;
     let ok = 0, fail = 0;
     await Promise.all(ips.map(async ip => {
         try { (await fn(ip)) ? ok++ : fail++; }
@@ -575,7 +638,7 @@ async function veyonForEachAttivo(label, fn) {
 /** ScreenLock su tutti gli studenti attivi. */
 export async function veyonClasseLock() {
     if (!state.veyonConfigured) return;
-    await veyonForEachAttivo('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
+    await veyonForEachTarget('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
 }
 
 /** TextMessage su tutti gli studenti attivi. */
@@ -583,7 +646,7 @@ export async function veyonClasseMsg() {
     if (!state.veyonConfigured) return;
     const text = prompt('Messaggio da mostrare a tutti gli studenti attivi:', '');
     if (!text) return;
-    await veyonForEachAttivo('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { text }));
+    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { text }));
 }
 
 /**
@@ -600,7 +663,7 @@ export async function veyonDistribuisciProxy() {
     const port = location.port || '9999';
     const url = `http://${lanIp}:${port}/api/scripts/proxy_on.bat`;
     const ps = `powershell -NoProfile -Command "iwr ${url} -OutFile $env:TEMP\\proxy_on.bat; & $env:TEMP\\proxy_on.bat"`;
-    await veyonForEachAttivo('Distribuzione proxy_on.bat', ip =>
+    await veyonForEachTarget('Distribuzione proxy_on.bat', ip =>
         veyonSendFeature(ip, 'startApp', 0, { applications: [ps] })
     );
 }

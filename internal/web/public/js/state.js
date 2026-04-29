@@ -60,6 +60,15 @@ export const state = {
     filtro: '',
     /** @type {string|null} IP su cui il traffico e' filtrato (click su riga/card). */
     focusIp: null,
+    /**
+     * Multi-selezione (Phase 4 polish). Set di IP selezionati con Ctrl/
+     * Shift+click sulle card. Quando non vuoto, le azioni Veyon "classe"
+     * agiscono sulla selezione invece che su tutti gli IP attivi.
+     * @type {Set<string>}
+     */
+    selectedIps: new Set(),
+    /** @type {string|null} Ultimo IP cliccato — anchor per Shift+click range selection. */
+    selectionAnchor: null,
     darkmode: localStorage.getItem('darkmode') === '1',
     notifiche: localStorage.getItem('notifiche') === '1',
     /** @type {'live'|'report'|'impostazioni'} */

@@ -111,7 +111,8 @@ document.body.addEventListener('click', (e) => {
         case 'nascondi-dominio': actions.nascondiDominio(d); break;
         case 'mostra-dominio': actions.mostraDominio(d); break;
         case 'reset-nascosti': actions.resetNascosti(); break;
-        case 'focus-ip': actions.setFocus(ip); break;
+        case 'focus-ip': actions.handleCardClick(ip, e); break;
+        case 'clear-selection': actions.clearSelection(); break;
         case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
         case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
         case 'vista-griglia': actions.cambiaVistaIp('griglia'); break;

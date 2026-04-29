@@ -490,3 +490,26 @@ tr.filtro-hidden { display: none; }
 body.veyon-on .ip-card-veyon { display: flex; }
 body.veyon-on .toolbar-veyon { display: flex; }
 
+/* Multi-select sulle card studente (Phase 4 polish).
+   Ctrl/Shift+click toggle. Stato visivo: bordo accent doppio.
+   La selection-bar appare sopra la griglia quando c'e' selezione. */
+.ip-card.selected, tr.selected {
+    outline: 2px solid var(--accent, #b77dd4);
+    outline-offset: -2px;
+}
+
+.selection-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    background: rgba(183, 125, 212, 0.12);
+    border: 1px solid var(--accent, #b77dd4);
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+.selection-bar.hidden { display: none; }
+.selection-bar .selection-count { font-weight: 600; margin-right: auto; }
+.selection-bar .btn { padding: 2px 10px; font-size: 0.85em; }
+

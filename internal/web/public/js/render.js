@@ -335,7 +335,16 @@ function calcolaStatoIp(ip, ora, soglia) {
 export function renderTabellaIp() {
     const container = $('ip-container');
     if (!container) return;
-    const tuttiIps = new Set([...state.perIp.keys(), ...state.aliveMap.keys()]);
+    // Card visibili = unione di:
+    //   - IP della mappa studenti (anche se nessun traffico ne' watchdog ping)
+    //     → permette di inviare comandi Veyon prima della distribuzione del proxy
+    //   - IP che hanno generato traffico (perIp)
+    //   - IP che hanno pingato il watchdog (aliveMap)
+    const tuttiIps = new Set([
+        ...Object.keys(state.cfg.studenti || {}),
+        ...state.perIp.keys(),
+        ...state.aliveMap.keys(),
+    ]);
     const ips = [...tuttiIps].sort((a, b) => ip2long(a) - ip2long(b));
     const ora = Date.now();
     const soglia = state.cfg.inattivitaSogliaSec * 1000;

@@ -86,6 +86,9 @@ type State struct {
 	veyonKeyName string // nome master key (vuoto = Veyon non configurato)
 	veyonPort    int    // 0 = default 11100
 
+	// --- Network info esposta in /api/config per "Distribuisci proxy" ---
+	lanIP string // IP LAN del docente (auto-detected o env PLANCK_LAN_IP)
+
 	// --- Liste ---
 	bloccati       map[string]struct{}
 	dominiIgnorati []string
@@ -219,6 +222,21 @@ func (s *State) saveConfigLocked() {
 // Store esposto per i handler API che hanno bisogno di operare direttamente
 // sul DB (es. CRUD presets, listing sessioni).
 func (s *State) Store() *store.Store { return s.store }
+
+// SetLanIP imposta il LAN IP del docente, settato a boot da main.go (auto-
+// detected o env PLANCK_LAN_IP). Esposto via /api/config per la UI.
+func (s *State) SetLanIP(ip string) {
+	s.mu.Lock()
+	s.lanIP = ip
+	s.mu.Unlock()
+}
+
+// LanIP ritorna il LAN IP configurato.
+func (s *State) LanIP() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lanIP
+}
 
 // ============================================================
 // Mutazioni runtime di base (chiamate dal proxy)

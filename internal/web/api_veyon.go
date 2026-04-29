@@ -2,6 +2,8 @@ package web
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/DoimoJr/planck-proxy/internal/veyon"
@@ -170,6 +172,89 @@ func (a *API) handleVeyonFeature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, nil)
+}
+
+// distributeBatBody e' il body di /api/veyon/distribuisci-proxy + /disinstalla-proxy.
+// Il caller passa la lista di IP target; il server legge il bat appropriato
+// dal data dir e lo manda via FileTransfer con OpenFileInApplication=true.
+type distributeBatBody struct {
+	IPs []string `json:"ips"`
+}
+
+// handleVeyonDistribuisciProxy invia proxy_on.bat ai target via FileTransfer
+// con flag "open in app" → cmd.exe lo esegue, attivando il proxy lato studente.
+func (a *API) handleVeyonDistribuisciProxy(w http.ResponseWriter, r *http.Request) {
+	a.distributeBat(w, r, "proxy_on.bat")
+}
+
+// handleVeyonDisinstallaProxy invia proxy_off.bat ai target.
+func (a *API) handleVeyonDisinstallaProxy(w http.ResponseWriter, r *http.Request) {
+	a.distributeBat(w, r, "proxy_off.bat")
+}
+
+// distributeBat e' il flow comune: legge il file dal data dir, itera sui
+// target IPs, invia via VeyonSendFile, raccoglie ok/fail.
+func (a *API) distributeBat(w http.ResponseWriter, r *http.Request, filename string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body distributeBatBody
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body deve essere {ips:[...]}", "BAD_BODY")
+		return
+	}
+	if len(body.IPs) == 0 {
+		writeError(w, http.StatusBadRequest, "Lista IPs vuota", "BAD_BODY")
+		return
+	}
+
+	// Legge il bat dal data dir (path: <dataDir>/<filename>).
+	dataDir := a.state.Store().DataDir()
+	path := filepath.Join(dataDir, filename)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "lettura "+filename+": "+err.Error(), "FILE_READ")
+		return
+	}
+
+	// Invia in parallelo, raccogli risultati.
+	type result struct {
+		IP    string `json:"ip"`
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	results := make([]result, len(body.IPs))
+	done := make(chan int, len(body.IPs))
+	for i, ip := range body.IPs {
+		go func(i int, ip string) {
+			err := a.state.VeyonSendFile(ip, filename, content, true, true)
+			r := result{IP: ip, OK: err == nil}
+			if err != nil {
+				r.Error = err.Error()
+			}
+			results[i] = r
+			done <- i
+		}(i, ip)
+	}
+	for range body.IPs {
+		<-done
+	}
+
+	ok, fail := 0, 0
+	for _, r := range results {
+		if r.OK {
+			ok++
+		} else {
+			fail++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      fail == 0,
+		"total":   len(body.IPs),
+		"success": ok,
+		"failed":  fail,
+		"results": results,
+	})
 }
 
 // jsonToVariant converte un valore decodato da encoding/json in un tipo

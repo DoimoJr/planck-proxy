@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	Versione = "2.0.0-alpha.4"
-	Fase     = "alpha.4"
+	Versione = "2.0.0-alpha.4.1"
+	Fase     = "alpha.4.1"
 )
 
 // dataDirDefault risolve la directory dati: env var PLANCK_DATA_DIR
@@ -160,6 +160,9 @@ func main() {
 	} else {
 		log.Printf("Script studenti pronti: %s + %s (IP %s:%d)", onPath, offPath, lanIP, proxyPortInt)
 	}
+	// Esponi il LAN IP via state cosi' la UI sa quale IP usare per
+	// "Distribuisci proxy" senza dover chiedere ogni volta.
+	st.SetLanIP(lanIP)
 
 	// Proxy: registra eventi sullo state
 	proxySrv := proxy.New(":"+proxyPort, st)

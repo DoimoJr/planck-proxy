@@ -110,6 +110,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/veyon/clear", auth(a.handleVeyonClear))
 	mux.HandleFunc("/api/veyon/test", auth(a.handleVeyonTest))
 	mux.HandleFunc("/api/veyon/feature", auth(a.handleVeyonFeature))
+	mux.HandleFunc("/api/veyon/distribuisci-proxy", auth(a.handleVeyonDistribuisciProxy))
+	mux.HandleFunc("/api/veyon/disinstalla-proxy", auth(a.handleVeyonDisinstallaProxy))
 
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))

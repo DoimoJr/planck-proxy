@@ -5,6 +5,54 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.4.1] — 2026-04-29
+
+Hotfix di alpha.4 dopo testing sul campo (4 VM Windows con Veyon
+4.10). Tre bug nascosti dietro recon agenti che hanno restituito
+informazioni tecnicamente plausibili ma sbagliate.
+
+### Fixato
+
+- **Distribuzione proxy_on/proxy_off ora funziona davvero**.
+  Sostituito il workaround `StartApp + powershell + curl` (fragile,
+  problemi di parsing/PATH) con il vero **FileTransfer feature di
+  Veyon** (UUID `4a70bd5a-fab2-4a4b-a92a-a1e81d2b75ed`). Sequenza
+  StartFileTransfer → ContinueFileTransfer (chunked 256 KB) →
+  FinishFileTransfer con `OpenFileInApplication=true`. Il file arriva
+  nella cartella Downloads dello studente e viene aperto da `cmd.exe`
+  che lo esegue.
+
+- **UUID FileTransfer corretto**. Era `...a1660a6105b7` (dalla recon
+  iniziale dello SPEC), ma il vero e' `...a1e81d2b75ed`. Le prime
+  versioni di FileTransfer non funzionavano per niente.
+
+- **Argument keys nei FeatureMessage erano sbagliate dappertutto**.
+  Avevo assunto chiavi camelCase tipo `"fileName"`, `"text"`,
+  `"applications"`. In realta' sono **gli integer dell'enum
+  Argument convertiti a stringa**: `"0"`, `"1"`, `"2"`, ecc. Vedi
+  `FeatureMessage::argument()` in core/src/FeatureMessage.h:
+  `m_arguments[QString::number(static_cast<int>(index))]`. Sistemati
+  i flow di TextMessage, StartApp, OpenURL e tutta la catena
+  FileTransfer. Lock/Unlock funzionavano per fortuna (niente
+  argomenti).
+
+- **IP host auto-detected esposto via /api/config** (`lanIP`). La UI
+  Distribuisci non chiede piu' all'utente l'IP — usa quello che
+  Planck stesso ha inserito nel proxy_on.bat al boot. Bottone
+  "Rimuovi proxy" aggiunto nella toolbar classe.
+
+- **Card Live ora visibili da subito**: anche IP della mappa
+  studenti senza traffico/watchdog appaiono come card. Permette di
+  inviare comandi Veyon prima della distribuzione del proxy.
+
+### Note di upgrade
+
+- Niente azione manuale richiesta. La master key Veyon importata in
+  alpha.4 resta valida.
+- Su Windows multi-interfaccia, esporta `PLANCK_LAN_IP=<ip-LAN>`
+  prima di lanciare planck.exe se l'auto-detect prende l'interfaccia
+  sbagliata (es. VirtualBox host-only invece della LAN reale).
+
 ## [v2.0.0-alpha.4] — 2026-04-29
 
 Phase 3 + 4: integrazione Veyon completa. Planck può ora controllare i

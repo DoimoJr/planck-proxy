@@ -105,6 +105,18 @@ func (s *State) VeyonSendFeature(ip string, fm veyon.FeatureMessage) error {
 	return conn.SendFeature(fm)
 }
 
+// VeyonSendFile invia un file via FileTransfer feature al PC studente.
+// Se openInApp=true il file viene aperto col programma associato
+// (utile per .bat → cmd.exe lo esegue).
+func (s *State) VeyonSendFile(ip, filename string, content []byte, openInApp, overwrite bool) error {
+	conn, err := s.veyonDial(ip)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.SendFile(filename, content, openInApp, overwrite)
+}
+
 // VeyonTest tenta una connessione + auth verso `ip` e poi chiude. Usato
 // dall'endpoint /api/veyon/test per validare la configurazione contro
 // uno specifico studente.

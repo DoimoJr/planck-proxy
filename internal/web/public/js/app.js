@@ -152,6 +152,7 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-classe-reboot': actions.veyonClasseReboot(); break;
         case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
+        case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
         case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;

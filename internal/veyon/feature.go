@@ -121,7 +121,23 @@ const (
 	FeatureLogoff       = "7311d43d-ab53-439e-a03a-8cb25f7ed526"
 	FeatureTextMsg      = "e75ae9c8-ac17-4d00-8f0d-019348346208"
 	FeatureOpenURL      = "8a11a75d-b3db-48b6-b9cb-f8422ddd5b0c"
+	FeatureFileTransfer = "4a70bd5a-fab2-4a4b-a92a-a1e81d2b75ed" // "distribute files"
+	FeatureFileCollect  = "5a14c971-e93c-457f-97a0-0b8f1058a58e" // "collect files" (non usato ora)
 )
+
+// Comandi del plugin FileTransfer (`enum class FeatureCommand` in
+// plugins/filetransfer/FileTransferPlugin.h, sequenziale partendo da 0).
+const (
+	CmdStartFileTransfer    FeatureCommand = 0
+	CmdContinueFileTransfer FeatureCommand = 1
+	CmdCancelFileTransfer   FeatureCommand = 2
+	CmdFinishFileTransfer   FeatureCommand = 3
+)
+
+// FileTransferChunkSize replica la costante `ChunkSize = 256*1024` di
+// plugins/filetransfer/FileTransferController.h. Usata per fare chunking
+// dei file grandi nei messaggi ContinueFileTransfer.
+const FileTransferChunkSize = 256 * 1024
 
 // Comandi specifici di alcuni plugin Veyon. Le chiavi sono integer
 // definiti in `enum class FeatureCommand` in plugins/<feature>/*.h —
@@ -165,11 +181,13 @@ func (c *Conn) ScreenUnlock() error {
 	})
 }
 
-// StartApp esegue uno o piu' programmi sullo studente. I path possono
-// essere assoluti (es. "C:\\Windows\\notepad.exe") o nel PATH.
+// StartApp esegue uno o piu' programmi sullo studente. I path devono essere
+// assoluti (es. "C:\\Windows\\notepad.exe") perche' Veyon non risolve PATH.
 //
-// Argomento `Applications` (capitale, da argToString(Argument::Applications)
-// in plugins/desktopservices/DesktopServicesFeaturePlugin.h).
+// Argomenti dal plugin DesktopServices (`enum class Argument`):
+//
+//	"0" = Applications (QStringList)
+//	"1" = WebsiteUrls   (non usato qui)
 func (c *Conn) StartApp(programs []string) error {
 	if len(programs) == 0 {
 		return fmt.Errorf("veyon: StartApp richiede almeno un programma")
@@ -178,7 +196,7 @@ func (c *Conn) StartApp(programs []string) error {
 		FeatureUUID: uuid(FeatureStartApp),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"Applications": programs,
+			"0": programs, // Applications
 		},
 	})
 }
@@ -218,25 +236,24 @@ func (c *Conn) Logoff() error {
 
 // TextMessage mostra un messaggio modale sul PC studente.
 //
-// Argomenti (chiavi capitali, da argToString(Argument::Text) in
-// plugins/textmessage/TextMessageFeaturePlugin.h):
-//   - Text: stringa del messaggio
-//   - Icon: int corrispondente a QMessageBox::Icon (1 = Information,
-//     2 = Warning, 3 = Critical, 4 = Question)
+// Argomenti dal plugin TextMessage (`enum class Argument`):
+//
+//	"0" = Text (QString)
+//	"1" = Icon (int — QMessageBox::Information=1, Warning=2, Critical=3)
 func (c *Conn) TextMessage(text string) error {
 	return c.SendFeature(FeatureMessage{
 		FeatureUUID: uuid(FeatureTextMsg),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"Text": text,
-			"Icon": int32(1), // QMessageBox::Information
+			"0": text,      // Text
+			"1": int32(1), // Icon = Information
 		},
 	})
 }
 
 // OpenURL apre uno o piu' URL nel browser di default sul PC studente.
 //
-// Argomento `WebsiteUrls` (capitale, da argToString(Argument::WebsiteUrls)).
+// Argomento `"1"` = WebsiteUrls (DesktopServices Argument enum).
 func (c *Conn) OpenURL(urls []string) error {
 	if len(urls) == 0 {
 		return fmt.Errorf("veyon: OpenURL richiede almeno un URL")
@@ -245,7 +262,7 @@ func (c *Conn) OpenURL(urls []string) error {
 		FeatureUUID: uuid(FeatureOpenURL),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"WebsiteUrls": urls,
+			"1": urls, // WebsiteUrls
 		},
 	})
 }

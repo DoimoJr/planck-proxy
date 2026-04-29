@@ -602,8 +602,10 @@ export async function veyonCardMsg(ip) {
     if (!state.veyonConfigured) return;
     const text = prompt('Messaggio da mostrare a ' + ip + ':', '');
     if (!text) return;
-    // Veyon usa argument key "Text" (capitale), Icon=1=Information.
-    await veyonSendFeature(ip, 'textMsg', 0, { Text: text, Icon: 1 });
+    // FeatureMessage args usano integer-stringa come chiave (vedi
+    // FeatureMessage::argument in core/src/FeatureMessage.h).
+    // TextMessage Argument enum: Text=0, Icon=1.
+    await veyonSendFeature(ip, 'textMsg', 0, { '0': text, '1': 1 });
 }
 
 /** Lista IP visti almeno una volta come `alive` (ping watchdog). */
@@ -675,8 +677,8 @@ export async function veyonClasseMsg() {
     if (!state.veyonConfigured) return;
     const text = prompt('Messaggio da mostrare:', '');
     if (!text) return;
-    // Veyon usa argument key "Text" (capitale).
-    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { Text: text, Icon: 1 }));
+    // TextMessage Argument enum: Text=0, Icon=1.
+    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { '0': text, '1': 1 }));
 }
 
 /** Reboot su tutti i target. */
@@ -703,19 +705,49 @@ export async function veyonClassePowerDown() {
  * hanno ancora pingato il watchdog di Planck (proxy_on non e' stato
  * ancora distribuito).
  */
+/**
+ * Distribuisce e attiva proxy_on.bat sui target via Veyon FileTransfer
+ * + OpenFileInApplication=true. Il server legge il bat dal data dir,
+ * lo manda chunked via il protocollo Veyon nativo (non via curl + bat
+ * download), e lo studente lo apre col programma associato (cmd.exe
+ * per i .bat → esegue).
+ */
 export async function veyonDistribuisciProxy() {
     if (!state.veyonConfigured) return;
-    const lanIp = prompt(
-        'IP/host di Planck visibile dagli studenti (per scaricare proxy_on.bat):',
-        location.hostname || '');
-    if (!lanIp) return;
-    const port = location.port || '9999';
-    const url = `http://${lanIp}:${port}/api/scripts/proxy_on.bat`;
-    const ps = `powershell -NoProfile -Command "iwr ${url} -OutFile $env:TEMP\\proxy_on.bat; & $env:TEMP\\proxy_on.bat"`;
-    // "Applications" e' la chiave attesa da DesktopServicesFeaturePlugin.
-    await veyonForEachTarget('Distribuzione proxy_on.bat', ip =>
-        veyonSendFeature(ip, 'startApp', 0, { Applications: [ps] })
-    );
+    await veyonDistribuisciHelper('/api/veyon/distribuisci-proxy', 'Distribuzione proxy_on.bat');
+}
+
+/**
+ * Distribuisce proxy_off.bat sui target. Il bat disabilita il proxy
+ * registrato in HKCU e killa il watchdog VBScript locale.
+ */
+export async function veyonDisinstallaProxy() {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Rimuovere il proxy da tutti i target?')) return;
+    await veyonDistribuisciHelper('/api/veyon/disinstalla-proxy', 'Disinstallazione proxy');
+}
+
+/** Helper interno: chiama un endpoint distribuzione bat con i target attuali. */
+async function veyonDistribuisciHelper(endpoint, label) {
+    const { ips, desc } = targetIps();
+    if (!ips.length) {
+        alert('Nessuno studente attivo nel monitor (nessun ping watchdog ricevuto).');
+        return;
+    }
+    if (!confirm(label + ' su ' + desc + '?')) return;
+
+    const r = await apiPost(endpoint, { ips });
+    if (r.ok) {
+        alert(label + ' completato: ' + r.success + ' OK, ' + r.failed + ' falliti su ' + r.total + '.');
+    } else {
+        // Mostra dettaglio dei falliti
+        const lines = (r.results || [])
+            .filter(x => !x.ok)
+            .map(x => '  ' + x.ip + ': ' + x.error)
+            .slice(0, 10);
+        alert(label + ' parziale: ' + r.success + ' OK, ' + r.failed + ' falliti su ' + r.total + '.\n\n' +
+              (lines.length ? 'Errori:\n' + lines.join('\n') : ''));
+    }
 }
 
 export { aggiornaInputDeadline };

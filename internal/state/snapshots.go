@@ -23,6 +23,11 @@ type ConfigSnapshot struct {
 	Studenti            map[string]string `json:"studenti"`
 	Presets             []string          `json:"presets"`
 	Classi              []Combo           `json:"classi"`
+	// LanIP e' l'IP del PC docente che gli studenti usano per raggiungere
+	// Planck (set a boot via PLANCK_LAN_IP o auto-detected). Stesso valore
+	// embeddato nel proxy_on.bat. La UI lo usa per "Distribuisci" senza
+	// dover chiedere all'utente.
+	LanIP string `json:"lanIP"`
 }
 
 // ConfigSnapshotData ritorna il payload per /api/config.
@@ -43,6 +48,7 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 		Studenti:            studCopy,
 		Presets:             []string{},
 		Classi:              []Combo{},
+		LanIP:               s.lanIP,
 	}
 	s.mu.RUnlock()
 

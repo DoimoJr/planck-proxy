@@ -137,6 +137,8 @@
                             </div>
                             <!-- Selection bar: appare solo quando selectedIps.size > 0. Renderizzata da renderSelectionBar(). -->
                             <div id="selection-bar" class="selection-bar hidden"></div>
+                            <!-- Pannello eventi watchdog: appare solo se ci sono eventi recenti. -->
+                            <div id="watchdog-events-panel" class="watchdog-events-panel hidden"></div>
                             <div class="card-scroll" id="ip-container"></div>
                         </div>
                     </div>
@@ -336,6 +338,12 @@
                     <button data-action="veyon-test" class="btn">Test</button>
                 </div>
                 <div id="veyon-test-result" class="hint" style="margin-top:6px"></div>
+            </div>
+
+            <div class="card" id="card-watchdog">
+                <h3>Watchdog plugins</h3>
+                <p class="hint">Plugin di monitoraggio remoto che girano sui PC studenti come script PowerShell. Polling ogni 5s, eventi inviati a Planck via HTTP. Si attivano col bottone qui sotto e vengono lanciati alla prossima distribuzione del proxy_on.bat.</p>
+                <div id="watchdog-plugins-list"></div>
             </div>
 
             <div class="card">

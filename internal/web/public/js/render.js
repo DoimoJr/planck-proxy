@@ -529,6 +529,7 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             card.innerHTML = '<div class="ip-card-head">'
                 + '<span class="watchdog-dot"></span>'
                 + '<div class="nome-wrap"></div>'
+                + '<span class="watchdog-event-badge" hidden></span>'
                 + '</div>'
                 + '<div class="ip-card-metriche">'
                 + '<div class="ip-card-num"></div>'
@@ -589,6 +590,19 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const visibili = dominiOrd.slice(0, DOMINI_CARD_MAX);
             const extra = dominiOrd.length - visibili.length;
             syncTagsDominio(tags, visibili, extra);
+
+            // Badge eventi watchdog (Phase 5).
+            const badge = head.querySelector('.watchdog-event-badge');
+            if (badge) {
+                const n = watchdogBadgeCount(ip);
+                if (n > 0) {
+                    badge.hidden = false;
+                    badge.textContent = '⚠️ ' + n;
+                    badge.title = n + ' eventi watchdog negli ultimi 5 min';
+                } else {
+                    badge.hidden = true;
+                }
+            }
         }
     );
 }
@@ -959,6 +973,96 @@ function renderSelectCombo() {
  * c'e' una multi-selezione attiva. Mostra count + bottoni per le azioni
  * Veyon piu' comuni (lock/messaggio) e un "Deseleziona tutti".
  */
+/**
+ * Renderizza la card "Watchdog plugins" nelle Impostazioni: per ogni
+ * plugin un toggle abilita/disabilita + descrizione. La config raw
+ * (JSON) e' nascosta in <details> per non sovraccaricare l'UI.
+ */
+export function renderWatchdogPluginsList() {
+    const root = $('watchdog-plugins-list');
+    if (!root) return;
+    root.textContent = '';
+    if (!state.watchdogPlugins.length) {
+        const p = document.createElement('p'); p.className = 'hint';
+        p.textContent = 'Nessun plugin registrato.';
+        root.appendChild(p);
+        return;
+    }
+    for (const plugin of state.watchdogPlugins) {
+        const wrap = document.createElement('div');
+        wrap.className = 'watchdog-plugin' + (plugin.enabled ? ' enabled' : '');
+        const head = document.createElement('div');
+        head.className = 'watchdog-plugin-head';
+        const toggle = document.createElement('label');
+        toggle.className = 'watchdog-toggle';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!plugin.enabled;
+        cb.dataset.action = 'watchdog-toggle';
+        cb.dataset.plugin = plugin.id;
+        const span = document.createElement('span');
+        span.textContent = plugin.name;
+        toggle.appendChild(cb);
+        toggle.appendChild(span);
+        head.appendChild(toggle);
+        const status = document.createElement('span');
+        status.className = 'watchdog-status';
+        status.textContent = plugin.enabled ? 'attivo' : 'inattivo';
+        head.appendChild(status);
+        wrap.appendChild(head);
+        const desc = document.createElement('p');
+        desc.className = 'hint';
+        desc.textContent = plugin.description;
+        wrap.appendChild(desc);
+        root.appendChild(wrap);
+    }
+}
+
+/**
+ * Pannello eventi watchdog sopra la griglia IP. Mostra gli ultimi 5
+ * eventi con severity warning/critical degli ultimi 5 minuti, con tag
+ * per IP/plugin. Nascosto se non ci sono eventi rilevanti.
+ */
+export function renderWatchdogEventsPanel() {
+    const panel = $('watchdog-events-panel');
+    if (!panel) return;
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    const recenti = state.watchdogEvents
+        .filter(e => e.ts >= cutoff && e.severity !== 'info')
+        .slice(-5)
+        .reverse();
+    if (recenti.length === 0) {
+        panel.classList.add('hidden');
+        panel.textContent = '';
+        return;
+    }
+    panel.classList.remove('hidden');
+    panel.innerHTML = '<strong>⚠️ Watchdog (ultimi 5 min):</strong>';
+    for (const ev of recenti) {
+        const row = document.createElement('div');
+        row.className = 'watchdog-event watchdog-' + ev.severity;
+        const ipLabel = ev.nomeStudente || ev.ip;
+        const text = ev.format || (ev.plugin + ' ' + JSON.stringify(ev.payload || {}));
+        row.textContent = `[${ipLabel}] ${text}`;
+        panel.appendChild(row);
+    }
+}
+
+/**
+ * Conta gli eventi watchdog "rilevanti" (severity warning/critical)
+ * negli ultimi 5 minuti per un IP. Usato per il badge sulla card.
+ */
+function watchdogBadgeCount(ip) {
+    const arr = state.watchdogEventsPerIp.get(ip);
+    if (!arr) return 0;
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    let n = 0;
+    for (const e of arr) {
+        if (e.ts >= cutoff && e.severity !== 'info') n++;
+    }
+    return n;
+}
+
 export function renderSelectionBar() {
     const bar = $('selection-bar');
     if (!bar) return;
@@ -990,10 +1094,12 @@ function _renderAllSync() {
     renderPausaEBottoni();
     renderTabellaIp();
     renderSelectionBar();
+    renderWatchdogEventsPanel();
     renderUltimeRichieste();
     renderFocus();
     renderReport();
     renderImpostazioni();
+    renderWatchdogPluginsList();
     renderCountdown();
 }
 

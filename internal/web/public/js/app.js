@@ -72,6 +72,10 @@ async function init() {
     // accendono di Veyon-buttons quando il fetch ritorna.
     actions.veyonAggiornaStato();
 
+    // Watchdog plugins: carica config + ultimi eventi (Phase 5).
+    actions.watchdogAggiornaPlugins();
+    actions.watchdogAggiornaEventi();
+
     // Countdown: tick ogni secondo (solo aggiorna la UI, zero allocazioni)
     setInterval(renderCountdown, 1000);
     // Refresh complessivo (durata, "ultima attivita'") - ogni 5s
@@ -153,6 +157,7 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
         case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
+        case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
         case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;

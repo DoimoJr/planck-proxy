@@ -54,6 +54,22 @@ echo Loop >> "%TEMP%\proxy_watchdog.vbs"
 
 start "" /b wscript.exe "%TEMP%\proxy_watchdog.vbs"
 
+:: Watchdog plugins (Phase 5): scarica e avvia ogni script enabled.
+:: GET /api/watchdog/plugins ritorna JSON con la lista; per semplicita'
+:: il bat scarica l'unico plugin attualmente disponibile (USB) e lo
+:: lancia in background hidden via wscript shell. Quando aggiungiamo
+:: altri plugin, qui si itera.
+::
+:: Se Planck e' irraggiungibile, l'errore di curl viene ignorato.
+curl -s -o "%TEMP%\planck_usb_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/usb.ps1 2>nul
+if exist "%TEMP%\planck_usb_watchdog.ps1" (
+    start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_usb_watchdog.ps1"
+)
+curl -s -o "%TEMP%\planck_process_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/process.ps1 2>nul
+if exist "%TEMP%\planck_process_watchdog.ps1" (
+    start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_process_watchdog.ps1"
+)
+
 echo Proxy attivato: %IP_PROF%:%PORTA%
 
 (goto) 2>nul & del "%~f0"
@@ -67,9 +83,18 @@ const proxyOffTemplate = `@echo off
 :: Disattiva il proxy e ferma il watchdog di presenza.
 :: ============================================================
 
-:: Ferma il watchdog
+:: Ferma il watchdog VBScript (presenza/proxy)
 taskkill /f /im wscript.exe >nul 2>&1
 del "%TEMP%\proxy_watchdog.vbs" >nul 2>&1
+
+:: Ferma i watchdog plugins PowerShell (USB monitor + futuri).
+:: Usa WMIC per killare solo i powershell che girano i nostri ps1
+:: (senza killare powershell di altre cose).
+for /f "tokens=*" %%P in ('wmic process where "name='powershell.exe' and CommandLine like '%%planck_%%_watchdog.ps1%%'" get ProcessId /value 2^>nul ^| findstr "="') do (
+    for /f "tokens=2 delims==" %%I in ("%%P") do taskkill /f /pid %%I >nul 2>&1
+)
+del "%TEMP%\planck_usb_watchdog.ps1" >nul 2>&1
+del "%TEMP%\planck_process_watchdog.ps1" >nul 2>&1
 
 :: Disattiva proxy
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f >nul 2>&1
@@ -82,19 +107,26 @@ echo Proxy disattivato.
 // Generate scrive proxy_on.bat e proxy_off.bat in outDir, sostituendo i
 // segnaposto con i valori forniti.
 //
+// `portaWeb` e' la porta del web server di Planck (default 9999),
+// usata da proxy_on.bat per scaricare gli script watchdog (Phase 5).
+//
 // Ritorna i due path assoluti dei file scritti.
-func Generate(outDir, versione, ipDocente string, portaProxy int) (onPath, offPath string, err error) {
+func Generate(outDir, versione, ipDocente string, portaProxy, portaWeb int) (onPath, offPath string, err error) {
 	if ipDocente == "" {
 		return "", "", fmt.Errorf("ipDocente vuoto")
 	}
 	if portaProxy <= 0 || portaProxy > 65535 {
 		return "", "", fmt.Errorf("porta proxy invalida: %d", portaProxy)
 	}
+	if portaWeb <= 0 || portaWeb > 65535 {
+		return "", "", fmt.Errorf("porta web invalida: %d", portaWeb)
+	}
 
 	onContent := strings.NewReplacer(
 		"__VERSIONE__", versione,
 		"__IP_DOCENTE__", ipDocente,
 		"__PORTA_PROXY__", strconv.Itoa(portaProxy),
+		"__PORTA_WEB__", strconv.Itoa(portaWeb),
 	).Replace(proxyOnTemplate)
 
 	offContent := strings.NewReplacer(

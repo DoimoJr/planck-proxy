@@ -750,4 +750,69 @@ async function veyonDistribuisciHelper(endpoint, label) {
     }
 }
 
+// ========================================================================
+// Watchdog plugins (Phase 5)
+// ========================================================================
+
+/** Carica la lista plugin + stato dal server in `state.watchdogPlugins`. */
+export async function watchdogAggiornaPlugins() {
+    try {
+        const r = await apiGet('/api/watchdog/plugins');
+        state.watchdogPlugins = r.plugins || [];
+        renderAll();
+    } catch (e) {
+        console.warn('watchdog: aggiornaPlugins fallito', e);
+    }
+}
+
+/** Carica gli ultimi N eventi watchdog (idratazione boot). */
+export async function watchdogAggiornaEventi() {
+    try {
+        const r = await apiGet('/api/watchdog/events?limit=200');
+        const events = (r.events || []).map(e => ({
+            type: 'watchdog',
+            id: e.id,
+            plugin: e.plugin,
+            ip: e.ip,
+            nomeStudente: e.nomeStudente,
+            ts: e.ts,
+            severity: e.severity,
+            payload: typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload,
+            format: '', // verra' sovrascritto dai SSE futuri
+        }));
+        // Server li manda DESC (recenti prima); per consistenza con la
+        // coda live (push in coda), li ribaltiamo cosi' i push successivi
+        // restano in fondo.
+        state.watchdogEvents = events.reverse();
+        state.watchdogEventsPerIp = new Map();
+        for (const e of state.watchdogEvents) {
+            if (!e.ip) continue;
+            let arr = state.watchdogEventsPerIp.get(e.ip);
+            if (!arr) { arr = []; state.watchdogEventsPerIp.set(e.ip, arr); }
+            arr.push(e);
+        }
+        renderAll();
+    } catch (e) {
+        console.warn('watchdog: aggiornaEventi fallito', e);
+    }
+}
+
+/** Toggle enable/disable di un plugin. */
+export async function watchdogTogglePlugin(pluginId) {
+    const plugin = state.watchdogPlugins.find(p => p.id === pluginId);
+    if (!plugin) return;
+    const newEnabled = !plugin.enabled;
+    const r = await apiPost('/api/watchdog/config', {
+        plugin: pluginId,
+        enabled: newEnabled,
+        config: plugin.config || {},
+    });
+    if (r.ok) {
+        plugin.enabled = newEnabled;
+        renderAll();
+    } else {
+        alert('Toggle ' + pluginId + ' fallito: ' + (r.error || 'errore'));
+    }
+}
+
 export { aggiornaInputDeadline };

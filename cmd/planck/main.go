@@ -22,12 +22,14 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/store"
+	"github.com/DoimoJr/planck-proxy/internal/watchdog"
+	"github.com/DoimoJr/planck-proxy/internal/watchdog/builtin"
 	"github.com/DoimoJr/planck-proxy/internal/web"
 )
 
 const (
-	Versione = "2.0.0-alpha.4.1"
-	Fase     = "alpha.4.1"
+	Versione = "2.0.0-alpha.5"
+	Fase     = "alpha.5"
 )
 
 // dataDirDefault risolve la directory dati: env var PLANCK_DATA_DIR
@@ -155,14 +157,27 @@ func main() {
 		lanIP = scripts.LocalLANIP()
 	}
 	proxyPortInt, _ := strconv.Atoi(proxyPort)
-	if onPath, offPath, err := scripts.Generate(dataDir, Versione, lanIP, proxyPortInt); err != nil {
+	webPortInt, _ := strconv.Atoi(webPort)
+	if onPath, offPath, err := scripts.Generate(dataDir, Versione, lanIP, proxyPortInt, webPortInt); err != nil {
 		log.Printf("Generazione script studenti fallita: %v", err)
 	} else {
-		log.Printf("Script studenti pronti: %s + %s (IP %s:%d)", onPath, offPath, lanIP, proxyPortInt)
+		log.Printf("Script studenti pronti: %s + %s (IP %s:%d, web :%d)", onPath, offPath, lanIP, proxyPortInt, webPortInt)
 	}
 	// Esponi il LAN IP via state cosi' la UI sa quale IP usare per
 	// "Distribuisci proxy" senza dover chiedere ogni volta.
 	st.SetLanIP(lanIP)
+
+	// Watchdog plugins (Phase 5): registra i built-in.
+	wdReg := watchdog.NewRegistry()
+	for _, p := range []watchdog.WatchdogPlugin{
+		builtin.UsbPlugin{},
+		builtin.ProcessPlugin{},
+	} {
+		if err := wdReg.Register(p); err != nil {
+			log.Printf("Watchdog: registrazione plugin %s: %v", p.ID(), err)
+		}
+	}
+	st.SetWatchdogRegistry(wdReg)
 
 	// Proxy: registra eventi sullo state
 	proxySrv := proxy.New(":"+proxyPort, st)

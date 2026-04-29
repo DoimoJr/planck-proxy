@@ -110,6 +110,29 @@ export const state = {
      * e visibili. Aggiornato da `veyonAggiornaStato()` (boot + cambia tab).
      */
     veyonConfigured: false,
+
+    // ============================================================
+    // Watchdog plugins (Phase 5)
+    // ============================================================
+
+    /**
+     * Lista dei plugin watchdog registrati lato server, ognuno con
+     * stato enabled/disabled e config corrente. Caricato a boot da
+     * /api/watchdog/plugins, aggiornato post toggle/save.
+     * @type {Array<{id:string,name:string,description:string,enabled:boolean,config:any}>}
+     */
+    watchdogPlugins: [],
+
+    /**
+     * Eventi watchdog recenti per IP (ultimi 5 min). Renderizzati come
+     * badge sulla card studente + nel pannello eventi. Map IP→array di
+     * eventi {plugin, ts, severity, format, payload}.
+     * @type {Map<string, Array<object>>}
+     */
+    watchdogEventsPerIp: new Map(),
+
+    /** Coda globale degli ultimi N eventi watchdog (per il pannello "Eventi"). */
+    watchdogEvents: [],
 };
 
 /** Persiste il Set dei domini nascosti. */

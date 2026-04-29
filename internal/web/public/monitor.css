@@ -513,3 +513,44 @@ body.veyon-on .toolbar-veyon { display: flex; }
 .selection-bar .selection-count { font-weight: 600; margin-right: auto; }
 .selection-bar .btn { padding: 2px 10px; font-size: 0.85em; }
 
+/* Watchdog plugins (Phase 5) */
+.watchdog-plugin {
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+.watchdog-plugin.enabled { border-left: 3px solid #4ade80; }
+.watchdog-plugin-head { display: flex; align-items: center; gap: 12px; }
+.watchdog-toggle { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.watchdog-status { font-size: 0.8em; color: var(--muted, #888); margin-left: auto; }
+.watchdog-plugin.enabled .watchdog-status { color: #4ade80; }
+.watchdog-plugin .hint { margin: 6px 0 0 0; }
+
+/* Pannello eventi watchdog sopra la griglia IP */
+.watchdog-events-panel {
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid #f59e0b;
+    border-radius: 3px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}
+.watchdog-events-panel.hidden { display: none; }
+.watchdog-events-panel strong { display: block; margin-bottom: 4px; }
+.watchdog-event { padding: 1px 0; }
+.watchdog-event.watchdog-warning { color: #f59e0b; }
+.watchdog-event.watchdog-critical { color: #f87171; font-weight: 600; }
+
+/* Badge ⚠️ N sulla card studente */
+.watchdog-event-badge {
+    background: #f59e0b;
+    color: #1a1a1a;
+    font-size: 0.75em;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+    font-weight: 600;
+}
+.watchdog-event-badge[hidden] { display: none; }
+

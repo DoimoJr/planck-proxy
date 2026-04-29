@@ -17,6 +17,7 @@ import (
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
 	"github.com/DoimoJr/planck-proxy/internal/store"
+	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 )
 
 // Entry rappresenta una richiesta loggata dal proxy.
@@ -88,6 +89,9 @@ type State struct {
 
 	// --- Network info esposta in /api/config per "Distribuisci proxy" ---
 	lanIP string // IP LAN del docente (auto-detected o env PLANCK_LAN_IP)
+
+	// --- Watchdog plugin registry (Phase 5) ---
+	watchdogReg *watchdog.Registry
 
 	// --- Liste ---
 	bloccati       map[string]struct{}

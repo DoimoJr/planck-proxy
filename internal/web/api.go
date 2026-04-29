@@ -113,6 +113,16 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/veyon/distribuisci-proxy", auth(a.handleVeyonDistribuisciProxy))
 	mux.HandleFunc("/api/veyon/disinstalla-proxy", auth(a.handleVeyonDisinstallaProxy))
 
+	// Watchdog plugins (Phase 5)
+	mux.HandleFunc("/api/watchdog/plugins", auth(a.handleWatchdogPlugins))
+	mux.HandleFunc("/api/watchdog/config", auth(a.handleWatchdogConfig))
+	mux.HandleFunc("/api/watchdog/events", auth(a.handleWatchdogEvents))
+	// /event riceve da PC studenti, niente auth (stesso trust di /_alive).
+	mux.HandleFunc("/api/watchdog/event", a.handleWatchdogEvent)
+	// Gli script vengono scaricati dagli studenti, niente auth.
+	mux.HandleFunc("/api/scripts/watchdog/usb.ps1", a.handleScriptWatchdogUsb)
+	mux.HandleFunc("/api/scripts/watchdog/process.ps1", a.handleScriptWatchdogProcess)
+
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
 	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))

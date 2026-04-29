@@ -9,7 +9,7 @@ import (
 
 func TestGenerate(t *testing.T) {
 	dir := t.TempDir()
-	on, off, err := Generate(dir, "2.0.0-test", "192.168.1.100", 9090)
+	on, off, err := Generate(dir, "2.0.0-test", "192.168.1.100", 9090, 9999)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -38,13 +38,13 @@ func TestGenerate(t *testing.T) {
 
 func TestGenerateRejectsInvalidInput(t *testing.T) {
 	dir := t.TempDir()
-	if _, _, err := Generate(dir, "v", "", 9090); err == nil {
+	if _, _, err := Generate(dir, "v", "", 9090, 9999); err == nil {
 		t.Errorf("ipDocente vuoto: atteso errore")
 	}
-	if _, _, err := Generate(dir, "v", "1.2.3.4", 0); err == nil {
+	if _, _, err := Generate(dir, "v", "1.2.3.4", 0, 9999); err == nil {
 		t.Errorf("porta 0: atteso errore")
 	}
-	if _, _, err := Generate(dir, "v", "1.2.3.4", 99999); err == nil {
+	if _, _, err := Generate(dir, "v", "1.2.3.4", 99999, 9999); err == nil {
 		t.Errorf("porta 99999: atteso errore")
 	}
 }

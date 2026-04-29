@@ -5,6 +5,83 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5] — 2026-04-29
+
+Phase 5: framework di **Watchdog plugins**. Planck monitora gli
+studenti oltre al traffico web: rileva connessioni USB sospette,
+processi della denylist, e in futuro altri eventi. Il framework
+e' estensibile: aggiungere un nuovo plugin = scrivere un .ps1 +
+implementare 5 metodi Go.
+
+### Aggiunto
+
+- **Framework `internal/watchdog`**: interfaccia `WatchdogPlugin` +
+  `Registry` con plugin registrati a boot. Ogni plugin ha 3 componenti:
+  Go server-side (validazione + format + severity), PowerShell client-
+  side (polling + POST eventi), UI Planck (toggle + display).
+
+- **Plugin USB built-in**: rileva collegamento/scollegamento di
+  dispositivi USB di classe non sicura (chiavette, telefoni MTP, hard
+  disk esterni, camere). Filtra automaticamente classi HID/Mouse/
+  Keyboard/Audio integrati. Polling 5s lato studente.
+
+- **Plugin Process built-in**: rileva avvio di processi nella denylist
+  (cmd, powershell, regedit, taskmgr, mmc, gpedit, perfmon, resmon,
+  msconfig). Strumenti che lo studente puo' usare per aggirare il
+  proxy o accedere a config di sistema.
+
+- **DB schema v2**: nuove tabelle `watchdog_events` (eventi storicizzati,
+  linkati alla sessione corrente se attiva) e `watchdog_config`
+  (enable/disable + config per-plugin). Migration automatica al boot.
+
+- **API REST**:
+  - `GET  /api/watchdog/plugins` — lista plugin + stato + config
+  - `POST /api/watchdog/config` — toggle enable/disable + update config
+  - `POST /api/watchdog/event` — endpoint per gli script studenti (no auth)
+  - `GET  /api/watchdog/events?plugin=&ip=&limit=` — storico eventi
+  - `GET  /api/scripts/watchdog/usb.ps1` — serve lo script PS1 (con IP/port templated)
+  - `GET  /api/scripts/watchdog/process.ps1` — analogo
+
+- **UI**:
+  - Tab Impostazioni → nuova card "Watchdog plugins" con toggle per
+    ogni plugin disponibile + descrizione.
+  - Tab Live → badge ⚠️ N sulla card studente quando ci sono eventi
+    rilevanti negli ultimi 5 minuti.
+  - Tab Live → pannello "Eventi watchdog" sopra la griglia IP che
+    mostra gli ultimi 5 eventi warning/critical degli ultimi 5 min.
+  - Notifica desktop / beep su eventi warning+ se notifiche sono on.
+
+- **Integrazione `proxy_on.bat` / `proxy_off.bat`**: il bat distribuito
+  agli studenti scarica gli script watchdog enabled e li lancia in
+  background hidden. `proxy_off.bat` killa solo i processi PowerShell
+  watchdog (filtro per CommandLine via WMIC), evitando di toccare
+  altri script PS dell'utente.
+
+### Note di upgrade
+
+- Per attivare i watchdog: Impostazioni → card "Watchdog plugins"
+  → toggle. Gli script vengono distribuiti alla prossima
+  esecuzione di "Distribuisci proxy_on.bat" (le istanze gia'
+  distribuite continueranno con la versione precedente fino al
+  successivo restart del PC studente o a una nuova distribuzione).
+
+- Trust model: `/api/watchdog/event` non richiede auth (stesso
+  modello di `/_alive` — fiducia LAN). `/api/watchdog/config` e
+  `/events` richiedono HTTP Basic come gli altri endpoint admin.
+
+- I watchdog sono **best-effort**: girano come PowerShell user-mode,
+  uno studente smaliziato puo' killarli da TaskManager. La detection
+  di "watchdog killato" non e' implementata (Phase 5.x).
+
+### Limitazioni note
+
+- Niente UI per modificare la **denylist process** o la **allowlist USB
+  VID:PID** — solo i default. Phase 5.x.
+- Niente plugin Network (cambio interfaccia / VPN / tethering). Phase
+  5.x se richiesto.
+- Tab "Storico eventi watchdog" non c'e' (gli eventi sono solo nella
+  toolbar Live ultimi 5 min). Phase 5.x.
+
 ## [v2.0.0-alpha.4.1] — 2026-04-29
 
 Hotfix di alpha.4 dopo testing sul campo (4 VM Windows con Veyon

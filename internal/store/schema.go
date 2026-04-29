@@ -99,4 +99,34 @@ CREATE INDEX idx_entries_ts       ON entries(ts);
 CREATE INDEX idx_entries_dominio  ON entries(dominio);
 `,
 	},
+	{
+		Version: 2,
+		Name:    "watchdog_plugins",
+		SQL: `
+-- ==========================================================
+-- Watchdog plugins (Phase 5): eventi e config per-plugin
+-- ==========================================================
+CREATE TABLE watchdog_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    sessione_id   INTEGER REFERENCES sessioni(id) ON DELETE SET NULL,
+    plugin        TEXT NOT NULL,
+    ip            TEXT NOT NULL,
+    nome_studente TEXT,
+    ts            INTEGER NOT NULL,
+    severity      TEXT NOT NULL,             -- info | warning | critical
+    payload_json  TEXT NOT NULL              -- JSON plugin-specific
+);
+CREATE INDEX idx_watchdog_sessione ON watchdog_events(sessione_id);
+CREATE INDEX idx_watchdog_ip       ON watchdog_events(ip);
+CREATE INDEX idx_watchdog_ts       ON watchdog_events(ts);
+CREATE INDEX idx_watchdog_plugin   ON watchdog_events(plugin);
+
+CREATE TABLE watchdog_config (
+    plugin       TEXT PRIMARY KEY,
+    enabled      INTEGER NOT NULL DEFAULT 0,
+    config_json  TEXT NOT NULL DEFAULT '{}',
+    updated_at   INTEGER NOT NULL
+);
+`,
+	},
 }

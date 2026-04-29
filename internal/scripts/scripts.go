@@ -162,15 +162,28 @@ func Generate(outDir, versione, ipDocente string, portaProxy, portaWeb int) (onP
 
 // LocalLANIP individua l'IPv4 della LAN locale del PC docente.
 //
-// Algoritmo:
-//  1. Scansiona tutte le interfacce di rete attive (non-loopback, up).
-//  2. Preferisce IP in range privati (RFC 1918: 10/8, 172.16/12, 192.168/16).
-//  3. Fallback al primo IPv4 non-loopback trovato.
-//  4. Ultima spiaggia: 127.0.0.1 (utile solo per smoke test).
+// Algoritmo (in ordine, primo che funziona vince):
 //
-// Per scuole con piu' interfacce (es. PC con Wi-Fi + Ethernet + VPN),
-// l'override e' possibile via env var PLANCK_LAN_IP gestito dal main.
+//  1. **UDP dial trick** verso 8.8.8.8: l'OS sceglie l'IP sorgente
+//     in base alla tabella di routing — che e' l'interfaccia di
+//     default (quella che raggiunge internet). Su PC multi-interface
+//     (Wi-Fi + Ethernet + VirtualBox host-only + VPN) prende
+//     SEMPRE quella giusta, evitando l'ambiguita' della scansione.
+//     Niente pacchetti spediti davvero (UDP e' connectionless).
+//  2. Scansione interfacce: preferisce IP in range privati RFC 1918
+//     (10/8, 172.16/12, 192.168/16). Fallback se l'host non ha
+//     connettivita' internet (lab air-gapped).
+//  3. 127.0.0.1: ultima spiaggia, utile solo per smoke test.
+//
+// Override sempre disponibile via env var PLANCK_LAN_IP.
 func LocalLANIP() string {
+	// Step 1: UDP dial trick. Best-effort: in caso di errore o IP
+	// loopback-ish, cade allo step 2.
+	if ip := lanIPViaUDPDial(); ip != "" && ip != "127.0.0.1" {
+		return ip
+	}
+
+	// Step 2: scansione interfacce.
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return "127.0.0.1"
@@ -211,4 +224,29 @@ func LocalLANIP() string {
 		return fallback
 	}
 	return "127.0.0.1"
+}
+
+// lanIPViaUDPDial usa il "trick UDP" per ottenere l'IP sorgente che
+// l'OS userebbe per uscire verso internet — cioe' l'IP dell'interfaccia
+// di default route. Niente pacchetti realmente inviati (UDP e' un
+// dial "fittizio", risolve solo la routing table).
+//
+// Funziona su Wi-Fi, Ethernet, VPN — qualunque setup abbia internet.
+// In una rete air-gapped (lab senza internet) il dial fallisce e
+// torniamo alla scansione manuale.
+func lanIPViaUDPDial() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || addr.IP == nil {
+		return ""
+	}
+	ip4 := addr.IP.To4()
+	if ip4 == nil {
+		return ""
+	}
+	return ip4.String()
 }

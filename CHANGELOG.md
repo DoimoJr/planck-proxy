@@ -5,6 +5,25 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5.2] — 2026-04-29
+
+Hotfix dell'auto-detection LAN IP. Su PC con piu' interfacce
+(Wi-Fi + Ethernet + VirtualBox host-only + VPN), la scansione
+euristica precedente prendeva la prima interfaccia privata trovata,
+spesso non quella della LAN reale. Risultato: il docente doveva
+settare PLANCK_LAN_IP a mano ogni volta che cambiava lab.
+
+### Fixato
+
+- **`scripts.LocalLANIP()` con UDP dial trick**: prova prima a fare
+  un `net.Dial("udp", "8.8.8.8:80")` — niente pacchetti spediti,
+  ma il kernel risponde con l'IP sorgente della default route.
+  Quello e' l'IP della LAN reale, sempre. Solo se non c'e' connettivita'
+  internet (lab air-gapped) cade alla scansione manuale.
+
+L'override via env var `PLANCK_LAN_IP` resta disponibile per setup
+particolari.
+
 ## [v2.0.0-alpha.5.1] — 2026-04-29
 
 Hotfix di alpha.5: il toggle dei plugin watchdog non era effettivamente

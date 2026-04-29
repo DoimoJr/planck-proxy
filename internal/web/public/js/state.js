@@ -94,6 +94,13 @@ export const state = {
     settings: null,
     /** Diventa true quando si modifica un settings key in `SETTINGS_RESTART` (banner orange). */
     riavvioRichiesto: false,
+
+    /**
+     * Stato della configurazione Veyon. True quando una master key e' stata
+     * importata: i bottoni Veyon (lock, msg, distribuisci) diventano cliccabili
+     * e visibili. Aggiornato da `veyonAggiornaStato()` (boot + cambia tab).
+     */
+    veyonConfigured: false,
 };
 
 /** Persiste il Set dei domini nascosti. */

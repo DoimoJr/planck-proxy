@@ -457,3 +457,36 @@ tr.filtro-hidden { display: none; }
     .main-panels { flex-direction: column; }
     .report-grid, .impostazioni-layout { grid-template-columns: 1fr; }
 }
+
+/* ====================================================================
+   Veyon UI (Phase 4)
+   - Inline buttons sulle card studente (lock + messaggio).
+   - Toolbar globale "Azioni classe".
+   - Tutto nascosto finche' la chiave master non e' importata
+     (`body.veyon-on` settato da actions.veyonAggiornaStato).
+   ==================================================================== */
+.ip-card-veyon {
+    display: none;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.ip-card-veyon button {
+    background: transparent;
+    border: 1px solid var(--border, rgba(255,255,255,0.15));
+    color: inherit;
+    padding: 2px 8px;
+    font-size: 0.85em;
+    cursor: pointer;
+    border-radius: 3px;
+    line-height: 1.2;
+}
+.ip-card-veyon button:hover { background: var(--hover, rgba(255,255,255,0.05)); }
+
+.toolbar-veyon { display: none; padding: 4px 12px; border-top: 1px solid var(--border, rgba(255,255,255,0.08)); }
+.toolbar-veyon .hint-inline { color: var(--muted, #888); margin-right: 4px; }
+
+body.veyon-on .ip-card-veyon { display: flex; }
+body.veyon-on .toolbar-veyon { display: flex; }
+

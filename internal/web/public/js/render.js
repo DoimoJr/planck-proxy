@@ -524,7 +524,11 @@ function renderGrigliaIp(container, ips, ora, soglia) {
                 + '<div class="ip-card-num"></div>'
                 + '<div class="ip-card-ultima"></div>'
                 + '</div>'
-                + '<div class="ip-card-tags"></div>';
+                + '<div class="ip-card-tags"></div>'
+                + '<div class="ip-card-veyon">'
+                + '<button type="button" data-action="veyon-card-lock" data-ip="' + ip + '" title="Blocca schermo">🔒</button>'
+                + '<button type="button" data-action="veyon-card-msg" data-ip="' + ip + '" title="Messaggio">💬</button>'
+                + '</div>';
             return card;
         },
         (card, ip) => {

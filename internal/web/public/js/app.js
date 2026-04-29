@@ -67,6 +67,11 @@ async function init() {
     renderAll();
     avviaSSE();
 
+    // Veyon: status (sapere se mostrare i bottoni inline + classe).
+    // Async non bloccante: il primo render va comunque, le card si
+    // accendono di Veyon-buttons quando il fetch ritorna.
+    actions.veyonAggiornaStato();
+
     // Countdown: tick ogni secondo (solo aggiorna la UI, zero allocazioni)
     setInterval(renderCountdown, 1000);
     // Refresh complessivo (durata, "ultima attivita'") - ogni 5s
@@ -137,6 +142,11 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-configure': actions.veyonConfigura(); break;
         case 'veyon-clear': actions.veyonRimuovi(); break;
         case 'veyon-test': actions.veyonTest(); break;
+        case 'veyon-card-lock': e.stopPropagation(); actions.veyonCardLock(el.dataset.ip); break;
+        case 'veyon-card-msg': e.stopPropagation(); actions.veyonCardMsg(el.dataset.ip); break;
+        case 'veyon-classe-lock': actions.veyonClasseLock(); break;
+        case 'veyon-classe-msg': actions.veyonClasseMsg(); break;
+        case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
         case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;

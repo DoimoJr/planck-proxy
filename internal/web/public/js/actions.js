@@ -453,24 +453,35 @@ export async function spegniServer() {
 // Veyon (Phase 3e)
 // ========================================================================
 
-/** Aggiorna il pannello "Stato" e i campi pre-popolati nella card Veyon. */
+/**
+ * Aggiorna il pannello "Stato" del card Veyon (se aperto) e il flag
+ * globale `state.veyonConfigured` che pilota la visibilita' dei
+ * bottoni Veyon nelle card studente. Chiamato al boot e ogni volta che
+ * si entra nel tab impostazioni o si configura/clear la chiave.
+ */
 export async function veyonAggiornaStato() {
+    let r;
+    try {
+        r = await apiGet('/api/veyon/status');
+    } catch (e) {
+        const elStato = document.getElementById('veyon-status');
+        if (elStato) elStato.textContent = 'errore: ' + e;
+        return;
+    }
+
+    state.veyonConfigured = !!r.configured;
+    document.body.classList.toggle('veyon-on', state.veyonConfigured);
+
     const elStato = document.getElementById('veyon-status');
     const elKeyname = document.getElementById('veyon-keyname');
     const elPort = document.getElementById('veyon-port');
-    if (!elStato) return;
-    try {
-        const r = await apiGet('/api/veyon/status');
-        if (r.configured) {
-            elStato.innerHTML = '<span style="color:#4ade80">configurato</span> &mdash; chiave: <code>' + r.keyName + '</code>';
-        } else {
-            elStato.innerHTML = '<span style="color:#999">non configurato</span>';
-        }
-        if (elKeyname) elKeyname.value = r.keyName || '';
-        if (elPort) elPort.value = r.port || 11100;
-    } catch (e) {
-        elStato.textContent = 'errore: ' + e;
+    if (elStato) {
+        elStato.innerHTML = r.configured
+            ? '<span style="color:#4ade80">configurato</span> &mdash; chiave: <code>' + r.keyName + '</code>'
+            : '<span style="color:#999">non configurato</span>';
     }
+    if (elKeyname) elKeyname.value = r.keyName || '';
+    if (elPort) elPort.value = r.port || 11100;
 }
 
 /** Salva master key + keyName via /api/veyon/configure. */
@@ -524,6 +535,74 @@ export async function veyonSendFeature(ip, feature, command, args) {
         alert('Veyon ' + feature + ' fallito: ' + (r.error || 'errore'));
     }
     return r.ok;
+}
+
+/** ScreenLock su un singolo studente. */
+export async function veyonCardLock(ip) {
+    if (!state.veyonConfigured) return;
+    await veyonSendFeature(ip, 'screenLock');
+}
+
+/** Apre una prompt e invia un TextMessage modale. */
+export async function veyonCardMsg(ip) {
+    if (!state.veyonConfigured) return;
+    const text = prompt('Messaggio da mostrare a ' + ip + ':', '');
+    if (!text) return;
+    await veyonSendFeature(ip, 'textMsg', 0, { text });
+}
+
+/** Lista IP attivi correnti (visti almeno una volta come `alive`). */
+function ipAttivi() {
+    return [...state.aliveMap.keys()];
+}
+
+/** Esegue una callback async per ogni IP attivo, raccoglie ok/fail. */
+async function veyonForEachAttivo(label, fn) {
+    const ips = ipAttivi();
+    if (!ips.length) {
+        alert('Nessuno studente attivo nel monitor (nessun ping watchdog ricevuto).');
+        return;
+    }
+    if (!confirm(label + ' su ' + ips.length + ' studenti attivi?')) return;
+    let ok = 0, fail = 0;
+    await Promise.all(ips.map(async ip => {
+        try { (await fn(ip)) ? ok++ : fail++; }
+        catch { fail++; }
+    }));
+    alert(label + ' completato: ' + ok + ' OK, ' + fail + ' falliti su ' + ips.length + '.');
+}
+
+/** ScreenLock su tutti gli studenti attivi. */
+export async function veyonClasseLock() {
+    if (!state.veyonConfigured) return;
+    await veyonForEachAttivo('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
+}
+
+/** TextMessage su tutti gli studenti attivi. */
+export async function veyonClasseMsg() {
+    if (!state.veyonConfigured) return;
+    const text = prompt('Messaggio da mostrare a tutti gli studenti attivi:', '');
+    if (!text) return;
+    await veyonForEachAttivo('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { text }));
+}
+
+/**
+ * "Distribuisci proxy_on.bat": su ogni studente attivo lancia una shell
+ * che scarica lo script da Planck stesso e lo esegue. Niente FileTransfer
+ * (non esposto via WebAPI/RFB) — usiamo StartApp + powershell + iwr.
+ */
+export async function veyonDistribuisciProxy() {
+    if (!state.veyonConfigured) return;
+    const lanIp = prompt(
+        'IP/host di Planck visibile dagli studenti (per scaricare proxy_on.bat):',
+        location.hostname || '');
+    if (!lanIp) return;
+    const port = location.port || '9999';
+    const url = `http://${lanIp}:${port}/api/scripts/proxy_on.bat`;
+    const ps = `powershell -NoProfile -Command "iwr ${url} -OutFile $env:TEMP\\proxy_on.bat; & $env:TEMP\\proxy_on.bat"`;
+    await veyonForEachAttivo('Distribuzione proxy_on.bat', ip =>
+        veyonSendFeature(ip, 'startApp', 0, { applications: [ps] })
+    );
 }
 
 export { aggiornaInputDeadline };

@@ -102,6 +102,16 @@
                     </div>
                 </div>
 
+                <!-- Toolbar Veyon: visibile solo se Veyon e' configurato (CSS body.veyon-on). -->
+                <div class="toolbar toolbar-veyon">
+                    <div class="toolbar-group">
+                        <span class="hint-inline">Azioni classe:</span>
+                        <button data-action="veyon-classe-lock" class="btn" title="Blocca schermo a tutti gli studenti attivi">🔒 Lock</button>
+                        <button data-action="veyon-classe-msg" class="btn" title="Mostra un messaggio a tutti">💬 Messaggio</button>
+                        <button data-action="veyon-distribuisci-proxy" class="btn btn-primary" title="Lancia proxy_on.bat su tutti gli studenti">📁 Distribuisci proxy_on</button>
+                    </div>
+                </div>
+
                 <div class="stat-row">
                     <div class="stat-card"><div class="numero" id="stat-richieste">0</div><div class="etichetta">Richieste</div></div>
                     <div class="stat-card"><div class="numero" id="stat-domini">0</div><div class="etichetta">Domini</div></div>

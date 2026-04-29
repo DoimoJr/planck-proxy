@@ -15,6 +15,7 @@ package veyon
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 const (
@@ -23,7 +24,10 @@ const (
 	testServer   = "localhost:11100"
 )
 
-func TestIntegrationDialAuth(t *testing.T) {
+// dialRig apre una connessione contro il Docker rig. Helper condiviso
+// dai test integration di questo file.
+func dialRig(t *testing.T) *Conn {
+	t.Helper()
 	pemBytes, err := os.ReadFile(testKeyPath)
 	if err != nil {
 		t.Fatalf("leggi chiave (rig avviato?): %v", err)
@@ -32,16 +36,53 @@ func TestIntegrationDialAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse PEM: %v", err)
 	}
-
 	conn, err := Dial(Config{
 		Addr:       testServer,
 		KeyName:    testKeyName,
-		Username:   "",
 		PrivateKey: key,
 	})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
+	return conn
+}
+
+func TestIntegrationDialAuth(t *testing.T) {
+	conn := dialRig(t)
 	defer conn.Close()
-	t.Logf("connessione + auth OK contro %s", testServer)
+	si := conn.ServerInit()
+	t.Logf("connessione + auth OK; ServerInit %dx%d %q", si.Width, si.Height, si.Name)
+}
+
+func TestIntegrationScreenLock(t *testing.T) {
+	conn := dialRig(t)
+	defer conn.Close()
+	if err := conn.ScreenLock(); err != nil {
+		t.Fatalf("ScreenLock: %v", err)
+	}
+	t.Logf("ScreenLock inviato")
+	// Non c'e' modo robusto di asserire che il server l'abbia eseguito
+	// (e' headless). Se non si solleva eccezione e la connessione resta
+	// aperta, considera success.
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestIntegrationStartApp(t *testing.T) {
+	conn := dialRig(t)
+	defer conn.Close()
+	if err := conn.StartApp([]string{"xterm"}); err != nil {
+		t.Fatalf("StartApp: %v", err)
+	}
+	t.Logf("StartApp inviato")
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestIntegrationTextMessage(t *testing.T) {
+	conn := dialRig(t)
+	defer conn.Close()
+	if err := conn.TextMessage("Test da Planck integration suite"); err != nil {
+		t.Fatalf("TextMessage: %v", err)
+	}
+	t.Logf("TextMessage inviato")
+	time.Sleep(200 * time.Millisecond)
 }

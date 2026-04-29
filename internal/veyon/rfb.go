@@ -89,6 +89,56 @@ func rfbSelectSecurityType(rw io.ReadWriter, want byte) error {
 	return nil
 }
 
+// ServerInit e' la struttura RFB ServerInit (RFC 6143 §7.3.2).
+//
+// Veyon non popola davvero il framebuffer (e' un control plane), ma lo
+// invia comunque per restare RFB-compatible. I valori non sono significativi
+// per Planck — vengono letti e poi ignorati.
+type ServerInit struct {
+	Width       uint16
+	Height      uint16
+	PixelFormat [16]byte
+	Name        string
+}
+
+// rfbSendClientInit scrive il ClientInit message (RFC 6143 §7.3.1):
+// 1 byte shared-flag. Veyon vuole sempre shared=1.
+func rfbSendClientInit(w io.Writer, shared bool) error {
+	var b byte
+	if shared {
+		b = 1
+	}
+	_, err := w.Write([]byte{b})
+	return err
+}
+
+// rfbReadServerInit legge il ServerInit message (RFC 6143 §7.3.2):
+//
+//	[u16 width][u16 height][16 byte pixelFormat][u32 nameLen][nameLen byte name]
+func rfbReadServerInit(r io.Reader) (ServerInit, error) {
+	var hdr [24]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return ServerInit{}, fmt.Errorf("rfb: read ServerInit header: %w", err)
+	}
+	si := ServerInit{
+		Width:  uint16(hdr[0])<<8 | uint16(hdr[1]),
+		Height: uint16(hdr[2])<<8 | uint16(hdr[3]),
+	}
+	copy(si.PixelFormat[:], hdr[4:20])
+	nameLen := uint32(hdr[20])<<24 | uint32(hdr[21])<<16 | uint32(hdr[22])<<8 | uint32(hdr[23])
+	if nameLen > MaxMessageSize {
+		return si, fmt.Errorf("rfb: ServerInit name length non valida (%d)", nameLen)
+	}
+	if nameLen > 0 {
+		name := make([]byte, nameLen)
+		if _, err := io.ReadFull(r, name); err != nil {
+			return si, fmt.Errorf("rfb: read ServerInit name: %w", err)
+		}
+		si.Name = string(name)
+	}
+	return si, nil
+}
+
 // rfbReadSecurityResult legge il SecurityResult finale (4 byte big-endian,
 // 0=OK, 1=failed). Per RFB v3.8 in caso di failed segue una reason
 // string [u32 length][bytes].

@@ -39,9 +39,16 @@ type Config struct {
 //
 // Non e' concurrent-safe: una sola goroutine alla volta sui metodi.
 type Conn struct {
-	c   net.Conn
-	cfg Config
+	c          net.Conn
+	cfg        Config
+	serverInit ServerInit
 }
+
+// ServerInit ritorna i metadati ricevuti dal server al ClientInit.
+// Width, Height, e Name sono popolati. Per Veyon non sono significativi
+// (e' un control plane, non una sessione VNC vera) ma sono esposti
+// per debug.
+func (c *Conn) ServerInit() ServerInit { return c.serverInit }
 
 // Dial apre una connessione a veyon-server, fa l'handshake RFB,
 // negozia il security type Veyon, e completa l'auth KeyFile.
@@ -88,7 +95,19 @@ func Dial(cfg Config) (*Conn, error) {
 		return nil, err
 	}
 
-	return &Conn{c: tcp, cfg: cfg}, nil
+	// 4. RFB v3.8 ClientInit + ServerInit (RFC 6143 §7.3). Veyon richiede
+	//    questo step anche se il control plane non usa il framebuffer.
+	if err := rfbSendClientInit(tcp, true); err != nil {
+		tcp.Close()
+		return nil, err
+	}
+	si, err := rfbReadServerInit(tcp)
+	if err != nil {
+		tcp.Close()
+		return nil, err
+	}
+
+	return &Conn{c: tcp, cfg: cfg, serverInit: si}, nil
 }
 
 // Close chiude la connessione TCP sottostante.

@@ -5,6 +5,35 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5.1] — 2026-04-29
+
+Hotfix di alpha.5: il toggle dei plugin watchdog non era effettivamente
+rispettato dal flow di distribuzione, e ridistribuire proxy_on creava
+istanze duplicate dei watchdog.
+
+### Fixato
+
+- **Endpoint `/api/scripts/watchdog/<id>.ps1` ora rispetta enable/disable**:
+  ritorna 404 se il plugin e' disabled, 200 se enabled. Prima serviva
+  sempre lo script — il toggle in UI non aveva effetto pratico.
+
+- **`proxy_on.bat` non duplica piu' i watchdog su redistribuzione**:
+  ora, al primo step, killa eventuali watchdog precedenti via WMIC
+  filter su CommandLine, cancella i `.ps1` vecchi, poi riprova il
+  download. Curl con `-f` fallisce su 404 senza scrivere il file →
+  plugin disabled = file mancante = `if exist` skippa lo start.
+
+### UX
+
+Il flow per applicare un cambio di config plugin diventa:
+
+1. Toggle plugin in Settings
+2. Click "Distribuisci proxy_on" → propaga a tutti gli studenti
+
+Il binario non va piu' riavviato (era una mia assunzione errata). Il
+`.bat` non si rigenera al toggle (non serve — e' "stupido" e generico,
+e' il server che decide 200/404).
+
 ## [v2.0.0-alpha.5] — 2026-04-29
 
 Phase 5: framework di **Watchdog plugins**. Planck monitora gli

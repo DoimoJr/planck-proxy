@@ -54,18 +54,33 @@ echo Loop >> "%TEMP%\proxy_watchdog.vbs"
 
 start "" /b wscript.exe "%TEMP%\proxy_watchdog.vbs"
 
-:: Watchdog plugins (Phase 5): scarica e avvia ogni script enabled.
-:: GET /api/watchdog/plugins ritorna JSON con la lista; per semplicita'
-:: il bat scarica l'unico plugin attualmente disponibile (USB) e lo
-:: lancia in background hidden via wscript shell. Quando aggiungiamo
-:: altri plugin, qui si itera.
+:: Watchdog plugins (Phase 5).
+:: Step 1: killa eventuali watchdog precedenti per evitare duplicati
+::         se proxy_on.bat viene rieseguito (es. ridistribuzione dopo
+::         toggle plugin in Planck UI).
+:: Step 2: cancella i .ps1 vecchi cosi' un plugin DISABILITATO non
+::         viene riavviato (curl 404 -> file mancante).
+:: Step 3: scarica nuovi .ps1 dal server (404 se plugin disabled).
+:: Step 4: avvia in background hidden quelli effettivamente scaricati.
 ::
-:: Se Planck e' irraggiungibile, l'errore di curl viene ignorato.
-curl -s -o "%TEMP%\planck_usb_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/usb.ps1 2>nul
+:: Se Planck e' irraggiungibile, gli errori di curl sono ignorati.
+
+:: Step 1: kill watchdog instances esistenti (filtro WMIC su CommandLine
+:: per non toccare powershell di altre cose).
+for /f "tokens=*" %%P in ('wmic process where "name='powershell.exe' and CommandLine like '%%planck_%%_watchdog.ps1%%'" get ProcessId /value 2^>nul ^| findstr "="') do (
+    for /f "tokens=2 delims==" %%I in ("%%P") do taskkill /f /pid %%I >nul 2>&1
+)
+
+:: Step 2: cancella i .ps1 vecchi.
+del "%TEMP%\planck_usb_watchdog.ps1" >nul 2>&1
+del "%TEMP%\planck_process_watchdog.ps1" >nul 2>&1
+
+:: Step 3 + 4: download + launch (uno per plugin, skip su 404).
+curl -s -f -o "%TEMP%\planck_usb_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/usb.ps1 2>nul
 if exist "%TEMP%\planck_usb_watchdog.ps1" (
     start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_usb_watchdog.ps1"
 )
-curl -s -o "%TEMP%\planck_process_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/process.ps1 2>nul
+curl -s -f -o "%TEMP%\planck_process_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/process.ps1 2>nul
 if exist "%TEMP%\planck_process_watchdog.ps1" (
     start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_process_watchdog.ps1"
 )

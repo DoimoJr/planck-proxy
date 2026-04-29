@@ -124,6 +124,28 @@ func (a *API) serveWatchdogScript(w http.ResponseWriter, r *http.Request, filena
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+
+	// Estrai l'ID plugin dal filename (es. "usb_watchdog.ps1" -> "usb").
+	pluginID := strings.TrimSuffix(filename, "_watchdog.ps1")
+
+	// Check enabled state. Se il plugin non e' configurato/abilitato,
+	// 404. Lato studente proxy_on.bat ha `if exist` sul download —
+	// niente file scritto = watchdog skippato per quel plugin.
+	cfgs, err := a.state.LoadWatchdogConfig()
+	if err == nil {
+		enabled := false
+		for _, c := range cfgs {
+			if c.ID == pluginID && c.Enabled {
+				enabled = true
+				break
+			}
+		}
+		if !enabled {
+			http.Error(w, "watchdog plugin "+pluginID+" non abilitato", http.StatusNotFound)
+			return
+		}
+	}
+
 	ip := a.state.LanIP()
 	port := 9999
 	if h := r.Host; h != "" {

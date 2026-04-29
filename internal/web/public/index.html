@@ -288,6 +288,39 @@
                 <ul class="sessioni-list" id="sessioni-list"></ul>
             </div>
 
+            <div class="card" id="card-veyon">
+                <h3>Veyon (controllo studenti)</h3>
+                <p class="hint">Importa la chiave master generata con Veyon Configurator (PEM). Una volta configurata, Planck può inviare comandi (lock schermo, lancio app, messaggi) ai PC studenti che hanno veyon-server in esecuzione.</p>
+
+                <div id="veyon-status-row" class="settings-grid">
+                    <label>Stato</label>
+                    <div id="veyon-status">caricamento...</div>
+                </div>
+
+                <h4 style="margin-top:14px">Configurazione</h4>
+                <div class="settings-grid">
+                    <label>Nome chiave</label>
+                    <input type="text" id="veyon-keyname" placeholder="es. teacher" style="max-width:240px">
+
+                    <label>Chiave privata (PEM)</label>
+                    <textarea id="veyon-pem" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:11px;width:100%"></textarea>
+
+                    <label>Porta server studente</label>
+                    <input type="number" id="veyon-port" value="11100" min="1" max="65535" style="max-width:120px">
+                </div>
+                <div class="toolbar-group" style="margin-top:8px">
+                    <button data-action="veyon-configure" class="btn btn-primary">Salva configurazione</button>
+                    <button data-action="veyon-clear" class="btn btn-danger">Rimuovi</button>
+                </div>
+
+                <h4 style="margin-top:14px">Test connessione</h4>
+                <div class="aggiungi-studente">
+                    <input type="text" id="veyon-test-ip" placeholder="IP studente (es. 192.168.6.15)">
+                    <button data-action="veyon-test" class="btn">Test</button>
+                </div>
+                <div id="veyon-test-result" class="hint" style="margin-top:6px"></div>
+            </div>
+
             <div class="card">
                 <h3>Collegamenti utili</h3>
                 <ul class="link-list">

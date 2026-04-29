@@ -82,6 +82,10 @@ type State struct {
 	authUser            string
 	authPasswordHash    string // hash bcrypt; vuoto = nessuna password impostata
 
+	// --- Veyon (Phase 3e) ---
+	veyonKeyName string // nome master key (vuoto = Veyon non configurato)
+	veyonPort    int    // 0 = default 11100
+
 	// --- Liste ---
 	bloccati       map[string]struct{}
 	dominiIgnorati []string
@@ -161,6 +165,8 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		if len(cfg.DominiIgnorati) > 0 {
 			s.dominiIgnorati = cfg.DominiIgnorati
 		}
+		s.veyonKeyName = cfg.VeyonKeyName
+		s.veyonPort = cfg.VeyonPort
 	} else if err != nil {
 		log.Printf("state: errore lettura config: %v", err)
 	}
@@ -202,6 +208,8 @@ func (s *State) saveConfigLocked() {
 		AuthUser:            s.authUser,
 		AuthPasswordHash:    s.authPasswordHash,
 		DominiIgnorati:      append([]string{}, s.dominiIgnorati...),
+		VeyonKeyName:        s.veyonKeyName,
+		VeyonPort:           s.veyonPort,
 	}
 	if err := s.store.SaveConfig(cfg); err != nil {
 		log.Printf("state: errore save config: %v", err)

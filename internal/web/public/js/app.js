@@ -134,6 +134,9 @@ document.body.addEventListener('click', (e) => {
         case 'combo-delete': actions.eliminaCombo(); break;
         case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
         case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
+        case 'veyon-configure': actions.veyonConfigura(); break;
+        case 'veyon-clear': actions.veyonRimuovi(); break;
+        case 'veyon-test': actions.veyonTest(); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
         case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;

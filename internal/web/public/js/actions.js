@@ -204,6 +204,7 @@ export function cambiaTab(nome) {
     renderTabs();
     renderAll();
     if (nome === 'impostazioni' || nome === 'report') ricaricaSessioni();
+    if (nome === 'impostazioni') veyonAggiornaStato();
 }
 
 // ========================================================================
@@ -446,6 +447,83 @@ export async function spegniServer() {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);color:#e0e0e0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui;z-index:99999';
     overlay.innerHTML = '<h1 style="color:#b77dd4">Planck spento.</h1><p style="opacity:0.7">Puoi chiudere questa finestra.</p>';
     document.body.appendChild(overlay);
+}
+
+// ========================================================================
+// Veyon (Phase 3e)
+// ========================================================================
+
+/** Aggiorna il pannello "Stato" e i campi pre-popolati nella card Veyon. */
+export async function veyonAggiornaStato() {
+    const elStato = document.getElementById('veyon-status');
+    const elKeyname = document.getElementById('veyon-keyname');
+    const elPort = document.getElementById('veyon-port');
+    if (!elStato) return;
+    try {
+        const r = await apiGet('/api/veyon/status');
+        if (r.configured) {
+            elStato.innerHTML = '<span style="color:#4ade80">configurato</span> &mdash; chiave: <code>' + r.keyName + '</code>';
+        } else {
+            elStato.innerHTML = '<span style="color:#999">non configurato</span>';
+        }
+        if (elKeyname) elKeyname.value = r.keyName || '';
+        if (elPort) elPort.value = r.port || 11100;
+    } catch (e) {
+        elStato.textContent = 'errore: ' + e;
+    }
+}
+
+/** Salva master key + keyName via /api/veyon/configure. */
+export async function veyonConfigura() {
+    const keyName = document.getElementById('veyon-keyname').value.trim();
+    const pem = document.getElementById('veyon-pem').value.trim();
+    if (!keyName || !pem) {
+        alert('Inserisci nome chiave e contenuto PEM.');
+        return;
+    }
+    const r = await apiPost('/api/veyon/configure', { keyName, privateKeyPEM: pem });
+    if (r.ok) {
+        document.getElementById('veyon-pem').value = '';
+        await veyonAggiornaStato();
+    } else {
+        alert('Errore: ' + (r.error || 'sconosciuto'));
+    }
+}
+
+/** Rimuove la configurazione Veyon. Chiede conferma. */
+export async function veyonRimuovi() {
+    if (!confirm('Rimuovere la configurazione Veyon? La chiave verra\' eliminata dal disco.')) return;
+    await apiPost('/api/veyon/clear');
+    await veyonAggiornaStato();
+}
+
+/** Test connessione verso un IP specifico. */
+export async function veyonTest() {
+    const ip = document.getElementById('veyon-test-ip').value.trim();
+    const elResult = document.getElementById('veyon-test-result');
+    if (!ip) { alert('Inserisci un IP.'); return; }
+    elResult.textContent = 'connessione in corso...';
+    elResult.style.color = '';
+    const r = await apiPost('/api/veyon/test', { ip });
+    if (r.ok) {
+        elResult.innerHTML = '<span style="color:#4ade80">OK: connessione + autenticazione riuscite verso ' + ip + '</span>';
+    } else {
+        elResult.innerHTML = '<span style="color:#f87171">FAIL: ' + (r.error || 'errore sconosciuto') + '</span>';
+    }
+}
+
+/** Invia un comando feature (UUID o nome simbolico) a uno studente. */
+export async function veyonSendFeature(ip, feature, command, args) {
+    const r = await apiPost('/api/veyon/feature', {
+        ip,
+        feature,
+        command: command || 0,
+        arguments: args || {},
+    });
+    if (!r.ok) {
+        alert('Veyon ' + feature + ' fallito: ' + (r.error || 'errore'));
+    }
+    return r.ok;
 }
 
 export { aggiornaInputDeadline };

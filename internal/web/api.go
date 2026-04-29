@@ -104,6 +104,13 @@ func (a *API) Register(mux *http.ServeMux) {
 	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
 	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
 
+	// Veyon (Phase 3e)
+	mux.HandleFunc("/api/veyon/status", auth(a.handleVeyonStatus))
+	mux.HandleFunc("/api/veyon/configure", auth(a.handleVeyonConfigure))
+	mux.HandleFunc("/api/veyon/clear", auth(a.handleVeyonClear))
+	mux.HandleFunc("/api/veyon/test", auth(a.handleVeyonTest))
+	mux.HandleFunc("/api/veyon/feature", auth(a.handleVeyonFeature))
+
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
 	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))

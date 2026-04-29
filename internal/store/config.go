@@ -24,13 +24,20 @@ type ConfigFile struct {
 	AuthUser            string   `json:"authUser"`
 	AuthPasswordHash    string   `json:"authPasswordHash"`
 	DominiIgnorati      []string `json:"dominiIgnorati"`
+	// VeyonKeyName e' il nome della master key importata dal docente
+	// via Settings UI (Phase 3e). Vuoto = Veyon non configurato. La
+	// chiave privata vive su disco in `<dataDir>/veyon-master.pem`,
+	// non in DB (per separare segreti da config).
+	VeyonKeyName string `json:"veyonKeyName"`
+	// VeyonPort e' la porta TCP dei veyon-server studente. 0 = default 11100.
+	VeyonPort int `json:"veyonPort"`
 }
 
 // kvKeys e' la lista dei campi mappata su chiavi `kv`.
 var kvKeys = struct {
 	Titolo, Classe, Modo, InattivitaSogliaSec,
 	ProxyPort, WebPort, AuthEnabled, AuthUser,
-	AuthPasswordHash string
+	AuthPasswordHash, VeyonKeyName, VeyonPort string
 }{
 	Titolo:              "titolo",
 	Classe:              "classe",
@@ -41,6 +48,8 @@ var kvKeys = struct {
 	AuthEnabled:         "authEnabled",
 	AuthUser:            "authUser",
 	AuthPasswordHash:    "authPasswordHash",
+	VeyonKeyName:        "veyonKeyName",
+	VeyonPort:           "veyonPort",
 }
 
 // LoadConfig legge tutti i campi config da kv + dominiIgnorati dalla
@@ -72,6 +81,8 @@ func (s *Store) LoadConfig() (ConfigFile, bool, error) {
 	cfg.AuthEnabled, _ = s.kvGetBool(kvKeys.AuthEnabled)
 	cfg.AuthUser, _ = s.kvGetString(kvKeys.AuthUser)
 	cfg.AuthPasswordHash, _ = s.kvGetString(kvKeys.AuthPasswordHash)
+	cfg.VeyonKeyName, _ = s.kvGetString(kvKeys.VeyonKeyName)
+	cfg.VeyonPort, _ = s.kvGetInt(kvKeys.VeyonPort)
 
 	// Domini ignorati dalla tabella dedicata.
 	rows, err := s.db.Query(`SELECT dominio FROM domini_ignorati ORDER BY dominio`)
@@ -116,6 +127,8 @@ func (s *Store) SaveConfig(cfg ConfigFile) error {
 		{kvKeys.AuthEnabled, cfg.AuthEnabled},
 		{kvKeys.AuthUser, cfg.AuthUser},
 		{kvKeys.AuthPasswordHash, cfg.AuthPasswordHash},
+		{kvKeys.VeyonKeyName, cfg.VeyonKeyName},
+		{kvKeys.VeyonPort, cfg.VeyonPort},
 	}
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)`)
 	if err != nil {

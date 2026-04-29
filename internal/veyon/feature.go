@@ -112,13 +112,26 @@ func (c *Conn) RecvFeature() (FeatureMessage, error) {
 // ============================================================
 
 const (
-	FeatureScreenLock = "ccb535a2-1d24-4cc1-a709-8b47d2b2ac79"
-	FeatureStartApp   = "da9ca56a-b2ad-4fff-8f8a-929b2927b442" // ex RunProgram
-	FeatureReboot     = "4f7d98f0-395a-4fff-b968-e49b8d0f748c"
-	FeaturePowerDown  = "6f5a27a0-0e2f-496e-afcc-7aae62eede10"
-	FeatureLogoff     = "7311d43d-ab53-439e-a03a-8cb25f7ed526"
-	FeatureTextMsg    = "e75ae9c8-ac17-4d00-8f0d-019348346208"
-	FeatureOpenURL    = "8a11a75d-b3db-48b6-b9cb-f8422ddd5b0c"
+	FeatureScreenLock   = "ccb535a2-1d24-4cc1-a709-8b47d2b2ac79"
+	FeatureStartApp     = "da9ca56a-b2ad-4fff-8f8a-929b2927b442" // ex RunProgram
+	FeatureReboot       = "4f7d98f0-395a-4fff-b968-e49b8d0f748c"
+	FeaturePowerDown    = "6f5a27a0-0e2f-496e-afcc-7aae62eede10"
+	FeaturePowerDownNow = "a88039f2-6716-40d8-b4e1-9f5cd48e91ed" // senza countdown
+	FeaturePowerOn      = "f483c659-b5e7-4dbc-bd91-2c9403e70ebd" // Wake-on-LAN
+	FeatureLogoff       = "7311d43d-ab53-439e-a03a-8cb25f7ed526"
+	FeatureTextMsg      = "e75ae9c8-ac17-4d00-8f0d-019348346208"
+	FeatureOpenURL      = "8a11a75d-b3db-48b6-b9cb-f8422ddd5b0c"
+)
+
+// Comandi specifici di alcuni plugin Veyon. Le chiavi sono integer
+// definiti in `enum class FeatureCommand` in plugins/<feature>/*.h —
+// auto-incrementati partendo da 0.
+const (
+	// ScreenLock: enum FeatureCommand { StartLock=0, StopLock=1 }.
+	// (StartLock coincide con CmdDefault=0, ma StopLock = 1 e' il
+	// command per sbloccare lo schermo.)
+	CmdScreenLockStart FeatureCommand = 0
+	CmdScreenLockStop  FeatureCommand = 1
 )
 
 // uuid e' un helper interno che costruisce qds.QUuid da una stringa
@@ -135,21 +148,28 @@ func uuid(s string) qds.QUuid {
 // High-level wrappers per i comandi piu' usati
 // ============================================================
 
-// ScreenLock attiva il blocco schermo sullo studente.
-//
-// Nota: Veyon ScreenLock e' edge-triggered come "start". Per sbloccare
-// occorre inviare la stessa feature con un command custom dipendente
-// dal plugin (variabile fra release Veyon — quando serve, decoderemo
-// dal sorgente del plugin specifico).
+// ScreenLock attiva il blocco schermo sullo studente (mostra schermo nero).
+// Comando StartLock = 0 dell'enum FeatureCommand del plugin ScreenLock.
 func (c *Conn) ScreenLock() error {
 	return c.SendFeature(FeatureMessage{
 		FeatureUUID: uuid(FeatureScreenLock),
-		Command:     CmdDefault,
+		Command:     CmdScreenLockStart,
+	})
+}
+
+// ScreenUnlock rimuove il lock sullo studente. Comando StopLock = 1.
+func (c *Conn) ScreenUnlock() error {
+	return c.SendFeature(FeatureMessage{
+		FeatureUUID: uuid(FeatureScreenLock),
+		Command:     CmdScreenLockStop,
 	})
 }
 
 // StartApp esegue uno o piu' programmi sullo studente. I path possono
 // essere assoluti (es. "C:\\Windows\\notepad.exe") o nel PATH.
+//
+// Argomento `Applications` (capitale, da argToString(Argument::Applications)
+// in plugins/desktopservices/DesktopServicesFeaturePlugin.h).
 func (c *Conn) StartApp(programs []string) error {
 	if len(programs) == 0 {
 		return fmt.Errorf("veyon: StartApp richiede almeno un programma")
@@ -158,7 +178,7 @@ func (c *Conn) StartApp(programs []string) error {
 		FeatureUUID: uuid(FeatureStartApp),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"applications": programs,
+			"Applications": programs,
 		},
 	})
 }
@@ -171,10 +191,19 @@ func (c *Conn) Reboot() error {
 	})
 }
 
-// PowerDown spegne il PC studente.
+// PowerDown spegne il PC studente con il countdown standard di Veyon.
+// Per spegnimento immediato senza dialog, usa PowerDownNow.
 func (c *Conn) PowerDown() error {
 	return c.SendFeature(FeatureMessage{
 		FeatureUUID: uuid(FeaturePowerDown),
+		Command:     CmdDefault,
+	})
+}
+
+// PowerDownNow spegne il PC studente immediatamente (no countdown UI).
+func (c *Conn) PowerDownNow() error {
+	return c.SendFeature(FeatureMessage{
+		FeatureUUID: uuid(FeaturePowerDownNow),
 		Command:     CmdDefault,
 	})
 }
@@ -188,17 +217,26 @@ func (c *Conn) Logoff() error {
 }
 
 // TextMessage mostra un messaggio modale sul PC studente.
+//
+// Argomenti (chiavi capitali, da argToString(Argument::Text) in
+// plugins/textmessage/TextMessageFeaturePlugin.h):
+//   - Text: stringa del messaggio
+//   - Icon: int corrispondente a QMessageBox::Icon (1 = Information,
+//     2 = Warning, 3 = Critical, 4 = Question)
 func (c *Conn) TextMessage(text string) error {
 	return c.SendFeature(FeatureMessage{
 		FeatureUUID: uuid(FeatureTextMsg),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"text": text,
+			"Text": text,
+			"Icon": int32(1), // QMessageBox::Information
 		},
 	})
 }
 
 // OpenURL apre uno o piu' URL nel browser di default sul PC studente.
+//
+// Argomento `WebsiteUrls` (capitale, da argToString(Argument::WebsiteUrls)).
 func (c *Conn) OpenURL(urls []string) error {
 	if len(urls) == 0 {
 		return fmt.Errorf("veyon: OpenURL richiede almeno un URL")
@@ -207,8 +245,19 @@ func (c *Conn) OpenURL(urls []string) error {
 		FeatureUUID: uuid(FeatureOpenURL),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"websiteUrls": urls,
+			"WebsiteUrls": urls,
 		},
 	})
+}
+
+// PowerOn richiede Wake-on-LAN: il PC studente e' spento, niente IP per
+// raggiungerlo via Veyon. Implementazione futura con magic packet UDP
+// broadcast (porta 9) — richiede MAC address che attualmente non e'
+// memorizzato nella mappa studenti. TODO Phase 4.x.
+//
+// Per ora ritorna un errore esplicativo; il bottone UI puo' rimanere
+// disabilitato finche' il MAC non viene aggiunto al record studente.
+func (c *Conn) PowerOn() error {
+	return fmt.Errorf("veyon: PowerOn (Wake-on-LAN) non ancora implementato — serve MAC address nello studente")
 }
 

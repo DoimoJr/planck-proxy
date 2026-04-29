@@ -528,6 +528,7 @@ function renderGrigliaIp(container, ips, ora, soglia) {
                 + '<div class="ip-card-tags"></div>'
                 + '<div class="ip-card-veyon">'
                 + '<button type="button" data-action="veyon-card-lock" data-ip="' + ip + '" title="Blocca schermo">🔒</button>'
+                + '<button type="button" data-action="veyon-card-unlock" data-ip="' + ip + '" title="Sblocca schermo">🔓</button>'
                 + '<button type="button" data-action="veyon-card-msg" data-ip="' + ip + '" title="Messaggio">💬</button>'
                 + '</div>';
             return card;
@@ -964,8 +965,11 @@ export function renderSelectionBar() {
     bar.innerHTML =
         '<span class="selection-count">' + n + ' selezionat' + (n === 1 ? 'o' : 'i') + '</span>'
         + (veyonOn
-            ? '<button class="btn" data-action="veyon-classe-lock" title="Blocca schermo">🔒 Lock</button>'
-            + '<button class="btn" data-action="veyon-classe-msg" title="Messaggio">💬 Msg</button>'
+            ? '<button class="btn" data-action="veyon-classe-lock" title="Blocca schermo">🔒</button>'
+            + '<button class="btn" data-action="veyon-classe-unlock" title="Sblocca schermo">🔓</button>'
+            + '<button class="btn" data-action="veyon-classe-msg" title="Messaggio">💬</button>'
+            + '<button class="btn btn-warning" data-action="veyon-classe-reboot" title="Riavvia">🔄</button>'
+            + '<button class="btn btn-danger" data-action="veyon-classe-poweroff" title="Spegni">⏻</button>'
             : '')
         + '<button class="btn" data-action="clear-selection">Deseleziona tutti</button>';
 }

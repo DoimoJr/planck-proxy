@@ -144,9 +144,13 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-clear': actions.veyonRimuovi(); break;
         case 'veyon-test': actions.veyonTest(); break;
         case 'veyon-card-lock': e.stopPropagation(); actions.veyonCardLock(el.dataset.ip); break;
+        case 'veyon-card-unlock': e.stopPropagation(); actions.veyonCardUnlock(el.dataset.ip); break;
         case 'veyon-card-msg': e.stopPropagation(); actions.veyonCardMsg(el.dataset.ip); break;
         case 'veyon-classe-lock': actions.veyonClasseLock(); break;
+        case 'veyon-classe-unlock': actions.veyonClasseUnlock(); break;
         case 'veyon-classe-msg': actions.veyonClasseMsg(); break;
+        case 'veyon-classe-reboot': actions.veyonClasseReboot(); break;
+        case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;

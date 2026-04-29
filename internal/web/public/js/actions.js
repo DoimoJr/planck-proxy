@@ -591,29 +591,52 @@ export async function veyonCardLock(ip) {
     await veyonSendFeature(ip, 'screenLock');
 }
 
+/** Sblocca lo schermo di un singolo studente. */
+export async function veyonCardUnlock(ip) {
+    if (!state.veyonConfigured) return;
+    await veyonSendFeature(ip, 'screenUnlock');
+}
+
 /** Apre una prompt e invia un TextMessage modale. */
 export async function veyonCardMsg(ip) {
     if (!state.veyonConfigured) return;
     const text = prompt('Messaggio da mostrare a ' + ip + ':', '');
     if (!text) return;
-    await veyonSendFeature(ip, 'textMsg', 0, { text });
+    // Veyon usa argument key "Text" (capitale), Icon=1=Information.
+    await veyonSendFeature(ip, 'textMsg', 0, { Text: text, Icon: 1 });
 }
 
-/** Lista IP attivi correnti (visti almeno una volta come `alive`). */
+/** Lista IP visti almeno una volta come `alive` (ping watchdog). */
 function ipAttivi() {
     return [...state.aliveMap.keys()];
 }
 
+/** Lista IP definiti nella mappa studenti (Impostazioni → Mappa studenti). */
+function ipStudenti() {
+    return Object.keys(state.cfg.studenti || {});
+}
+
 /**
- * Determina su quali IP applicare un'azione di classe:
- * - se c'e' una multi-selezione, usa quella
- * - altrimenti usa tutti gli IP attivi (watchdog)
+ * Determina su quali IP applicare un'azione di classe.
  *
- * Ritorna anche un'etichetta descrittiva da mettere nel confirm().
+ * Priorita':
+ *   1. Multi-selezione esplicita (Ctrl/Shift+click sulle card)
+ *   2. Mappa studenti configurata (la "directory" del docente)
+ *   3. Fallback: solo IP attivi (visti come alive)
+ *
+ * Veyon Master tipicamente usa una directory (LDAP/AD) per sapere quali
+ * PC ci sono. Nel nostro setup il docente compila la mappa studenti
+ * (IP→nome) — quella e' la nostra directory. Solo se non e' compilata
+ * cadiamo sul watchdog (che pero' richiede gia' proxy_on attivo, quindi
+ * non funziona per "distribuisci proxy_on").
  */
 function targetIps() {
     if (state.selectedIps.size > 0) {
         return { ips: [...state.selectedIps], desc: state.selectedIps.size + ' studenti selezionati' };
+    }
+    const studenti = ipStudenti();
+    if (studenti.length > 0) {
+        return { ips: studenti, desc: studenti.length + ' studenti dalla mappa' };
     }
     const a = ipAttivi();
     return { ips: a, desc: a.length + ' studenti attivi' };
@@ -635,24 +658,50 @@ async function veyonForEachTarget(label, fn) {
     alert(label + ' completato: ' + ok + ' OK, ' + fail + ' falliti su ' + ips.length + '.');
 }
 
-/** ScreenLock su tutti gli studenti attivi. */
+/** ScreenLock su tutti i target (selezione/mappa studenti/attivi). */
 export async function veyonClasseLock() {
     if (!state.veyonConfigured) return;
     await veyonForEachTarget('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
 }
 
-/** TextMessage su tutti gli studenti attivi. */
+/** ScreenUnlock su tutti i target. */
+export async function veyonClasseUnlock() {
+    if (!state.veyonConfigured) return;
+    await veyonForEachTarget('ScreenUnlock', ip => veyonSendFeature(ip, 'screenUnlock'));
+}
+
+/** TextMessage su tutti i target. */
 export async function veyonClasseMsg() {
     if (!state.veyonConfigured) return;
-    const text = prompt('Messaggio da mostrare a tutti gli studenti attivi:', '');
+    const text = prompt('Messaggio da mostrare:', '');
     if (!text) return;
-    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { text }));
+    // Veyon usa argument key "Text" (capitale).
+    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { Text: text, Icon: 1 }));
+}
+
+/** Reboot su tutti i target. */
+export async function veyonClasseReboot() {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Riavviare i PC? L\'azione e\' immediata: gli studenti perdono il lavoro non salvato.')) return;
+    await veyonForEachTarget('Reboot', ip => veyonSendFeature(ip, 'reboot'));
+}
+
+/** PowerDown su tutti i target. */
+export async function veyonClassePowerDown() {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Spegnere i PC? L\'azione e\' immediata: gli studenti perdono il lavoro non salvato.')) return;
+    await veyonForEachTarget('PowerDown', ip => veyonSendFeature(ip, 'powerDown'));
 }
 
 /**
- * "Distribuisci proxy_on.bat": su ogni studente attivo lancia una shell
+ * "Distribuisci proxy_on.bat": su ogni studente target lancia una shell
  * che scarica lo script da Planck stesso e lo esegue. Niente FileTransfer
- * (non esposto via WebAPI/RFB) — usiamo StartApp + powershell + iwr.
+ * (non esposto via RFB) — usiamo StartApp + powershell + iwr.
+ *
+ * I target di default sono gli IP della mappa studenti (la "directory"
+ * del docente) perche' a questo punto gli studenti probabilmente NON
+ * hanno ancora pingato il watchdog di Planck (proxy_on non e' stato
+ * ancora distribuito).
  */
 export async function veyonDistribuisciProxy() {
     if (!state.veyonConfigured) return;
@@ -663,8 +712,9 @@ export async function veyonDistribuisciProxy() {
     const port = location.port || '9999';
     const url = `http://${lanIp}:${port}/api/scripts/proxy_on.bat`;
     const ps = `powershell -NoProfile -Command "iwr ${url} -OutFile $env:TEMP\\proxy_on.bat; & $env:TEMP\\proxy_on.bat"`;
+    // "Applications" e' la chiave attesa da DesktopServicesFeaturePlugin.
     await veyonForEachTarget('Distribuzione proxy_on.bat', ip =>
-        veyonSendFeature(ip, 'startApp', 0, { applications: [ps] })
+        veyonSendFeature(ip, 'startApp', 0, { Applications: [ps] })
     );
 }
 

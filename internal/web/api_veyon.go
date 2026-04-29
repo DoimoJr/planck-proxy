@@ -97,14 +97,27 @@ type veyonFeatureBody struct {
 // veyonSymbolicFeatures mappa nomi simbolici comodi → UUID.
 // Qualunque chiamata con `feature` non in questa mappa viene
 // interpretata come UUID raw.
+//
+// Per ScreenLock il command field discrimina lock/unlock (0/1):
+// usiamo due alias simbolici "screenLock" e "screenUnlock" per
+// non costringere il client a sapere i numeri.
 var veyonSymbolicFeatures = map[string]string{
-	"screenLock": veyon.FeatureScreenLock,
-	"startApp":   veyon.FeatureStartApp,
-	"reboot":     veyon.FeatureReboot,
-	"powerDown":  veyon.FeaturePowerDown,
-	"logoff":     veyon.FeatureLogoff,
-	"textMsg":    veyon.FeatureTextMsg,
-	"openURL":    veyon.FeatureOpenURL,
+	"screenLock":   veyon.FeatureScreenLock,
+	"screenUnlock": veyon.FeatureScreenLock, // stesso UUID, command=1 dal client
+	"startApp":     veyon.FeatureStartApp,
+	"reboot":       veyon.FeatureReboot,
+	"powerDown":    veyon.FeaturePowerDown,
+	"powerDownNow": veyon.FeaturePowerDownNow,
+	"logoff":       veyon.FeatureLogoff,
+	"textMsg":      veyon.FeatureTextMsg,
+	"openURL":      veyon.FeatureOpenURL,
+}
+
+// veyonSymbolicCommands mappa nomi simbolici → command number per le
+// feature dove il default (0) non e' sufficiente. Solo screenUnlock
+// per ora.
+var veyonSymbolicCommands = map[string]int32{
+	"screenUnlock": 1, // ScreenLock::FeatureCommand::StopLock
 }
 
 func (a *API) handleVeyonFeature(w http.ResponseWriter, r *http.Request) {
@@ -119,10 +132,16 @@ func (a *API) handleVeyonFeature(w http.ResponseWriter, r *http.Request) {
 
 	// Risolvi nome simbolico se presente.
 	uuidStr := body.Feature
+	cmd := body.Command
 	if strings.Contains(uuidStr, "-") == false {
 		// non assomiglia a un UUID, prova come simbolico
-		if mapped, ok := veyonSymbolicFeatures[uuidStr]; ok {
+		if mapped, ok := veyonSymbolicFeatures[body.Feature]; ok {
 			uuidStr = mapped
+			// Se il simbolico ha un command default associato, usalo
+			// (override del campo `command` del body, che spesso e' 0).
+			if c, ok := veyonSymbolicCommands[body.Feature]; ok && body.Command == 0 {
+				cmd = c
+			}
 		} else {
 			writeError(w, http.StatusBadRequest, "feature sconosciuta: "+body.Feature, "BAD_FEATURE")
 			return
@@ -143,7 +162,7 @@ func (a *API) handleVeyonFeature(w http.ResponseWriter, r *http.Request) {
 
 	fm := veyon.FeatureMessage{
 		FeatureUUID: uuid,
-		Command:     veyon.FeatureCommand(body.Command),
+		Command:     veyon.FeatureCommand(cmd),
 		Arguments:   args,
 	}
 	if err := a.state.VeyonSendFeature(body.IP, fm); err != nil {

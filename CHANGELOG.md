@@ -5,6 +5,46 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5.4] — 2026-04-29
+
+Refactor distribuzione proxy: **da .bat a .vbs**. Niente piu' flash di
+console / cmd minimizzata sugli studenti — esecuzione 100% silenziosa.
+
+### Cambiato
+
+- **`proxy_on.bat` → `proxy_on.vbs`**, idem per `proxy_off`.
+
+  Su Windows i `.bat` sono associati a `cmd.exe` (subsystem console),
+  che apre **sempre** una finestra console quando viene invocato. Con
+  `OpenFileInApplication=true` di Veyon FileTransfer, ogni studente
+  vedeva un cmd lampeggiare/restare minimizzato col messaggio
+  "Proxy attivato". Anche con `start /min` e `WindowStyle Hidden` sui
+  child, c'era sempre un flash.
+
+  Soluzione strutturale: i `.vbs` sono associati a `wscript.exe`
+  (subsystem GUI), che NON crea nessuna finestra. La logica del bat
+  (set proxy in HKCU, kill watchdog precedenti, lancia watchdog VBS,
+  scarica + lancia plugin .ps1) viene riscritta come VBScript usando
+  `WScript.Shell.RegWrite` per il registry e `Run "wscript ...", 0,
+  False` per i child hidden.
+
+- **API endpoint per il download manuale rinominato**:
+  `/api/scripts/proxy_on.bat` → `/api/scripts/proxy_on.vbs` (idem off).
+  Content-Type: `text/vbscript`.
+
+- **API distribuzione**: `/api/veyon/distribuisci-proxy` e
+  `/api/veyon/disinstalla-proxy` ora trasferiscono i file `.vbs`
+  invece di `.bat`. Comportamento client-side identico, solo nessun
+  cmd visibile.
+
+### Note di upgrade
+
+- I `.bat` vecchi gia' distribuiti agli studenti continuano a girare
+  finche' non si fa Distribuisci proxy_off oppure il PC viene
+  riavviato. La prossima Distribuisci proxy_on inviera' la versione
+  `.vbs`, che killa il watchdog vecchio e installa il nuovo flow.
+- Nessun cambio per il docente: stessa UI, stessi bottoni.
+
 ## [v2.0.0-alpha.5.3] — 2026-04-29
 
 Hotfix: cmd window non si chiudeva sul PC studente dopo Distribuisci.

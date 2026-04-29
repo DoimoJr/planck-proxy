@@ -706,20 +706,20 @@ export async function veyonClassePowerDown() {
  * ancora distribuito).
  */
 /**
- * Distribuisce e attiva proxy_on.bat sui target via Veyon FileTransfer
- * + OpenFileInApplication=true. Il server legge il bat dal data dir,
- * lo manda chunked via il protocollo Veyon nativo (non via curl + bat
- * download), e lo studente lo apre col programma associato (cmd.exe
- * per i .bat → esegue).
+ * Distribuisce e attiva proxy_on.vbs sui target via Veyon FileTransfer
+ * + OpenFileInApplication=true. Il server legge il vbs dal data dir,
+ * lo manda chunked via il protocollo Veyon nativo, e lo studente lo
+ * apre col programma associato (wscript.exe per i .vbs → esegue
+ * SILENZIOSAMENTE, nessuna console o finestra visibile).
  */
 export async function veyonDistribuisciProxy() {
     if (!state.veyonConfigured) return;
-    await veyonDistribuisciHelper('/api/veyon/distribuisci-proxy', 'Distribuzione proxy_on.bat');
+    await veyonDistribuisciHelper('/api/veyon/distribuisci-proxy', 'Distribuzione proxy_on');
 }
 
 /**
- * Distribuisce proxy_off.bat sui target. Il bat disabilita il proxy
- * registrato in HKCU e killa il watchdog VBScript locale.
+ * Distribuisce proxy_off.vbs sui target: disabilita il proxy
+ * registrato in HKCU e killa i watchdog locali.
  */
 export async function veyonDisinstallaProxy() {
     if (!state.veyonConfigured) return;

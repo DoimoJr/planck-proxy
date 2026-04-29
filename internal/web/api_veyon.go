@@ -181,15 +181,17 @@ type distributeBatBody struct {
 	IPs []string `json:"ips"`
 }
 
-// handleVeyonDistribuisciProxy invia proxy_on.bat ai target via FileTransfer
-// con flag "open in app" → cmd.exe lo esegue, attivando il proxy lato studente.
+// handleVeyonDistribuisciProxy invia proxy_on.vbs ai target via FileTransfer
+// con flag "open in app" → wscript.exe lo esegue, attivando il proxy lato
+// studente. wscript e' subsystem GUI -> nessuna finestra/console visibile
+// (niente flash, niente prompt).
 func (a *API) handleVeyonDistribuisciProxy(w http.ResponseWriter, r *http.Request) {
-	a.distributeBat(w, r, "proxy_on.bat")
+	a.distributeBat(w, r, "proxy_on.vbs")
 }
 
-// handleVeyonDisinstallaProxy invia proxy_off.bat ai target.
+// handleVeyonDisinstallaProxy invia proxy_off.vbs ai target.
 func (a *API) handleVeyonDisinstallaProxy(w http.ResponseWriter, r *http.Request) {
-	a.distributeBat(w, r, "proxy_off.bat")
+	a.distributeBat(w, r, "proxy_off.vbs")
 }
 
 // distributeBat e' il flow comune: legge il file dal data dir, itera sui

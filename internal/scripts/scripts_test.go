@@ -13,26 +13,25 @@ func TestGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if filepath.Base(on) != "proxy_on.bat" || filepath.Base(off) != "proxy_off.bat" {
+	if filepath.Base(on) != "proxy_on.vbs" || filepath.Base(off) != "proxy_off.vbs" {
 		t.Errorf("path inattesi: on=%s off=%s", on, off)
 	}
 
 	onContent, _ := os.ReadFile(on)
 	body := string(onContent)
-	if !strings.Contains(body, "set IP_PROF=192.168.1.100") {
-		t.Errorf("proxy_on.bat: IP non sostituito\n%s", body)
+	if !strings.Contains(body, `ipProf = "192.168.1.100"`) {
+		t.Errorf("proxy_on.vbs: IP non sostituito\n%s", body)
 	}
-	if !strings.Contains(body, "set PORTA=9090") {
-		t.Errorf("proxy_on.bat: porta non sostituita\n%s", body)
+	if !strings.Contains(body, `portaProxy = "9090"`) {
+		t.Errorf("proxy_on.vbs: porta non sostituita\n%s", body)
 	}
 	if strings.Contains(body, "__IP_DOCENTE__") || strings.Contains(body, "__PORTA_PROXY__") {
-		t.Errorf("proxy_on.bat: segnaposti non sostituiti")
+		t.Errorf("proxy_on.vbs: segnaposti non sostituiti")
 	}
 
 	offContent, _ := os.ReadFile(off)
-	if !strings.Contains(string(offContent), "Disattiva proxy") &&
-		!strings.Contains(string(offContent), "Disattiva il proxy") {
-		t.Errorf("proxy_off.bat: contenuto inatteso\n%s", offContent)
+	if !strings.Contains(string(offContent), "ProxyEnable") {
+		t.Errorf("proxy_off.vbs: contenuto inatteso\n%s", offContent)
 	}
 }
 

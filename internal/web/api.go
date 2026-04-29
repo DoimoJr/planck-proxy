@@ -98,8 +98,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/students/clear", auth(a.handleStudentClear))
 
 	// Download script studenti (Phase 1.7)
-	mux.HandleFunc("/api/scripts/proxy_on.bat", auth(a.handleScriptProxyOn))
-	mux.HandleFunc("/api/scripts/proxy_off.bat", auth(a.handleScriptProxyOff))
+	mux.HandleFunc("/api/scripts/proxy_on.vbs", auth(a.handleScriptProxyOn))
+	mux.HandleFunc("/api/scripts/proxy_off.vbs", auth(a.handleScriptProxyOff))
 
 	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
 	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
@@ -531,18 +531,18 @@ func (a *API) handleScriptProxyOn(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	a.serveScriptDownload(w, "proxy_on.bat")
+	a.serveScriptDownload(w, "proxy_on.vbs")
 }
 
 func (a *API) handleScriptProxyOff(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	a.serveScriptDownload(w, "proxy_off.bat")
+	a.serveScriptDownload(w, "proxy_off.vbs")
 }
 
-// serveScriptDownload manda il file .bat come download (Content-Disposition
-// attachment) leggendolo dalla data dir.
+// serveScriptDownload manda il file .vbs come download
+// (Content-Disposition attachment) leggendolo dalla data dir.
 func (a *API) serveScriptDownload(w http.ResponseWriter, filename string) {
 	dataDir := a.state.Store().DataDir()
 	if dataDir == "" {
@@ -554,7 +554,7 @@ func (a *API) serveScriptDownload(w http.ResponseWriter, filename string) {
 		writeError(w, http.StatusNotFound, "Script non trovato: "+err.Error(), "NOT_FOUND")
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-bat; charset=UTF-8")
+	w.Header().Set("Content-Type", "text/vbscript; charset=UTF-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)

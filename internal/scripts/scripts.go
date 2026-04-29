@@ -19,105 +19,146 @@ import (
 // proxyOnTemplate e' il contenuto di proxy_on.bat. I segnaposto
 // `__IP_DOCENTE__`, `__PORTA_PROXY__`, `__VERSIONE__` vengono sostituiti
 // in Generate.
-const proxyOnTemplate = `@echo off
-:: ============================================================
-:: Generato automaticamente da Planck Proxy v__VERSIONE__
-:: PC docente: __IP_DOCENTE__:__PORTA_PROXY__
-:: Distribuire via Veyon ai PC studenti.
-:: ============================================================
+const proxyOnTemplate = `' ============================================================
+' Planck Proxy v__VERSIONE__ - proxy_on.vbs
+' PC docente: __IP_DOCENTE__:__PORTA_PROXY__
+'
+' VBScript invece di .bat per essere TOTALMENTE invisibile sul PC
+' studente. Windows apre .vbs con wscript.exe (subsystem GUI =
+' nessuna console, nessun flash), .bat con cmd.exe (subsystem
+' console = sempre lampeggia).
+'
+' Logica:
+'   1. Setta il proxy in HKCU (registry user, no UAC)
+'   2. Killa watchdog precedenti per evitare duplicati su redistribuzione
+'   3. Crea+lancia un watchdog VBS che ri-applica il proxy + pinga /_alive
+'   4. Scarica + lancia gli script watchdog plugin enabled (USB, process)
+'   5. Self-delete del .vbs
+' ============================================================
 
-set IP_PROF=__IP_DOCENTE__
-set PORTA=__PORTA_PROXY__
+Option Explicit
+Dim ipProf, portaProxy, portaWeb, ws, fso, tmpDir, watchdogPath
+ipProf = "__IP_DOCENTE__"
+portaProxy = "__PORTA_PROXY__"
+portaWeb = "__PORTA_WEB__"
 
-:: Attiva subito (con bypass per il server del prof e localhost)
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul 2>&1
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /t REG_SZ /d "%IP_PROF%:%PORTA%" /f >nul 2>&1
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyOverride /t REG_SZ /d "%IP_PROF%;localhost;127.0.0.1;<local>" /f >nul 2>&1
+Set ws = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+tmpDir = ws.ExpandEnvironmentStrings("%TEMP%")
 
-:: Crea lo script watchdog nascosto che riapplica il proxy + ping di presenza
-echo Set ws = CreateObject("WScript.Shell") > "%TEMP%\proxy_watchdog.vbs"
-echo Do >> "%TEMP%\proxy_watchdog.vbs"
-echo   ws.Run "reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"" /v ProxyEnable /t REG_DWORD /d 1 /f", 0, True >> "%TEMP%\proxy_watchdog.vbs"
-echo   ws.Run "reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"" /v ProxyServer /t REG_SZ /d ""%IP_PROF%:%PORTA%"" /f", 0, True >> "%TEMP%\proxy_watchdog.vbs"
-echo   ws.Run "reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"" /v ProxyOverride /t REG_SZ /d ""%IP_PROF%;localhost;127.0.0.1;<local>"" /f", 0, True >> "%TEMP%\proxy_watchdog.vbs"
-echo   On Error Resume Next >> "%TEMP%\proxy_watchdog.vbs"
-echo   Dim http : Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0") >> "%TEMP%\proxy_watchdog.vbs"
-echo   http.setProxy 1 >> "%TEMP%\proxy_watchdog.vbs"
-echo   http.setTimeouts 3000, 3000, 3000, 3000 >> "%TEMP%\proxy_watchdog.vbs"
-echo   http.Open "GET", "http://%IP_PROF%:%PORTA%/_alive", False >> "%TEMP%\proxy_watchdog.vbs"
-echo   http.Send >> "%TEMP%\proxy_watchdog.vbs"
-echo   Set http = Nothing >> "%TEMP%\proxy_watchdog.vbs"
-echo   Err.Clear >> "%TEMP%\proxy_watchdog.vbs"
-echo   On Error Goto 0 >> "%TEMP%\proxy_watchdog.vbs"
-echo   WScript.Sleep 5000 >> "%TEMP%\proxy_watchdog.vbs"
-echo Loop >> "%TEMP%\proxy_watchdog.vbs"
+' --- Step 1: set proxy registry ---
+ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 1, "REG_DWORD"
+ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer", ipProf & ":" & portaProxy, "REG_SZ"
+ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyOverride", ipProf & ";localhost;127.0.0.1;<local>", "REG_SZ"
 
-:: /min e niente /b: stacca dalla console del bat parent (sennon' cmd
-:: resta aperto/minimizzato finche' i child sono in vita).
-:: wscript.exe e' subsystem GUI quindi e' invisibile comunque.
-start "" /min wscript.exe "%TEMP%\proxy_watchdog.vbs"
+' --- Step 2: kill watchdog precedenti (proxy + plugin) ---
+On Error Resume Next
+ws.Run "wmic process where ""commandline like '%%proxy_watchdog.vbs%%'"" delete", 0, True
+ws.Run "wmic process where ""commandline like '%%planck_%%_watchdog.ps1%%'"" delete", 0, True
+fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
+fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
+fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
+On Error Goto 0
 
-:: Watchdog plugins (Phase 5).
-:: Step 1: killa eventuali watchdog precedenti per evitare duplicati
-::         se proxy_on.bat viene rieseguito (es. ridistribuzione dopo
-::         toggle plugin in Planck UI).
-:: Step 2: cancella i .ps1 vecchi cosi' un plugin DISABILITATO non
-::         viene riavviato (curl 404 -> file mancante).
-:: Step 3: scarica nuovi .ps1 dal server (404 se plugin disabled).
-:: Step 4: avvia in background hidden quelli effettivamente scaricati.
-::
-:: Se Planck e' irraggiungibile, gli errori di curl sono ignorati.
+' --- Step 3: crea + lancia il watchdog VBS proxy/alive ---
+watchdogPath = tmpDir & "\proxy_watchdog.vbs"
+Dim f
+Set f = fso.CreateTextFile(watchdogPath, True)
+f.WriteLine "Set ws = CreateObject(""WScript.Shell"")"
+f.WriteLine "Do"
+f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable"", 1, ""REG_DWORD"""
+f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer"", """ & ipProf & ":" & portaProxy & """, ""REG_SZ"""
+f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyOverride"", """ & ipProf & ";localhost;127.0.0.1;<local>"", ""REG_SZ"""
+f.WriteLine "  On Error Resume Next"
+f.WriteLine "  Dim h : Set h = CreateObject(""MSXML2.ServerXMLHTTP.6.0"")"
+f.WriteLine "  h.setProxy 1"
+f.WriteLine "  h.setTimeouts 3000, 3000, 3000, 3000"
+f.WriteLine "  h.Open ""GET"", ""http://" & ipProf & ":" & portaProxy & "/_alive"", False"
+f.WriteLine "  h.Send"
+f.WriteLine "  Set h = Nothing"
+f.WriteLine "  Err.Clear"
+f.WriteLine "  On Error Goto 0"
+f.WriteLine "  WScript.Sleep 5000"
+f.WriteLine "Loop"
+f.Close
 
-:: Step 1: kill watchdog instances esistenti (filtro WMIC su CommandLine
-:: per non toccare powershell di altre cose).
-for /f "tokens=*" %%P in ('wmic process where "name='powershell.exe' and CommandLine like '%%planck_%%_watchdog.ps1%%'" get ProcessId /value 2^>nul ^| findstr "="') do (
-    for /f "tokens=2 delims==" %%I in ("%%P") do taskkill /f /pid %%I >nul 2>&1
-)
+' Lancia hidden (intWindowStyle=0, bWaitOnReturn=False).
+ws.Run "wscript.exe """ & watchdogPath & """", 0, False
 
-:: Step 2: cancella i .ps1 vecchi.
-del "%TEMP%\planck_usb_watchdog.ps1" >nul 2>&1
-del "%TEMP%\planck_process_watchdog.ps1" >nul 2>&1
+' --- Step 4: scarica + lancia plugin watchdog (USB, process). ---
+DownloadAndRunPS "/api/scripts/watchdog/usb.ps1", "planck_usb_watchdog.ps1"
+DownloadAndRunPS "/api/scripts/watchdog/process.ps1", "planck_process_watchdog.ps1"
 
-:: Step 3 + 4: download + launch (uno per plugin, skip su 404).
-curl -s -f -o "%TEMP%\planck_usb_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/usb.ps1 2>nul
-if exist "%TEMP%\planck_usb_watchdog.ps1" (
-    start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_usb_watchdog.ps1"
-)
-curl -s -f -o "%TEMP%\planck_process_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/process.ps1 2>nul
-if exist "%TEMP%\planck_process_watchdog.ps1" (
-    start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_process_watchdog.ps1"
-)
+' --- Step 5: self-delete del .vbs (best-effort) ---
+On Error Resume Next
+fso.DeleteFile WScript.ScriptFullName, True
+On Error Goto 0
 
-(goto) 2>nul & del "%~f0"
+WScript.Quit 0
+
+' Helper: scarica uno script .ps1 da Planck (404 -> skip),
+' lo salva e lo lancia con powershell hidden.
+Sub DownloadAndRunPS(urlPath, localFile)
+    Dim psPath, h, stream
+    psPath = tmpDir & "\" & localFile
+    On Error Resume Next
+    Set h = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    h.setTimeouts 3000, 3000, 3000, 3000
+    h.Open "GET", "http://" & ipProf & ":" & portaWeb & urlPath, False
+    h.Send
+    If Err.Number = 0 And h.Status = 200 Then
+        Set stream = CreateObject("ADODB.Stream")
+        stream.Type = 1 ' adTypeBinary
+        stream.Open
+        stream.Write h.ResponseBody
+        stream.SaveToFile psPath, 2 ' adSaveCreateOverWrite
+        stream.Close
+        ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psPath & """", 0, False
+    End If
+    Err.Clear
+    On Error Goto 0
+End Sub
 `
 
-// proxyOffTemplate e' il contenuto di proxy_off.bat (il server non e'
-// referenziato — disattiva semplicemente il proxy locale di Windows).
-const proxyOffTemplate = `@echo off
-:: ============================================================
-:: Generato automaticamente da Planck Proxy v__VERSIONE__
-:: Disattiva il proxy e ferma il watchdog di presenza.
-:: ============================================================
+// proxyOffTemplate e' il contenuto di proxy_off.vbs.
+// VBScript invece di .bat per essere invisibile sullo studente
+// (subsystem GUI). Uccide il watchdog VBS proxy + i watchdog ps1
+// plugin, disattiva il proxy in HKCU, fa pulizia del temp, self-delete.
+const proxyOffTemplate = `' ============================================================
+' Planck Proxy v__VERSIONE__ - proxy_off.vbs
+' Disattiva il proxy + ferma tutti i watchdog. Invisibile.
+' ============================================================
 
-:: Ferma il watchdog VBScript (presenza/proxy)
-taskkill /f /im wscript.exe >nul 2>&1
-del "%TEMP%\proxy_watchdog.vbs" >nul 2>&1
+Option Explicit
+Dim ws, fso, tmpDir
+Set ws = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+tmpDir = ws.ExpandEnvironmentStrings("%TEMP%")
 
-:: Ferma i watchdog plugins PowerShell (USB monitor + futuri).
-:: Usa WMIC per killare solo i powershell che girano i nostri ps1
-:: (senza killare powershell di altre cose).
-for /f "tokens=*" %%P in ('wmic process where "name='powershell.exe' and CommandLine like '%%planck_%%_watchdog.ps1%%'" get ProcessId /value 2^>nul ^| findstr "="') do (
-    for /f "tokens=2 delims==" %%I in ("%%P") do taskkill /f /pid %%I >nul 2>&1
-)
-del "%TEMP%\planck_usb_watchdog.ps1" >nul 2>&1
-del "%TEMP%\planck_process_watchdog.ps1" >nul 2>&1
+' --- Step 1: kill watchdog proxy (VBS) ---
+' WMIC filter su CommandLine: kill solo i wscript che girano
+' proxy_watchdog.vbs (NON proxy_off.vbs che siamo noi).
+On Error Resume Next
+ws.Run "wmic process where ""commandline like '%%proxy_watchdog.vbs%%'"" delete", 0, True
+ws.Run "wmic process where ""commandline like '%%planck_%%_watchdog.ps1%%'"" delete", 0, True
+On Error Goto 0
 
-:: Disattiva proxy
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f >nul 2>&1
+' --- Step 2: cleanup temp ---
+On Error Resume Next
+fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
+fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
+fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
+On Error Goto 0
 
-echo Proxy disattivato.
+' --- Step 3: disabilita proxy ---
+ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 0, "REG_DWORD"
 
-(goto) 2>nul & del "%~f0"
+' --- Step 4: self-delete ---
+On Error Resume Next
+fso.DeleteFile WScript.ScriptFullName, True
+On Error Goto 0
+
+WScript.Quit 0
 `
 
 // Generate scrive proxy_on.bat e proxy_off.bat in outDir, sostituendo i
@@ -149,8 +190,8 @@ func Generate(outDir, versione, ipDocente string, portaProxy, portaWeb int) (onP
 		"__VERSIONE__", versione,
 	).Replace(proxyOffTemplate)
 
-	onPath = filepath.Join(outDir, "proxy_on.bat")
-	offPath = filepath.Join(outDir, "proxy_off.bat")
+	onPath = filepath.Join(outDir, "proxy_on.vbs")
+	offPath = filepath.Join(outDir, "proxy_off.vbs")
 
 	if err := os.WriteFile(onPath, []byte(onContent), 0o644); err != nil {
 		return "", "", fmt.Errorf("write %s: %w", onPath, err)

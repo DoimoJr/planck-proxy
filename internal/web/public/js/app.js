@@ -168,6 +168,58 @@ document.body.addEventListener('click', (e) => {
     if (dentroMenu) chiudiMenuOverflow();
 });
 
+// --- Keyboard shortcuts (SPEC §6.7) ---
+//
+// I tab si switchano con Ctrl+1..4. Le azioni "primarie" (Avvia/Ferma,
+// Pausa) hanno shortcuts veloci. ESC svuota selezione/focus. Ctrl+F
+// porta il fuoco sul filtro testuale del Live tab.
+//
+// Non sovrascriviamo gli shortcut quando il fuoco e' su input/textarea
+// (eccetto per il filtro stesso): il prof spesso digita IP/nome studente.
+const TAB_SHORTCUTS = { '1': 'live', '2': 'report', '3': 'storico', '4': 'impostazioni' };
+function isInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+}
+document.addEventListener('keydown', (e) => {
+    // ESC: clear selezione + focus IP, sempre attivo.
+    if (e.key === 'Escape') {
+        if (state.selectedIps.size > 0) { actions.clearSelection(); e.preventDefault(); return; }
+        if (state.focusIp) { actions.clearFocus(); e.preventDefault(); return; }
+    }
+    // Shortcut con Ctrl/Cmd
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    // Ctrl+1..4 sempre attivo (anche da input — comodo)
+    if (TAB_SHORTCUTS[e.key]) {
+        actions.cambiaTab(TAB_SHORTCUTS[e.key]);
+        e.preventDefault();
+        return;
+    }
+    // Gli altri solo se non stiamo digitando in un input
+    if (isInputFocused()) return;
+    if (e.key === 's' || e.key === 'S') {
+        actions.toggleSessione();
+        e.preventDefault();
+    } else if (e.key === 'p' || e.key === 'P') {
+        actions.togglePausa();
+        e.preventDefault();
+    } else if (e.key === 'f' || e.key === 'F') {
+        const filtro = document.querySelector('[data-action="filtro"]');
+        if (filtro) { filtro.focus(); filtro.select(); e.preventDefault(); }
+    } else if (e.key === 'a' || e.key === 'A') {
+        // Seleziona tutti gli IP visibili nella vista Live.
+        if (state.tabAttivo === 'live') {
+            const visibili = Object.keys(state.cfg.studenti || {});
+            state.selectedIps = new Set(visibili);
+            renderAll();
+            e.preventDefault();
+        }
+    }
+});
+
 // --- Input / change ---
 document.body.addEventListener('input', (e) => {
     const el = e.target;

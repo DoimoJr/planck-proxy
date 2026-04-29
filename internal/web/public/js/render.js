@@ -508,12 +508,36 @@ function renderGrigliaIp(container, ips, ora, soglia) {
     const grid = scheletroVistaIp(container, 'griglia');
     if (ips.length === 0) {
         grid.textContent = '';
-        if (!grid.querySelector(':scope > .ip-grid-vuota')) {
-            const v = document.createElement('div');
-            v.className = 'ip-grid-vuota';
-            v.textContent = 'Nessun IP ancora rilevato.';
-            grid.appendChild(v);
+        const v = document.createElement('div');
+        v.className = 'ip-grid-vuota';
+
+        const titolo = document.createElement('div');
+        titolo.className = 'empty-title';
+        titolo.textContent = 'Nessuno studente connesso ancora.';
+        v.appendChild(titolo);
+
+        const hint = document.createElement('div');
+        hint.className = 'empty-hint';
+        const haStudenti = Object.keys(state.cfg.studenti || {}).length > 0;
+        const haVeyon = !!state.veyonConfigured;
+        if (haVeyon && haStudenti) {
+            hint.textContent = 'Clicca "Distribuisci proxy" per attivare il monitoraggio sui PC studente.';
+        } else if (haStudenti) {
+            hint.textContent = 'Configura Veyon nelle Impostazioni per distribuire automaticamente il proxy_on.bat agli studenti.';
+        } else {
+            hint.textContent = 'Aggiungi studenti alla mappa nelle Impostazioni, oppure attendi che il proxy venga lanciato sui PC studente.';
         }
+        v.appendChild(hint);
+
+        if (haVeyon && haStudenti) {
+            const cta = document.createElement('button');
+            cta.type = 'button';
+            cta.className = 'empty-cta';
+            cta.dataset.action = 'veyon-distribuisci-proxy';
+            cta.textContent = '📁 Distribuisci proxy ora';
+            v.appendChild(cta);
+        }
+        grid.appendChild(v);
         return;
     }
     // Rimuovi eventuale placeholder "vuoto" ereditato da un render precedente.

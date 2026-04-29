@@ -16,6 +16,7 @@
 
 import { state, salvaNascosti, salvaDarkmode, salvaNotifiche, salvaTab, salvaVistaIp, salvaCollassi } from './state.js';
 import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs } from './render.js';
+import { toast } from './toast.js';
 
 /** Wrapper GET → JSON. */
 async function apiGet(path) {
@@ -101,9 +102,9 @@ export async function salvaPreset() {
         const lista = await apiGet('/api/presets');
         state.cfg.presets = lista.presets || [];
         aggiornaSelectPresets();
-        alert(`Preset "${nome}" salvato.`);
+        toast.success(`Preset "${nome}" salvato.`);
     } else {
-        alert('Errore salvataggio preset: ' + (r.error || ''));
+        toast.error('Errore salvataggio preset: ' + (r.error || ''));
     }
 }
 
@@ -274,10 +275,10 @@ export async function aggiungiStudente() {
     const nomeEl = document.getElementById('nuovo-nome');
     const ip = (ipEl.value || '').trim();
     const nome = (nomeEl.value || '').trim();
-    if (!ip || !nome) { alert('Inserisci sia IP che nome.'); return; }
+    if (!ip || !nome) { toast.error('Inserisci sia IP che nome.'); return; }
     const r = await apiPost('/api/students/set', { ip, nome });
     if (r.ok) { ipEl.value = ''; nomeEl.value = ''; ipEl.focus(); }
-    else alert('Errore: ' + (r.error || ''));
+    else toast.error('Errore: ' + (r.error || ''));
 }
 
 export async function svuotaMappaStudenti() {
@@ -316,7 +317,7 @@ export async function caricaCombo() {
     if (!classe || !lab) return;
     if (!confirm(`Caricare la mappa "${classe}" in "${lab}"?\n\nLa mappa attuale verra' sostituita.`)) return;
     const r = await apiPost('/api/classi/load', { classe, lab });
-    if (!r.ok) alert('Errore: ' + (r.error || ''));
+    if (!r.ok) toast.error('Errore caricamento mappa: ' + (r.error || ''));
 }
 
 export async function salvaCombo() {
@@ -330,13 +331,13 @@ export async function salvaCombo() {
         // Refresh elenco classi
         const lista = await apiGet('/api/classi');
         state.cfg.classi = lista.classi || [];
-        alert(`Salvata: ${classe} in ${lab}`);
+        toast.success(`Salvata: ${classe} in ${lab}`);
         const selC = document.getElementById('sel-classe');
         const selL = document.getElementById('sel-lab');
         if (selC) selC.value = classe;
         if (selL) selL.value = lab;
         renderAll();
-    } else alert('Errore salvataggio: ' + (r.error || ''));
+    } else toast.error('Errore salvataggio: ' + (r.error || ''));
 }
 
 export async function eliminaCombo() {
@@ -381,9 +382,9 @@ export async function settingsCampoModificato(el) {
         body: JSON.stringify({ [key]: value }),
     }).then(r => r.json()).catch(() => null);
 
-    if (!r) { alert('Errore rete'); return; }
+    if (!r) { toast.error('Errore rete'); return; }
     if (r.rejected && r.rejected.length > 0) {
-        alert(`Valore rifiutato per: ${r.rejected.join(', ')}`);
+        toast.error(`Valore rifiutato per: ${r.rejected.join(', ')}`);
     }
     state.settings = r.settings;
     if (r.richiedeRiavvio && r.richiedeRiavvio.length > 0) {
@@ -399,7 +400,7 @@ export async function aggiungiIgnorato() {
     if (!dominio) return;
     const r = await apiPost('/api/settings/ignorati/add', { dominio });
     if (r.ok) { el.value = ''; el.focus(); }
-    else alert('Errore: ' + (r.error || ''));
+    else toast.error('Errore: ' + (r.error || ''));
 }
 
 export async function rimuoviIgnorato(dominio) {
@@ -424,10 +425,10 @@ export async function archiviaOra() {
         // Refresh elenco
         const lista = await apiGet('/api/sessioni');
         state.sessioniArchivio = lista.sessioni || [];
-        alert(`Sessione archiviata: ${r.archiviata}`);
+        toast.success(`Sessione archiviata: ${r.archiviata}`);
         renderAll();
     } else {
-        alert('Errore archiviazione: ' + (r.error || 'sessione vuota'));
+        toast.error('Errore archiviazione: ' + (r.error || 'sessione vuota'));
     }
 }
 
@@ -440,7 +441,7 @@ export async function apriSessioneArchiviata(filename) {
     }
     const r = await apiPost('/api/sessioni/load', { filename });
     if (r && !r.ok && r.error) {
-        alert('Errore caricamento: ' + r.error);
+        toast.error('Errore caricamento: ' + r.error);
         return;
     }
     // Il payload e' direttamente l'ArchiveFile (no wrap {ok})
@@ -470,7 +471,7 @@ export async function eliminaSessioneArchiviata(filename) {
         }
         renderAll();
     } else {
-        alert('Errore eliminazione: ' + (r.error || ''));
+        toast.error('Errore eliminazione: ' + (r.error || ''));
     }
 }
 
@@ -537,15 +538,16 @@ export async function veyonConfigura() {
     const keyName = document.getElementById('veyon-keyname').value.trim();
     const pem = document.getElementById('veyon-pem').value.trim();
     if (!keyName || !pem) {
-        alert('Inserisci nome chiave e contenuto PEM.');
+        toast.error('Inserisci nome chiave e contenuto PEM.');
         return;
     }
     const r = await apiPost('/api/veyon/configure', { keyName, privateKeyPEM: pem });
     if (r.ok) {
         document.getElementById('veyon-pem').value = '';
         await veyonAggiornaStato();
+        toast.success('Veyon configurato.');
     } else {
-        alert('Errore: ' + (r.error || 'sconosciuto'));
+        toast.error('Errore configurazione Veyon: ' + (r.error || 'sconosciuto'));
     }
 }
 
@@ -560,7 +562,7 @@ export async function veyonRimuovi() {
 export async function veyonTest() {
     const ip = document.getElementById('veyon-test-ip').value.trim();
     const elResult = document.getElementById('veyon-test-result');
-    if (!ip) { alert('Inserisci un IP.'); return; }
+    if (!ip) { toast.error('Inserisci un IP.'); return; }
     elResult.textContent = 'connessione in corso...';
     elResult.style.color = '';
     const r = await apiPost('/api/veyon/test', { ip });
@@ -580,7 +582,7 @@ export async function veyonSendFeature(ip, feature, command, args) {
         arguments: args || {},
     });
     if (!r.ok) {
-        alert('Veyon ' + feature + ' fallito: ' + (r.error || 'errore'));
+        toast.error('Veyon ' + feature + ' fallito: ' + (r.error || 'errore'));
     }
     return r.ok;
 }
@@ -648,7 +650,7 @@ function targetIps() {
 async function veyonForEachTarget(label, fn) {
     const { ips, desc } = targetIps();
     if (!ips.length) {
-        alert('Nessuno studente attivo nel monitor (nessun ping watchdog ricevuto).');
+        toast.info('Nessuno studente nel target. Compila la mappa studenti o aspetta che pinghino il watchdog.');
         return;
     }
     if (!confirm(label + ' su ' + desc + '?')) return;
@@ -657,7 +659,11 @@ async function veyonForEachTarget(label, fn) {
         try { (await fn(ip)) ? ok++ : fail++; }
         catch { fail++; }
     }));
-    alert(label + ' completato: ' + ok + ' OK, ' + fail + ' falliti su ' + ips.length + '.');
+    if (fail === 0) {
+        toast.success(`${label}: ${ok}/${ips.length} OK.`);
+    } else {
+        toast.error(`${label}: ${ok}/${ips.length} OK, ${fail} falliti.`);
+    }
 }
 
 /** ScreenLock su tutti i target (selezione/mappa studenti/attivi). */
@@ -731,22 +737,22 @@ export async function veyonDisinstallaProxy() {
 async function veyonDistribuisciHelper(endpoint, label) {
     const { ips, desc } = targetIps();
     if (!ips.length) {
-        alert('Nessuno studente attivo nel monitor (nessun ping watchdog ricevuto).');
+        toast.info('Nessuno studente nel target. Compila la mappa studenti.');
         return;
     }
     if (!confirm(label + ' su ' + desc + '?')) return;
 
     const r = await apiPost(endpoint, { ips });
     if (r.ok) {
-        alert(label + ' completato: ' + r.success + ' OK, ' + r.failed + ' falliti su ' + r.total + '.');
+        toast.success(`${label}: ${r.success}/${r.total} OK.`);
     } else {
-        // Mostra dettaglio dei falliti
-        const lines = (r.results || [])
-            .filter(x => !x.ok)
-            .map(x => '  ' + x.ip + ': ' + x.error)
-            .slice(0, 10);
-        alert(label + ' parziale: ' + r.success + ' OK, ' + r.failed + ' falliti su ' + r.total + '.\n\n' +
-              (lines.length ? 'Errori:\n' + lines.join('\n') : ''));
+        // Su parziale, mostra il primo errore nel toast e logga il resto in console
+        const failed = (r.results || []).filter(x => !x.ok);
+        const firstErr = failed.length ? failed[0].error : '';
+        toast.error(`${label}: ${r.success}/${r.total} OK, ${r.failed} falliti. Es: ${firstErr}`);
+        if (failed.length > 1) {
+            console.warn('Distribuisci errori:', failed);
+        }
     }
 }
 
@@ -811,7 +817,7 @@ export async function watchdogTogglePlugin(pluginId) {
         plugin.enabled = newEnabled;
         renderAll();
     } else {
-        alert('Toggle ' + pluginId + ' fallito: ' + (r.error || 'errore'));
+        toast.error('Toggle ' + pluginId + ' fallito: ' + (r.error || 'errore'));
     }
 }
 

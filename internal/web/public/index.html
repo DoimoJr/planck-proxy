@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="monitor.css">
 </head>
 <body>
+    <!-- Connection lost banner: shown da renderAll quando state.connesso=false. -->
+    <div id="connection-banner" class="hidden">⚠️ Connessione al server persa. Tentativo di riconnessione...</div>
+    <!-- Toast container: popolato da js/toast.js. -->
+    <div id="toast-container"></div>
     <div id="ai-banner"></div>
 
     <div class="topbar">

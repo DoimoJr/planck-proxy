@@ -105,6 +105,10 @@ function setStato(connesso) {
     card.classList.remove('connected', 'disconnected');
     card.classList.add(connesso ? 'connected' : 'disconnected');
     $('stat-status').textContent = connesso ? 'LIVE' : 'OFF';
+
+    // Banner top "riconnessione..." quando perdiamo SSE.
+    const banner = document.getElementById('connection-banner');
+    if (banner) banner.classList.toggle('hidden', connesso);
 }
 
 /**

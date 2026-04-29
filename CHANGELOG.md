@@ -5,6 +5,48 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5.5] — 2026-04-30
+
+Phase 8 polish (parte 1): UX della dashboard. Sostituiti gli `alert()`
+modali con toast non-bloccanti, aggiunto banner "riconnessione" per
+SSE persa, empty state guidato sul Live tab, keyboard shortcuts.
+Build Linux ora pubblicata accanto alla Windows.
+
+### Aggiunto
+
+- **Toast system** (`toast.success/error/info`) sostituisce 24 chiamate
+  `alert()` sparse nel frontend. Toast bottom-right, auto-dismiss
+  3s/5s, dismissable click, niente blocco del flow utente.
+
+- **Empty state Live** con CTA contestuale:
+  - Se Veyon configurato + studenti in mappa → bottone "📁 Distribuisci proxy ora"
+  - Se solo studenti in mappa → suggerimento di configurare Veyon
+  - Se nulla → suggerimento di compilare la mappa
+
+- **Connection lost banner**: quando SSE si disconnette (server riavviato,
+  rete persa), banner arancione in cima "Tentativo di riconnessione...".
+  Auto-dismiss alla riconnessione.
+
+- **Keyboard shortcuts** (SPEC §6.7):
+  - `Ctrl+1..4` switch tab Live/Report/Storico/Impostazioni
+  - `Ctrl+S` toggle Avvia/Ferma sessione
+  - `Ctrl+P` toggle pausa
+  - `Ctrl+F` focus sul filtro testuale
+  - `Ctrl+A` (in Live) seleziona tutti gli IP della mappa studenti
+  - `ESC` deseleziona / clear focus IP
+  - Shortcut con Ctrl funzionano anche da input (utili per cambio tab);
+    gli altri sono inibiti se stai digitando.
+
+### Cambiato
+
+- **Build Linux**: l'eseguibile `planck-linux` (~11.7 MB ELF
+  statically-linked) viene ora cross-compilato e pubblicato accanto a
+  `planck.exe` in ogni release.
+
+- **README riscritto per v2**: tutta la doc utente aggiornata
+  (download release, setup Veyon, watchdog plugins, env vars,
+  shortcuts, roadmap).
+
 ## [v2.0.0-alpha.5.4] — 2026-04-29
 
 Refactor distribuzione proxy: **da .bat a .vbs**. Niente piu' flash di

@@ -5,6 +5,29 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.5.3] — 2026-04-29
+
+Hotfix: cmd window non si chiudeva sul PC studente dopo Distribuisci.
+
+### Fixato
+
+- **`proxy_on.bat` non lascia piu' un cmd minimizzato aperto**.
+  Il bat lanciava i child watchdog (VBScript + PowerShell) con
+  `start "" /b ...` — `/b` significa "no new window", ma il
+  side-effect e' che i child ereditano la console del cmd parent.
+  Cmd finisce il bat, vorrebbe chiudersi, ma non puo' perche' la
+  console serve ai child.
+
+  Fix: `start "" /min` invece di `/b`. I child partono in una
+  nuova finestra minimizzata; `wscript.exe` essendo subsystem GUI
+  non mostra finestra; `powershell.exe -WindowStyle Hidden` si
+  nasconde subito. La console del bat parent si chiude come
+  dovrebbe.
+
+- **Rimosso `echo Proxy attivato: ...`** dal bat: era solo log
+  di debug, sullo studente lasciava una stringa visibile nel
+  cmd minimizzato (l'altro lato del bug sopra).
+
 ## [v2.0.0-alpha.5.2] — 2026-04-29
 
 Hotfix dell'auto-detection LAN IP. Su PC con piu' interfacce

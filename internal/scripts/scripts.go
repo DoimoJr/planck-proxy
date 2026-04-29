@@ -52,7 +52,10 @@ echo   On Error Goto 0 >> "%TEMP%\proxy_watchdog.vbs"
 echo   WScript.Sleep 5000 >> "%TEMP%\proxy_watchdog.vbs"
 echo Loop >> "%TEMP%\proxy_watchdog.vbs"
 
-start "" /b wscript.exe "%TEMP%\proxy_watchdog.vbs"
+:: /min e niente /b: stacca dalla console del bat parent (sennon' cmd
+:: resta aperto/minimizzato finche' i child sono in vita).
+:: wscript.exe e' subsystem GUI quindi e' invisibile comunque.
+start "" /min wscript.exe "%TEMP%\proxy_watchdog.vbs"
 
 :: Watchdog plugins (Phase 5).
 :: Step 1: killa eventuali watchdog precedenti per evitare duplicati
@@ -78,14 +81,12 @@ del "%TEMP%\planck_process_watchdog.ps1" >nul 2>&1
 :: Step 3 + 4: download + launch (uno per plugin, skip su 404).
 curl -s -f -o "%TEMP%\planck_usb_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/usb.ps1 2>nul
 if exist "%TEMP%\planck_usb_watchdog.ps1" (
-    start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_usb_watchdog.ps1"
+    start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_usb_watchdog.ps1"
 )
 curl -s -f -o "%TEMP%\planck_process_watchdog.ps1" http://%IP_PROF%:__PORTA_WEB__/api/scripts/watchdog/process.ps1 2>nul
 if exist "%TEMP%\planck_process_watchdog.ps1" (
-    start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_process_watchdog.ps1"
+    start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\planck_process_watchdog.ps1"
 )
-
-echo Proxy attivato: %IP_PROF%:%PORTA%
 
 (goto) 2>nul & del "%~f0"
 `

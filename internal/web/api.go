@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"github.com/DoimoJr/planck-proxy/internal/state"
+	"github.com/DoimoJr/planck-proxy/internal/store"
 )
 
 // API raggruppa state + broker e i suoi handler HTTP.
@@ -211,7 +211,7 @@ func (a *API) handleSessioni(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	lista, err := a.state.Store().ListaSessioni()
+	lista, err := a.state.Store().SessionListFilenames()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Errore lettura archivio: "+err.Error(), "STORE_ERROR")
 		return
@@ -565,14 +565,14 @@ func (a *API) handlePresetSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// Snapshot della blocklist corrente
 	bloccatiSnap := a.state.HistorySnapshotData().Bloccati
-	p := persist.PresetFile{
+	p := store.PresetFile{
 		Nome:        body.Nome,
 		Descrizione: body.Descrizione,
 		Domini:      bloccatiSnap,
 		CreatedAt:   time.Now().UnixMilli(),
 	}
 	if err := a.state.Store().SavePreset(p); err != nil {
-		if err == persist.ErrNomeInvalido {
+		if err == store.ErrNomeInvalido {
 			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
 			return
 		}
@@ -640,14 +640,14 @@ func (a *API) handleClassiSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// Salva la mappa studenti corrente come snapshot per quella combo.
 	cfg := a.state.ConfigSnapshotData()
-	c := persist.ClasseFile{
+	c := store.ClasseFile{
 		Classe:    body.Classe,
 		Lab:       body.Lab,
 		Mappa:     cfg.Studenti,
 		UpdatedAt: time.Now().UnixMilli(),
 	}
 	if err := a.state.Store().SaveClasse(c); err != nil {
-		if err == persist.ErrNomeInvalido {
+		if err == store.ErrNomeInvalido {
 			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
 			return
 		}
@@ -717,8 +717,9 @@ type filenameBody struct {
 	Filename string `json:"filename"`
 }
 
-// handleSessioniLoad carica una sessione archiviata dal nome file.
-// Body: {filename:"2026-04-22-10-23-45.json"}.
+// handleSessioniLoad carica una sessione archiviata dall'id-stringa
+// "<id>-<inizio>.json" prodotto da SessionListFilenames.
+// Body: {filename:"12-2026-04-22-10-23-45.json"}.
 func (a *API) handleSessioniLoad(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -728,7 +729,12 @@ func (a *API) handleSessioniLoad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Body deve essere {filename}", "BAD_BODY")
 		return
 	}
-	archive, err := a.state.Store().LoadArchive(body.Filename)
+	id, err := store.ParseSessionFilename(body.Filename)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "BAD_BODY")
+		return
+	}
+	archive, err := a.state.Store().SessionLoad(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
 		return
@@ -737,7 +743,7 @@ func (a *API) handleSessioniLoad(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessioniDelete elimina una sessione archiviata.
-// Body: {filename:"..."}
+// Body: {filename:"<id>-<inizio>.json"}
 func (a *API) handleSessioniDelete(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -751,7 +757,12 @@ func (a *API) handleSessioniDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Filename deve terminare con .json", "BAD_BODY")
 		return
 	}
-	if err := a.state.Store().DeleteArchive(body.Filename); err != nil {
+	id, err := store.ParseSessionFilename(body.Filename)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "BAD_BODY")
+		return
+	}
+	if err := a.state.Store().SessionDelete(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return
 	}

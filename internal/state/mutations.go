@@ -1,14 +1,13 @@
 package state
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/DoimoJr/planck-proxy/internal/classify"
-	"github.com/DoimoJr/planck-proxy/internal/persist"
+	"github.com/DoimoJr/planck-proxy/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -360,22 +359,47 @@ func (s *State) RemoveIgnorato(dominio string) {
 // Sessione (start/stop)
 // ============================================================
 
-// SessionStart apre una nuova sessione di registrazione:
-// archivia la precedente (stub in 1.5, NDJSON+JSON in 1.6),
-// azzera il ring buffer, imposta sessioneInizio = now.
+// SessionStart apre una nuova sessione: se ce n'e' una attiva la chiude
+// in DB, poi crea una nuova riga in `sessioni` con snapshot di studenti
+// e bloccati. Azzera il ring buffer in-memory.
 //
-// Ritorna `(sessioneInizio, archiviata)`. `archiviata` e' il nome del
-// file archivio prodotto (vuoto in 1.5; popolato in 1.6).
+// Ritorna `(sessioneInizio, archiviata)`. `archiviata` e' il filename-id
+// della sessione precedente (vuoto se non c'era).
 func (s *State) SessionStart() (sessioneInizio string, archiviata string) {
 	s.mu.Lock()
 
-	// Archivia la precedente se aveva dati (stub Phase 1.5)
-	archiviata = s.archiveLocked()
+	// Chiudi la precedente in DB se attiva (defensive).
+	if s.sessioneAttiva && s.sessioneID > 0 {
+		now := time.Now().UTC()
+		fine := now.Format(time.RFC3339)
+		durata := computeDurata(s.sessioneInizio, now)
+		if err := s.store.SessionClose(s.sessioneID, fine, durata, now.UnixMilli()); err != nil {
+			log.Printf("state: errore close prev session: %v", err)
+		}
+		archiviata = sessionFilename(s.sessioneID, s.sessioneInizio)
+	}
+
+	// Apri nuova sessione in DB.
+	now := time.Now().UTC()
+	meta := store.SessionMeta{
+		SessioneInizio: now.Format(time.RFC3339),
+		Classe:         s.classe,
+		Lab:            "",
+		Titolo:         s.titolo,
+		Modo:           s.modo,
+		Studenti:       s.studentiCopyLocked(),
+		Bloccati:       s.bloccatiSortedLocked(),
+	}
+	id, err := s.store.SessionStart(meta)
+	if err != nil {
+		log.Printf("state: errore start session: %v", err)
+	}
 
 	s.storia = make([]Entry, 0, 256)
-	s.sessioneInizio = time.Now().UTC().Format(time.RFC3339)
+	s.sessioneInizio = meta.SessioneInizio
 	s.sessioneFineISO = ""
 	s.sessioneAttiva = true
+	s.sessioneID = id
 	inizio := s.sessioneInizio
 	s.mu.Unlock()
 
@@ -388,10 +412,8 @@ func (s *State) SessionStart() (sessioneInizio string, archiviata string) {
 	return inizio, archiviata
 }
 
-// SessionStop chiude la sessione corrente:
-// archivia il buffer (stub in 1.5), imposta sessioneFineISO = now.
-// Il buffer NON viene azzerato: resta visibile in UI per consultazione
-// finche' non si avvia una nuova sessione.
+// SessionStop chiude la sessione corrente in DB. Il ring buffer in-memory
+// NON viene azzerato: resta visibile in UI fino a un nuovo SessionStart.
 //
 // Ritorna `(archiviata, sessioneFineISO)`. No-op se la sessione non e' attiva.
 func (s *State) SessionStop() (archiviata, fineISO string) {
@@ -400,83 +422,94 @@ func (s *State) SessionStop() (archiviata, fineISO string) {
 		s.mu.Unlock()
 		return "", ""
 	}
-	archiviata = s.archiveLocked()
+	now := time.Now().UTC()
+	fine := now.Format(time.RFC3339)
+	durata := computeDurata(s.sessioneInizio, now)
+	if s.sessioneID > 0 {
+		if err := s.store.SessionClose(s.sessioneID, fine, durata, now.UnixMilli()); err != nil {
+			log.Printf("state: errore close session: %v", err)
+		}
+		archiviata = sessionFilename(s.sessioneID, s.sessioneInizio)
+	}
 	s.sessioneAttiva = false
-	s.sessioneFineISO = time.Now().UTC().Format(time.RFC3339)
-	fine := s.sessioneFineISO
+	s.sessioneFineISO = fine
+	s.sessioneID = 0
 	s.mu.Unlock()
 	s.broadcastSessionState()
 	return archiviata, fine
 }
 
-// ArchiviaCorrente forza l'archivio della sessione corrente senza fermarla.
-// Usato dall'endpoint /api/sessioni/archivia come "checkpoint".
-// Ritorna il filename dell'archivio prodotto, o "" se niente da archiviare.
+// ArchiviaCorrente esegue un "checkpoint": chiude la sessione corrente
+// in DB e ne apre una nuova con gli stessi metadata. Ritorna il filename-id
+// della sessione chiusa, o "" se non c'e' nulla da archiviare.
 func (s *State) ArchiviaCorrente() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.archiveLocked()
 }
 
-// archiveLocked legge il NDJSON corrente, lo serializza in un JSON
-// snapshot completo (con metadata della sessione) e lo scrive in
-// sessioni/<timestamp>.json. Tronca poi il NDJSON.
+// archiveLocked esegue la rotazione (close + open new) della sessione
+// corrente. La sessione resta attiva con un nuovo ID.
 //
 // **Deve essere chiamato col lock gia' tenuto.**
-//
-// Ritorna il filename dell'archivio prodotto, o "" se niente da archiviare
-// (sessione mai avviata, NDJSON vuoto, store disabilitato, errore).
 func (s *State) archiveLocked() string {
-	if s.store.Disabled() || s.sessioneInizio == "" {
+	if s.store.Disabled() || !s.sessioneAttiva || s.sessioneID == 0 {
+		return ""
+	}
+	now := time.Now().UTC()
+	fine := now.Format(time.RFC3339)
+	durata := computeDurata(s.sessioneInizio, now)
+	closedID := s.sessioneID
+	closedInizio := s.sessioneInizio
+	if err := s.store.SessionClose(closedID, fine, durata, now.UnixMilli()); err != nil {
+		log.Printf("state: errore close session (archive): %v", err)
 		return ""
 	}
 
-	// Leggi le entries del NDJSON corrente
-	entries, err := s.store.NDJSONReadAll()
+	meta := store.SessionMeta{
+		SessioneInizio: fine,
+		Classe:         s.classe,
+		Lab:            "",
+		Titolo:         s.titolo,
+		Modo:           s.modo,
+		Studenti:       s.studentiCopyLocked(),
+		Bloccati:       s.bloccatiSortedLocked(),
+	}
+	id, err := s.store.SessionStart(meta)
 	if err != nil {
-		log.Printf("state: errore lettura NDJSON: %v", err)
-		return ""
+		log.Printf("state: errore start session post-archive: %v", err)
+		s.sessioneAttiva = false
+		s.sessioneID = 0
+		return sessionFilename(closedID, closedInizio)
 	}
-	if len(entries) == 0 {
-		return ""
-	}
+	s.sessioneInizio = fine
+	s.sessioneID = id
+	s.storia = s.storia[:0]
+	return sessionFilename(closedID, closedInizio)
+}
 
-	// Snapshot studenti + bloccati al momento dell'archive
-	studentiSnap := make(map[string]string, len(s.studenti))
-	for k, v := range s.studenti {
-		studentiSnap[k] = v
-	}
-	bloccatiSnap := s.bloccatiSortedLocked()
-
-	rawEntries := make([]json.RawMessage, len(entries))
-	for i, e := range entries {
-		rawEntries[i] = e
-	}
-
-	archivio := persist.ArchiveFile{
-		SessioneInizio:  s.sessioneInizio,
-		SessioneFineISO: s.sessioneFineISO,
-		EsportatoAlle:   time.Now().UTC().Format(time.RFC3339),
-		Titolo:          s.titolo,
-		Classe:          s.classe,
-		Modo:            s.modo,
-		Studenti:        studentiSnap,
-		Bloccati:        bloccatiSnap,
-		Entries:         rawEntries,
-	}
-
-	fn, err := s.store.SaveArchive(archivio)
+// computeDurata ritorna i secondi tra `inizio` (RFC3339) e `now`.
+// Ritorna 0 se inizio e' invalido o la differenza e' negativa.
+func computeDurata(inizio string, now time.Time) int64 {
+	t, err := time.Parse(time.RFC3339, inizio)
 	if err != nil {
-		log.Printf("state: errore save archive: %v", err)
-		return ""
+		return 0
 	}
-
-	// Tronca NDJSON dopo archiviazione riuscita
-	if err := s.store.NDJSONReset(); err != nil {
-		log.Printf("state: errore reset NDJSON dopo archive: %v", err)
+	d := int64(now.Sub(t).Seconds())
+	if d < 0 {
+		return 0
 	}
+	return d
+}
 
-	return fn
+// sessionFilename costruisce l'id-stringa "<id>-<inizio>.json" usato
+// dagli endpoint API per retro-compatibilita' col modello v1 file-based.
+func sessionFilename(id int64, inizio string) string {
+	clean := strings.NewReplacer(":", "-", "T", "-", ".", "-").Replace(inizio)
+	if len(clean) > 19 {
+		clean = clean[:19]
+	}
+	return fmt.Sprintf("%d-%s.json", id, clean)
 }
 
 func (s *State) broadcastSessionState() {

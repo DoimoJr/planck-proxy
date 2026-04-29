@@ -18,16 +18,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DoimoJr/planck-proxy/internal/persist"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
 	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
+	"github.com/DoimoJr/planck-proxy/internal/store"
 	"github.com/DoimoJr/planck-proxy/internal/web"
 )
 
 const (
-	Versione = "2.0.0-alpha.2"
-	Fase     = "alpha.2"
+	Versione = "2.0.0-alpha.3"
+	Fase     = "alpha.3"
 )
 
 // dataDirDefault risolve la directory dati: env var PLANCK_DATA_DIR
@@ -112,28 +112,39 @@ func main() {
 	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 	dataDir := dataDirDefault()
 
-	// Persistenza: crea le sotto-directory necessarie e carica i file
-	// esistenti (config.json, studenti.json, _blocked_domains.txt).
-	store, err := persist.New(dataDir)
+	// Persistenza: apri SQLite (creandolo se non esiste) e applica le
+	// migrations dello schema.
+	dbPath := filepath.Join(dataDir, "planck.db")
+	st0, err := store.Open(dbPath)
 	if err != nil {
-		log.Fatalf("Errore inizializzazione persistenza in %q: %v", dataDir, err)
+		log.Fatalf("Errore apertura DB %q: %v", dbPath, err)
+	}
+	defer st0.Close()
+
+	// One-shot: importa i dati legacy file-based (Phase 1.6) nel DB se
+	// presenti. Idempotente via marker in kv.
+	if imported, err := st0.MigrateFromFiles(dataDir); err != nil {
+		log.Printf("Migrazione v1 -> SQLite fallita: %v", err)
+	} else if len(imported) > 0 {
+		log.Printf("Migrazione v1 -> SQLite: importati %d file", len(imported))
 	}
 
-	// Wiring: broker (SSE) → state (mutazioni + persistenza)
+	// Crash recovery: chiudi forzatamente eventuali sessioni rimaste aperte
+	// al crash precedente (sessione_fine NULL).
+	if id, inizio, found, err := st0.SessionFindActive(); err != nil {
+		log.Printf("Recovery sessione: %v", err)
+	} else if found {
+		now := time.Now().UTC()
+		if err := st0.SessionClose(id, now.Format(time.RFC3339), 0, now.UnixMilli()); err != nil {
+			log.Printf("Recovery sessione %d (inizio %s): %v", id, inizio, err)
+		} else {
+			log.Printf("Recuperata sessione interrotta id=%d (inizio %s)", id, inizio)
+		}
+	}
+
+	// Wiring: broker (SSE) → state (mutazioni + persistenza).
 	broker := web.NewBroker()
-	st := state.NewWithStore(broker, store)
-
-	// Crash recovery: se al boot esiste un NDJSON con dati, prova ad
-	// archiviarlo come "recovered-<inizioISO>.json".
-	if recovered, err := store.RecoverNDJSONIfAny(persist.ArchiveFile{
-		SessioneInizio: "recovered-" + Versione,
-		EsportatoAlle:  "boot",
-		Titolo:         "Sessione recuperata da NDJSON residuo",
-	}); err != nil {
-		log.Printf("Recovery NDJSON fallita: %v", err)
-	} else if recovered != "" {
-		log.Printf("Sessione interrotta recuperata in archivio: %s", recovered)
-	}
+	st := state.NewWithStore(broker, st0)
 
 	// Genera proxy_on.bat / proxy_off.bat con IP+porta corretti per la
 	// rete corrente. Sovrascrive ogni boot (riflette IP che potrebbe

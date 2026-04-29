@@ -5,7 +5,55 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
-## [v2.0.0-alpha.2] — 2026-04-29
+## [v2.0.0-alpha.3] — 2026-04-29
+
+Phase 2: persistenza migrata da file-based a SQLite. Niente piu' rotolamento
+NDJSON + JSON snapshot per le sessioni — ogni richiesta finisce in una riga
+della tabella `entries`, le sessioni in `sessioni`. Il binario resta single-
+file e cross-compilabile (driver pure-Go `modernc.org/sqlite`, niente CGO).
+
+### Aggiunto
+
+- **`internal/store`**: nuovo package SQLite-backed che sostituisce il
+  file-based `internal/persist`. Apre `planck.db` accanto al binario con
+  `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`. Schema gestito
+  via tabella `schema_version` + migration ordinate (v1 = init).
+- **Migrazione one-shot da v1 file-based**: al primo boot dopo l'upgrade,
+  Planck importa `config.json`, `studenti.json`, `_blocked_domains.txt`,
+  `presets/*.json`, `classi/*.json` e `sessioni/*.json` nel DB. I file
+  sorgente vengono rinominati a `*.v1.bak` per non re-importare. Marker
+  di idempotenza in `kv.migrated_from_files`.
+- **BOM-tolerant**: il parser tollera l'UTF-8 BOM che Notepad su Windows
+  aggiunge ai file `Save As UTF-8`. Necessario perche' molti docenti
+  editano `config.json` a mano.
+- **Crash recovery sessione**: al boot, eventuali sessioni con
+  `sessione_fine NULL` (crash mid-sessione) vengono chiuse forzatamente.
+
+### Cambiato
+
+- **Lifecycle sessione**: `SessionStart` apre una riga in `sessioni` e
+  ritorna l'id; le entries del proxy vanno via `SessionAppendEntry` (insert
+  per riga) invece di NDJSON append. `SessionStop` fa `UPDATE sessioni SET
+  sessione_fine = ?, durata_sec = ?, archiviata_at = ?`.
+- **`/api/sessioni`**: il filename ritornato e' `<id>-<inizio>.json` invece
+  che il path del JSON snapshot. La UI continua a funzionare perche' usa
+  l'id-stringa come opaco; load/delete passano per `ParseSessionFilename`
+  che estrae l'id numerico.
+- **`/api/sessioni/archivia`** (checkpoint): non scrive piu' uno snapshot
+  separato. Chiude la sessione corrente e ne apre una nuova con stessi
+  metadata (rotazione in-place).
+
+### Note di upgrade
+
+- Niente azione manuale richiesta: aggiorna l'eseguibile e al primo boot
+  Planck importa i file legacy automaticamente. I file `*.v1.bak` possono
+  essere cancellati a mano dopo aver verificato che il DB ha i dati
+  corretti (consigliato: tieni una copia di backup della cartella prima
+  dell'upgrade).
+- `internal/persist` resta nel repo (per reference / fallback) ma non e'
+  piu' importato dal binario. Verra' rimosso in alpha.4.
+
+
 
 Patch QoL su alpha.1 — feel desktop app + shutdown dalla UI.
 

@@ -5,6 +5,87 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0-alpha.4] — 2026-04-29
+
+Phase 3 + 4: integrazione Veyon completa. Planck può ora controllare i
+PC studenti che hanno `veyon-server` in esecuzione: lock schermo, lancio
+applicazioni, messaggi modali, reboot/poweroff, distribuzione automatica
+di `proxy_on.bat` con un click. Niente cgo, niente Qt SDK: client
+nativo del protocollo RFB+Veyon implementato in Go puro.
+
+### Aggiunto
+
+- **`internal/veyon/qds`** (Phase 3a, ~500 LoC + 39 unit test): encoder/
+  decoder Qt `QDataStream` versione `Qt_5_5`. Tipi supportati: `bool,
+  qint32, qint64, double, QString, QByteArray, QStringList, QUuid,
+  QRect, QVariant, QVariantList, QVariantMap`. Determinismo dell'ordine
+  delle chiavi `QVariantMap` (Qt's `QMap` e' sorted) per byte-equality
+  con messaggi prodotti da Qt.
+- **`internal/veyon`** (Phase 3b/c/d, ~400 LoC + 4 integration test):
+  client del protocollo Veyon su RFB v3.8. Greeting + security type
+  custom (`0x28`) + `KeyFile` auth con firma RSA SHA-512 PKCS#1 v1.5
+  + `ClientInit`/`ServerInit` + invio `FeatureMessage` come RFB
+  extension (tipo `0x29`).
+- **API REST `/api/veyon/*`** (Phase 3e):
+  - `GET  /status`     ritorna `{configured, keyName, port}`
+  - `POST /configure`  importa la master key (PEM) + nome chiave
+  - `POST /clear`      rimuove la configurazione (file su disco + DB)
+  - `POST /test`       prova dial+auth verso `{ip}`
+  - `POST /feature`    invia `{ip, feature, command, arguments}`. Il
+    campo `feature` accetta UUID raw o un nome simbolico tra
+    `screenLock, startApp, reboot, powerDown, logoff, textMsg, openURL`.
+- **UI Veyon** (Phase 3e + 4):
+  - Card "Veyon (controllo studenti)" nel tab Impostazioni: status
+    indicator, importazione master key PEM, override porta, test
+    connessione verso un IP.
+  - Bottoni inline 🔒 / 💬 sulle card studente nella vista griglia
+    Live (visibili solo se Veyon e' configurato).
+  - Toolbar "Azioni classe" sotto la toolbar principale Live: 🔒 Lock,
+    💬 Messaggio, 📁 Distribuisci proxy_on. Tutti applicati su tutti
+    gli IP attivi (chi ha pingato il watchdog).
+  - "Distribuisci proxy_on.bat" sfrutta che Planck gia' serve lo
+    script su `/api/scripts/proxy_on.bat`. Lancia su ogni studente
+    via `StartApp` un comando `powershell -c "iwr ... -OutFile ...; & ..."`.
+    Niente `FileTransfer` (Veyon WebAPI non lo espone via plugin RFB).
+- **`test/veyon-rig`**: Dockerfile + entrypoint per Veyon server
+  headless (Ubuntu 24.04 + PPA `veyon/stable` + Xvfb). Setup
+  one-shot: `docker build -t planck-veyon-rig test/veyon-rig`,
+  poi `docker run -p 11100:11100 planck-veyon-rig`. Genera coppie
+  RSA al boot, accessibili in `/export/`.
+- **Update SPEC §5.16**: riscritto il protocollo Veyon dopo
+  l'implementazione effettiva. La versione iniziale assumeva un
+  protocollo Qt-puro su TCP raw; in realta' Veyon e' RFB v3.8 (VNC)
+  con security type custom e message extension. Il nuovo testo
+  documenta la sequenza byte-per-byte validata vs server vivo.
+
+### Note di upgrade
+
+- Niente azione manuale richiesta. Aggiorna l'eseguibile e Planck parte
+  come prima. Se vuoi usare Veyon, vai su Impostazioni → card "Veyon"
+  e importa la master key generata con Veyon Configurator (PEM PKCS#8).
+- La master key viene salvata in `<dataDir>/veyon-master.pem` con
+  permessi `0600`. Cancellala con il bottone "Rimuovi" se vuoi
+  disabilitare il controllo.
+- I PC studenti devono avere `veyon-server` in esecuzione e la
+  chiave pubblica corrispondente importata via Veyon Configurator
+  (workflow standard Veyon).
+- `internal/persist` (file-based v1.6) e' stato rimosso dal binario
+  in alpha.3 ma resta nel repo come reference. Verra' eliminato in
+  alpha.5.
+
+### Limitazioni note
+
+- **Niente Screenshot** — la WebAPI di Veyon lo espone (`GET
+  /framebuffer`) ma RFB FeatureMessage no. Phase 4 polish.
+- **Multi-select** sulle card studente non ancora — i comandi vanno
+  o su un singolo IP (bottoni inline) o su tutti gli attivi (toolbar
+  classe). In arrivo come polish.
+- **Niente integrazione Veyon "discovery"**: Planck non scopre
+  automaticamente quali IP della classe hanno veyon-server attivo.
+  Per ora si fida del watchdog del proxy ("studente ha pingato"
+  -> "ha veyon-server attivo, probabilmente"). Per diagnosi punto
+  per punto c'e' il bottone Test connessione.
+
 ## [v2.0.0-alpha.3] — 2026-04-29
 
 Phase 2: persistenza migrata da file-based a SQLite. Niente piu' rotolamento

@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	Versione = "2.1.0"
+	Versione = "2.2.0"
 	Fase     = "stable"
 )
 
@@ -172,6 +172,7 @@ func main() {
 	for _, p := range []watchdog.WatchdogPlugin{
 		builtin.UsbPlugin{},
 		builtin.ProcessPlugin{},
+		builtin.NetworkPlugin{},
 	} {
 		if err := wdReg.Register(p); err != nil {
 			log.Printf("Watchdog: registrazione plugin %s: %v", p.ID(), err)

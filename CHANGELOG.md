@@ -5,6 +5,58 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.2.0] — 2026-04-30
+
+Phase 5.x parte 2: **plugin Network** (rileva nuove interfacce di rete)
++ **heartbeat detection** (alert se uno studente killa il watchdog).
+
+### Aggiunto
+
+- **Plugin Network** (`internal/watchdog/builtin/network.go`):
+  rileva la comparsa di nuove interfacce "Up" rispetto al baseline
+  catturato al boot dello script. Pattern di config:
+  - `suspiciousPatterns`: substring nel nome interfaccia che alzano
+    severity a critical (default: VPN, TAP, TUN, WireGuard, OpenVPN,
+    Cellular, Mobile, Broadband, USB, Hotspot, Tether, PAN)
+  - `ignorePatterns`: substring per skippare completamente (default:
+    Loopback, Hyper-V, VirtualBox Host-Only)
+  Tutto editabile dall'editor JSON delle Impostazioni.
+
+  Caso d'uso: studente attacca un dongle 4G LTE, attiva un client
+  VPN, fa tethering dal telefono → Planck rileva l'interfaccia nuova
+  e fa scattare un alert critical.
+
+- **Watchdog heartbeat** (`internal/state/watchdog.go`):
+  ogni script `.ps1` ora invia un POST `/api/watchdog/heartbeat`
+  ogni 30 secondi (in aggiunta agli eventi reali). Il server traccia
+  `lastSeen[ip][plugin]` e una goroutine ogni 30s controlla:
+  - Se un IP e' "alive" (proxy ping recente) MA un suo plugin enabled
+    e' silente da piu' di 90 secondi → emette evento meta
+    `watchdog-<plugin> stopped` con severity `warning` ("probabilmente
+    killato").
+  - Quando l'heartbeat torna → evento `watchdog-<plugin> resumed` con
+    severity `info`.
+  Il flag stopped/alerted evita flooding (un solo allarme per silenziamento).
+
+  Caso d'uso: studente apre Task Manager, killa `wscript.exe` o
+  `powershell.exe`, prosegue il proprio piano. Planck se ne accorge
+  entro 2 minuti e lo segnala al docente.
+
+### API
+
+- `POST /api/watchdog/heartbeat {plugin}` — endpoint senza auth (LAN
+  trust come `/_alive` e `/event`). Body minimal, niente persistenza.
+- `GET  /api/scripts/watchdog/network.ps1` — script PowerShell
+  template-substituted con la config network.
+
+### Limiti
+
+L'attacker model resta lo stesso: lo studente ha l'ultima parola sul
+suo PC. Il framework heartbeat non impedisce il kill — RILEVA il kill.
+Per "blindare" davvero servirebbe un servizio Windows con privilegi
+admin. Phase 5.x non ci si addentra (richiederebbe firma codice +
+UAC + setup IT scuola).
+
 ## [v2.1.0] — 2026-04-30
 
 Phase 5.x: editor UI per la config dei watchdog plugins. Le denylist

@@ -119,9 +119,12 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/watchdog/events", auth(a.handleWatchdogEvents))
 	// /event riceve da PC studenti, niente auth (stesso trust di /_alive).
 	mux.HandleFunc("/api/watchdog/event", a.handleWatchdogEvent)
+	// /heartbeat e' chiamato dagli script .ps1 ogni N sec per dire "sono vivo".
+	mux.HandleFunc("/api/watchdog/heartbeat", a.handleWatchdogHeartbeat)
 	// Gli script vengono scaricati dagli studenti, niente auth.
 	mux.HandleFunc("/api/scripts/watchdog/usb.ps1", a.handleScriptWatchdogUsb)
 	mux.HandleFunc("/api/scripts/watchdog/process.ps1", a.handleScriptWatchdogProcess)
+	mux.HandleFunc("/api/scripts/watchdog/network.ps1", a.handleScriptWatchdogNetwork)
 
 	// Persistence-backed (Phase 1.6)
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))

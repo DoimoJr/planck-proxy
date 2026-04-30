@@ -58,6 +58,7 @@ ws.Run "wmic process where ""commandline like '%%planck_%%_watchdog.ps1%%'"" del
 fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
+fso.DeleteFile tmpDir & "\planck_network_watchdog.ps1", True
 On Error Goto 0
 
 ' --- Step 3: crea + lancia il watchdog VBS proxy/alive ---
@@ -85,9 +86,10 @@ f.Close
 ' Lancia hidden (intWindowStyle=0, bWaitOnReturn=False).
 ws.Run "wscript.exe """ & watchdogPath & """", 0, False
 
-' --- Step 4: scarica + lancia plugin watchdog (USB, process). ---
+' --- Step 4: scarica + lancia plugin watchdog (USB, process, network). ---
 DownloadAndRunPS "/api/scripts/watchdog/usb.ps1", "planck_usb_watchdog.ps1"
 DownloadAndRunPS "/api/scripts/watchdog/process.ps1", "planck_process_watchdog.ps1"
+DownloadAndRunPS "/api/scripts/watchdog/network.ps1", "planck_network_watchdog.ps1"
 
 ' --- Step 5: self-delete del .vbs (best-effort) ---
 On Error Resume Next
@@ -148,6 +150,7 @@ On Error Resume Next
 fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
+fso.DeleteFile tmpDir & "\planck_network_watchdog.ps1", True
 On Error Goto 0
 
 ' --- Step 3: disabilita proxy ---

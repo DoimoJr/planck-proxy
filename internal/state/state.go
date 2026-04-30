@@ -92,6 +92,14 @@ type State struct {
 
 	// --- Watchdog plugin registry (Phase 5) ---
 	watchdogReg *watchdog.Registry
+	// watchdogHeartbeats[ip][pluginID] = ms epoch del piu' recente
+	// heartbeat ricevuto. Usato per detectare il "watchdog killato"
+	// dallo studente (Phase 5.x).
+	watchdogHeartbeats map[string]map[string]int64
+	// watchdogStoppedAlerted[ip][pluginID] = true quando abbiamo
+	// gia' emesso l'evento "stopped" e stiamo aspettando un
+	// nuovo heartbeat per "resumed" (evita flooding).
+	watchdogStoppedAlerted map[string]map[string]bool
 
 	// --- Liste ---
 	bloccati       map[string]struct{}
@@ -143,7 +151,9 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		dominiIgnorati:      ignorati,
 		studenti:            map[string]string{},
 		storia:              make([]Entry, 0, 256),
-		aliveMap:            map[string]int64{},
+		aliveMap:               map[string]int64{},
+		watchdogHeartbeats:     map[string]map[string]int64{},
+		watchdogStoppedAlerted: map[string]map[string]bool{},
 	}
 
 	// Carica config persistita (se esiste).

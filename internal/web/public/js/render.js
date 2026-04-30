@@ -998,6 +998,31 @@ function renderSelectCombo() {
  * Veyon piu' comuni (lock/messaggio) e un "Deseleziona tutti".
  */
 /**
+ * Card "Lista AI auto-aggiornata" nelle Impostazioni: mostra count +
+ * source (embedded/cache/remote) + timestamp ultimo update.
+ */
+export function renderAIListStatus() {
+    const el = $('ai-list-status-value');
+    if (!el) return;
+    const a = state.aiList || {};
+    if (!a.count) {
+        el.textContent = 'caricamento...';
+        return;
+    }
+    const sourceLabel = {
+        embedded: 'integrata nel binario',
+        cache:    'cache locale',
+        remote:   'aggiornata da GitHub',
+    }[a.source] || a.source || '?';
+    let updated = a.updatedAt || '';
+    if (updated) {
+        try { updated = new Date(updated).toLocaleString('it-IT'); } catch {}
+    }
+    el.innerHTML = '<strong>' + a.count + '</strong> domini &mdash; sorgente: <code>' + sourceLabel + '</code><br>'
+                 + '<span class="hint" style="font-size:0.85em">Ultimo update: ' + (updated || 'n/a') + '</span>';
+}
+
+/**
  * Renderizza la card "Watchdog plugins" nelle Impostazioni: per ogni
  * plugin un toggle abilita/disabilita + descrizione. La config raw
  * (JSON) e' nascosta in <details> per non sovraccaricare l'UI.
@@ -1157,6 +1182,7 @@ function _renderAllSync() {
     renderReport();
     renderImpostazioni();
     renderWatchdogPluginsList();
+    renderAIListStatus();
     renderCountdown();
 }
 

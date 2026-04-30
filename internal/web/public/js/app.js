@@ -76,6 +76,9 @@ async function init() {
     actions.watchdogAggiornaPlugins();
     actions.watchdogAggiornaEventi();
 
+    // Lista AI: status (count + source) — Phase 6.
+    actions.aiAggiornaStato();
+
     // Countdown: tick ogni secondo (solo aggiorna la UI, zero allocazioni)
     setInterval(renderCountdown, 1000);
     // Refresh complessivo (durata, "ultima attivita'") - ogni 5s
@@ -158,6 +161,7 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
         case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
         case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
+        case 'ai-refresh': actions.aiRefresh(); break;
         case 'watchdog-save-config': actions.watchdogSaveConfig(el.dataset.plugin); break;
         case 'watchdog-reset-config': actions.watchdogResetConfig(el.dataset.plugin); break;
         case 'archivia-ora': actions.archiviaOra(); break;

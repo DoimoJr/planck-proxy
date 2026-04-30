@@ -24,9 +24,15 @@ const (
 	TipoUtente  Tipo = "utente"
 )
 
-// DominiAI: pattern di servizi AI (chatbot, assistenti, code AI, ricerca
-// accademica AI, ecc.). I match generano un banner di allarme nella UI.
-var DominiAI = []string{
+// dominiAILegacyHardcoded e' rimasta come riferimento storico per
+// l'iniziale lista hardcoded di v1. La lista corrente vive ora in
+// `data/ai-domains.txt` (embedded in `embedded_ai_domains.txt` per
+// fallback) e viene caricata da `source.go` via `init()` +
+// pull remote opzionale tramite `RefreshAIList`.
+//
+// I chiamanti devono usare `classify.AIDomains()` (snapshot del
+// puntatore atomico) invece di una variabile globale.
+var dominiAILegacyHardcoded = []string{
 	// --- Chatbot principali (USA/Europa) ---
 	"openai.com", "chatgpt.com",
 	"anthropic.com", "claude.ai",
@@ -261,7 +267,7 @@ var PatternSistema = []string{
 //	classify.Classifica("www.example.com")    // -> TipoUtente
 func Classifica(dominio string) Tipo {
 	d := strings.ToLower(dominio)
-	for _, ai := range DominiAI {
+	for _, ai := range AIDomains() {
 		if strings.Contains(d, ai) {
 			return TipoAI
 		}

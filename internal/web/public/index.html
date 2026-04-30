@@ -344,6 +344,18 @@
                 <div id="veyon-test-result" class="hint" style="margin-top:6px"></div>
             </div>
 
+            <div class="card" id="card-ai-list">
+                <h3>Lista AI auto-aggiornata</h3>
+                <p class="hint">Planck mantiene una lista di domini AI (chatbot, code assistant, ecc.) usata per evidenziarli nel monitor. La lista canonica vive nel repo GitHub e si aggiorna manualmente con il bottone qui sotto. Senza connettività, viene usata la copia integrata nel binario (~129 domini).</p>
+                <div id="ai-list-status" class="settings-grid">
+                    <label>Stato</label>
+                    <div id="ai-list-status-value">caricamento...</div>
+                </div>
+                <div class="toolbar-group" style="margin-top:8px">
+                    <button data-action="ai-refresh" class="btn btn-primary">🔄 Aggiorna ora</button>
+                </div>
+            </div>
+
             <div class="card" id="card-watchdog">
                 <h3>Watchdog plugins</h3>
                 <p class="hint">Plugin di monitoraggio remoto che girano sui PC studenti come script PowerShell. Polling ogni 5s, eventi inviati a Planck via HTTP. Si attivano col bottone qui sotto e vengono lanciati alla prossima distribuzione del proxy_on.bat.</p>

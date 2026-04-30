@@ -133,6 +133,13 @@ export const state = {
 
     /** Coda globale degli ultimi N eventi watchdog (per il pannello "Eventi"). */
     watchdogEvents: [],
+
+    /**
+     * Stato corrente della lista AI (Phase 6). Aggiornato a boot via
+     * /api/ai/status, poi su SSE 'ai-list' o dopo refresh manuale.
+     * @type {{count:number, source:string, updatedAt:string, url?:string}}
+     */
+    aiList: { count: 0, source: '', updatedAt: '' },
 };
 
 /** Persiste il Set dei domini nascosti. */

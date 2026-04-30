@@ -896,4 +896,37 @@ export async function watchdogResetConfig(pluginId) {
     }
 }
 
+// ========================================================================
+// Lista AI (Phase 6)
+// ========================================================================
+
+/** Carica lo status della lista AI (count + source + timestamp). */
+export async function aiAggiornaStato() {
+    try {
+        state.aiList = await apiGet('/api/ai/status');
+        renderAll();
+    } catch (e) {
+        console.warn('ai status:', e);
+    }
+}
+
+/** Forza un fetch dalla URL remota. Toast con esito. */
+export async function aiRefresh() {
+    const r = await apiPost('/api/ai/refresh');
+    if (r && r.ok) {
+        state.aiList = { count: r.count, source: r.source, updatedAt: r.updatedAt };
+        toast.success(`Lista AI aggiornata: ${r.count} domini.`);
+        renderAll();
+    } else {
+        const msg = (r && r.error) || 'errore sconosciuto';
+        toast.error('Aggiornamento fallito: ' + msg + ' (lista corrente intatta)');
+        // aggiorna comunque lo stato visualizzato (potrebbe essere
+        // tornato il count corrente con source='cache' o 'embedded')
+        if (r && r.count !== undefined) {
+            state.aiList = { count: r.count, source: r.source || '', updatedAt: r.updatedAt || '' };
+            renderAll();
+        }
+    }
+}
+
 export { aggiornaInputDeadline };

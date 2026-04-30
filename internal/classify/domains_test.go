@@ -113,8 +113,8 @@ func TestClassificaCaseInsensitive(t *testing.T) {
 
 // TestListeNonVuote sanity check: le liste hardcoded non sono accidentalmente vuote.
 func TestListeNonVuote(t *testing.T) {
-	if len(DominiAI) < 50 {
-		t.Errorf("DominiAI sembra troncato: %d elementi (atteso >= 50)", len(DominiAI))
+	if len(AIDomains()) < 50 {
+		t.Errorf("AIDomains sembra troncato: %d elementi (atteso >= 50)", len(AIDomains()))
 	}
 	if len(PatternSistema) < 100 {
 		t.Errorf("PatternSistema sembra troncato: %d elementi (atteso >= 100)", len(PatternSistema))

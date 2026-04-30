@@ -113,6 +113,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/veyon/distribuisci-proxy", auth(a.handleVeyonDistribuisciProxy))
 	mux.HandleFunc("/api/veyon/disinstalla-proxy", auth(a.handleVeyonDisinstallaProxy))
 
+	// AI list management (Phase 6)
+	mux.HandleFunc("/api/ai/status", auth(a.handleAIStatus))
+	mux.HandleFunc("/api/ai/refresh", auth(a.handleAIRefresh))
+
 	// Watchdog plugins (Phase 5)
 	mux.HandleFunc("/api/watchdog/plugins", auth(a.handleWatchdogPlugins))
 	mux.HandleFunc("/api/watchdog/config", auth(a.handleWatchdogConfig))

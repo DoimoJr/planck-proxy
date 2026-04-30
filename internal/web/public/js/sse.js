@@ -187,6 +187,13 @@ export function avviaSSE() {
         } else if (msg.type === 'alive') {
             state.aliveMap.set(msg.ip, msg.ts);
             renderAll();
+        } else if (msg.type === 'ai-list') {
+            state.aiList = {
+                count: msg.count,
+                source: msg.source,
+                updatedAt: new Date(msg.ts).toISOString(),
+            };
+            renderAll();
         } else if (msg.type === 'watchdog') {
             // Aggiungi alla coda globale (cap a 200 ultimi).
             state.watchdogEvents.push(msg);

@@ -49,10 +49,10 @@ func (s *State) Unblock(dominio string) {
 	s.broadcastBlocklist(list)
 }
 
-// BlockAllAI aggiunge tutti i domini AI noti (lista classify.DominiAI) alla blocklist.
+// BlockAllAI aggiunge tutti i domini AI noti (lista classify.AIDomains()) alla blocklist.
 func (s *State) BlockAllAI() {
 	s.mu.Lock()
-	for _, d := range classify.DominiAI {
+	for _, d := range classify.AIDomains() {
 		s.bloccati[d] = struct{}{}
 	}
 	list := s.bloccatiSortedLocked()
@@ -64,7 +64,7 @@ func (s *State) BlockAllAI() {
 // UnblockAllAI rimuove tutti i domini AI dalla blocklist.
 func (s *State) UnblockAllAI() {
 	s.mu.Lock()
-	for _, d := range classify.DominiAI {
+	for _, d := range classify.AIDomains() {
 		delete(s.bloccati, d)
 	}
 	list := s.bloccatiSortedLocked()

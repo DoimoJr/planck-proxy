@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	Versione = "2.2.0"
+	Versione = "2.3.0"
 	Fase     = "stable"
 )
 
@@ -179,6 +179,16 @@ func main() {
 		}
 	}
 	st.SetWatchdogRegistry(wdReg)
+
+	// Lista AI (Phase 6): tenta cache locale al boot, poi async tenta
+	// fetch remote. Niente blocchi sul boot — se non c'e' internet,
+	// classify resta sulla lista embedded (~129 domini canonici).
+	st.LoadAICacheAtBoot()
+	go func() {
+		if _, err := st.RefreshAIListNow(); err != nil {
+			log.Printf("classify: refresh AI list a boot fallito (uso cache/embedded): %v", err)
+		}
+	}()
 
 	// Proxy: registra eventi sullo state
 	proxySrv := proxy.New(":"+proxyPort, st)

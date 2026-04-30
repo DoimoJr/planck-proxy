@@ -5,6 +5,62 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.0.0] — 2026-04-30
+
+🎉 **Prima release stable di Planck v2.** Niente piu' alpha. Cumulativa
+di tutte le 5 fasi del rewrite Go: monitor proxy + dashboard, persistenza
+SQLite, integrazione Veyon completa (lock/msg/distribuisci/power),
+watchdog plugins (USB/Process), polish UX.
+
+`main` ora punta a v2 (era rimasto su v1 Node.js fino a questo cut).
+v1 vive nei tag legacy `v1.x` per retrocompatibilita'.
+
+### Highlights
+
+- **Single binary** Go (~12 MB) per Windows e Linux, niente
+  dipendenze esterne. Sostituisce il bundle Node.js+script di v1
+  (~91 MB). Doppio click → parte.
+- **Proxy HTTP+HTTPS** con CONNECT tunneling, no MITM. Vede solo
+  hostname, mai contenuti.
+- **Dashboard web** real-time via SSE. 4 tab (Live / Report /
+  Storico / Impostazioni). Tema chiaro/scuro, tema italiano.
+- **SQLite** per sessioni, eventi watchdog, mappe classe, preset.
+  Migrazione automatica dal layout file-based v1 al primo boot.
+- **Veyon nativo** (RFB v3.8 + KeyFile auth + FeatureMessage,
+  protocollo reverse-engineered byte-per-byte): lock/unlock schermo,
+  text message, start app, reboot, poweroff, distribuisci proxy_on.vbs.
+  Multi-select Ctrl/Shift+click sulle card studente.
+- **Watchdog plugins** estensibili: USB monitor, Process monitor.
+  PowerShell client-side, REST + SSE server-side. Toggle in Settings.
+- **UX**: toast non-modali, empty state guidate, connection banner,
+  keyboard shortcuts (Ctrl+1..4 / Ctrl+S/P/F/A / ESC).
+
+### Migrazione da v1
+
+Niente azione manuale. Sostituisci il bundle Node.js con `planck.exe`
+nella stessa cartella, e al primo boot Planck importa automaticamente
+`config.json`, `studenti.json`, `_blocked_domains.txt`, `presets/`,
+`classi/`, `sessioni/` nel `planck.db` SQLite. I file legacy restano
+sul disco come `*.v1.bak` (cancellabili a mano dopo verifica).
+
+### Breaking changes vs v1
+
+- Endpoint API REST tutti **POST + JSON body** (v1 usava GET + query
+  params). I client esterni vanno aggiornati. La UI built-in funziona
+  out-of-the-box.
+- `proxy_on.bat` → `proxy_on.vbs` (esecuzione silenziosa lato
+  studente). Distribuisci-proxy via Veyon usa la versione `.vbs`.
+- Niente piu' `node.exe` da scaricare separatamente.
+
+### Limiti noti
+
+Vedi [README — Limiti strutturali](./README.md#limiti-strutturali).
+In sintesi: lo studente ha sempre l'ultima parola sul proprio PC
+(proxy in HKCU = no UAC, watchdog user-mode killabile). Planck
+**rileva e disincentiva**, non blinda.
+
+---
+
 ## [v2.0.0-alpha.5.5] — 2026-04-30
 
 Phase 8 polish (parte 1): UX della dashboard. Sostituiti gli `alert()`

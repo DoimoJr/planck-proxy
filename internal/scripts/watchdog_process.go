@@ -24,13 +24,9 @@ const processWatchdogTemplate = `# =============================================
 
 $plancUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/event"
 
-# Denylist case-insensitive. Aggiungere un nome senza .exe matchera'
+# Denylist case-insensitive (config docente). I nomi senza .exe matchano
 # anche con .exe.
-$denyList = @(
-    'cmd', 'powershell', 'powershell_ise', 'pwsh',
-    'regedit', 'taskmgr', 'mmc', 'gpedit',
-    'perfmon', 'resmon', 'msconfig'
-)
+$denyList = @(__DENY_LIST__)
 
 function Test-Suspect($procName) {
     $clean = $procName.ToLower()
@@ -80,10 +76,11 @@ while ($true) {
 `
 
 // WatchdogProcessScript ritorna lo script PowerShell del plugin Process
-// con IP/porta del docente sostituiti.
-func WatchdogProcessScript(ipDocente string, portaWeb int) string {
+// con IP/porta del docente sostituiti + denylist iniettata dalla config.
+func WatchdogProcessScript(ipDocente string, portaWeb int, denyList []string) string {
 	return strings.NewReplacer(
 		"__IP_DOCENTE__", ipDocente,
 		"__PORTA_WEB__", fmt.Sprintf("%d", portaWeb),
+		"__DENY_LIST__", psStringArray(lowercase(denyList)),
 	).Replace(processWatchdogTemplate)
 }

@@ -5,6 +5,54 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.1.0] — 2026-04-30
+
+Phase 5.x: editor UI per la config dei watchdog plugins. Le denylist
+process e le classi/VID:PID ignorati USB sono ora editabili dal browser
+e iniettati al volo nei `.ps1` serviti agli studenti.
+
+### Aggiunto
+
+- **Editor JSON inline** nella card "Watchdog plugins" delle Impostazioni:
+  `<details>` collassabile con textarea, bottoni "Salva configurazione"
+  e "Ripristina default". Il JSON e' validato lato client prima
+  dell'invio; errori parse mostrati come toast.
+
+- **Allowlist USB VID:PID**: il plugin USB ora rispetta una whitelist di
+  coppie hex (es. `"1234:5678"`) per device legittimi del docente — la
+  chiavetta personale non genera piu' false positive ad ogni inserimento.
+  L'estrazione VID:PID dal PnP InstanceId e' fatta lato PowerShell.
+
+- **Denylist process editabile**: il plugin Process aveva una lista
+  hardcoded nel template; ora la lista viene letta dalla config in DB
+  e iniettata nello script al momento del download. Aggiungere/rimuovere
+  processi e' immediato (effetto alla prossima Distribuisci proxy).
+
+### Cambiato
+
+- `internal/scripts/watchdog_*.go`: le signature di `WatchdogUsbScript`
+  e `WatchdogProcessScript` ora accettano gli array di config in input.
+  Il template ha placeholder `__IGNORED_CLASSES__`, `__ALLOW_VID_PID__`,
+  `__DENY_LIST__` sostituiti via `psStringArray()` (formatter di array
+  PowerShell con escape di apici singoli).
+
+- `/api/scripts/watchdog/<id>.ps1`: l'endpoint ora legge la config del
+  plugin da `LoadWatchdogConfig`, deserializza in struct typed, e la
+  passa al generator. Comportamento per plugin non abilitato invariato
+  (404 → bat skippa via `if exist`).
+
+### UX
+
+Modificare la config NON propaga automaticamente agli studenti già
+attivi. Il flow corretto:
+
+1. Modifica JSON nella UI → click Salva
+2. Toolbar Live → Distribuisci proxy
+3. Sui PC studenti: il bat killa il watchdog vecchio + scarica il
+   `.ps1` con la nuova config
+
+Toast post-save lo ricorda esplicitamente.
+
 ## [v2.0.0] — 2026-04-30
 
 🎉 **Prima release stable di Planck v2.** Niente piu' alpha. Cumulativa

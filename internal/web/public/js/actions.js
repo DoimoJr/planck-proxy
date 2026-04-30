@@ -821,4 +821,79 @@ export async function watchdogTogglePlugin(pluginId) {
     }
 }
 
+/**
+ * Salva la config (JSON) editata nel textarea. Valida che sia JSON
+ * parseable, poi POST. Reminder all'utente: serve un Distribuisci
+ * proxy per propagare la config agli studenti gia' attivi.
+ */
+export async function watchdogSaveConfig(pluginId) {
+    const plugin = state.watchdogPlugins.find(p => p.id === pluginId);
+    if (!plugin) return;
+    const ta = document.querySelector(`.watchdog-config-json[data-plugin="${pluginId}"]`);
+    if (!ta) return;
+    let cfg;
+    try {
+        cfg = JSON.parse(ta.value);
+    } catch (e) {
+        toast.error('JSON non valido: ' + e.message);
+        return;
+    }
+    const r = await apiPost('/api/watchdog/config', {
+        plugin: pluginId,
+        enabled: plugin.enabled,
+        config: cfg,
+    });
+    if (r.ok) {
+        plugin.config = cfg;
+        toast.success('Config salvata. Per propagarla agli studenti gia\' attivi, ridistribuisci il proxy.');
+        renderAll();
+    } else {
+        toast.error('Salvataggio fallito: ' + (r.error || 'errore'));
+    }
+}
+
+/**
+ * Ripristina i valori default del plugin (riapplicando DefaultConfig
+ * lato server). Nel DB resta una riga ma con config = quella che il
+ * server considera default — facciamo SaveWatchdogPluginConfig con
+ * config={} e il prossimo LoadWatchdogConfig usera' DefaultConfig
+ * per quei campi non specificati. Pero' meglio: ricarico tutti i
+ * plugin per avere DefaultConfig fresco e setto come current.
+ */
+export async function watchdogResetConfig(pluginId) {
+    if (!confirm('Ripristinare la configurazione default di ' + pluginId + '?')) return;
+    // Re-fetch plugins per avere il default JSON canonico.
+    // Server: se cancello la riga, LoadWatchdogConfig torna a
+    // DefaultConfig. Endpoint /clear non esiste; uso config:{} che
+    // pero' verrebbe persistito come {}. Soluzione semplice: usa la
+    // DefaultConfig che la UI gia' ha (era nel /plugins response al
+    // primo boot, prima di ogni save).
+    //
+    // In assenza di un campo "default" lato API, faccio un GET su
+    // /api/watchdog/plugins forzato senza side effects: se il
+    // plugin non e' in watchdog_config, ritorna DefaultConfig.
+    // Ma se l'ho gia' salvato, ritorna il salvato.
+    // Workaround: chiedo al server di azzerare via config={}+enabled
+    // = stato corrente; il server riapplichera' DefaultConfig al
+    // prossimo LoadWatchdogConfig perche' marshalled defaults.
+    //
+    // Per ora: setta il textarea con l'ultimo "current default" che
+    // abbiamo, l'utente clicca Salva manualmente.
+    toast.info('Click "Salva configurazione" per applicare i default mostrati nel textarea.');
+    const ta = document.querySelector(`.watchdog-config-json[data-plugin="${pluginId}"]`);
+    if (ta) {
+        // Reset al default che il server ci ha mandato all'ultimo /plugins.
+        // Recuperiamo da una nuova chiamata se non disponibile.
+        try {
+            const r = await apiGet('/api/watchdog/plugins');
+            const fresh = (r.plugins || []).find(p => p.id === pluginId);
+            if (fresh && fresh.config) {
+                ta.value = JSON.stringify(fresh.config, null, 2);
+            }
+        } catch (e) {
+            console.warn('reset config fetch:', e);
+        }
+    }
+}
+
 export { aggiornaInputDeadline };

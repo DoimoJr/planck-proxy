@@ -111,39 +111,65 @@ func (a *API) handleWatchdogEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleScriptWatchdogUsb e handleScriptWatchdogProcess servono i
-// rispettivi script PowerShell con IP/porta del docente sostituiti.
-// Senza auth (stesso modello dei .bat che gli studenti scaricano).
-func (a *API) handleScriptWatchdogUsb(w http.ResponseWriter, r *http.Request) {
-	a.serveWatchdogScript(w, r, "usb_watchdog.ps1", scripts.WatchdogUsbScript)
+// rispettivi script PowerShell con IP/porta + config del plugin
+// (denylist/allowlist) sostituiti dal template. Senza auth (stesso
+// modello dei .vbs che gli studenti scaricano).
+
+// Config typed (rispecchia builtin/usb.go e builtin/process.go).
+type usbPluginConfig struct {
+	IgnoredClasses []string `json:"ignoredClasses"`
+	AllowVidPid    []string `json:"allowVidPid"`
 }
-func (a *API) handleScriptWatchdogProcess(w http.ResponseWriter, r *http.Request) {
-	a.serveWatchdogScript(w, r, "process_watchdog.ps1", scripts.WatchdogProcessScript)
+type processPluginConfig struct {
+	DenyList []string `json:"denyList"`
 }
 
-func (a *API) serveWatchdogScript(w http.ResponseWriter, r *http.Request, filename string, gen func(string, int) string) {
-	if !requireMethod(w, r, http.MethodGet) {
+func (a *API) handleScriptWatchdogUsb(w http.ResponseWriter, r *http.Request) {
+	cfg, ip, port, ok := a.prepareWatchdogScript(w, r, "usb", "usb_watchdog.ps1")
+	if !ok {
 		return
 	}
+	var c usbPluginConfig
+	_ = json.Unmarshal(cfg, &c)
+	_, _ = w.Write([]byte(scripts.WatchdogUsbScript(ip, port, c.IgnoredClasses, c.AllowVidPid)))
+}
 
-	// Estrai l'ID plugin dal filename (es. "usb_watchdog.ps1" -> "usb").
-	pluginID := strings.TrimSuffix(filename, "_watchdog.ps1")
+func (a *API) handleScriptWatchdogProcess(w http.ResponseWriter, r *http.Request) {
+	cfg, ip, port, ok := a.prepareWatchdogScript(w, r, "process", "process_watchdog.ps1")
+	if !ok {
+		return
+	}
+	var c processPluginConfig
+	_ = json.Unmarshal(cfg, &c)
+	_, _ = w.Write([]byte(scripts.WatchdogProcessScript(ip, port, c.DenyList)))
+}
 
-	// Check enabled state. Se il plugin non e' configurato/abilitato,
-	// 404. Lato studente proxy_on.bat ha `if exist` sul download —
-	// niente file scritto = watchdog skippato per quel plugin.
+// prepareWatchdogScript fa i check comuni a tutti gli endpoint .ps1:
+// metodo, plugin enabled (404 altrimenti), risolve IP+port. Ritorna
+// la config raw JSON del plugin (da deserializzare in tipo specifico)
+// + IP + port + ok=true. Se ok=false, ha gia' scritto la risposta.
+func (a *API) prepareWatchdogScript(w http.ResponseWriter, r *http.Request, pluginID, filename string) ([]byte, string, int, bool) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return nil, "", 0, false
+	}
+
 	cfgs, err := a.state.LoadWatchdogConfig()
-	if err == nil {
-		enabled := false
-		for _, c := range cfgs {
-			if c.ID == pluginID && c.Enabled {
-				enabled = true
-				break
-			}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return nil, "", 0, false
+	}
+	var rawCfg []byte
+	enabled := false
+	for _, c := range cfgs {
+		if c.ID == pluginID {
+			enabled = c.Enabled
+			rawCfg = []byte(c.Config)
+			break
 		}
-		if !enabled {
-			http.Error(w, "watchdog plugin "+pluginID+" non abilitato", http.StatusNotFound)
-			return
-		}
+	}
+	if !enabled {
+		http.Error(w, "watchdog plugin "+pluginID+" non abilitato", http.StatusNotFound)
+		return nil, "", 0, false
 	}
 
 	ip := a.state.LanIP()
@@ -159,7 +185,7 @@ func (a *API) serveWatchdogScript(w http.ResponseWriter, r *http.Request, filena
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	_, _ = w.Write([]byte(gen(ip, port)))
+	return rawCfg, ip, port, true
 }
 
 // formatInt e' un mini-helper int-parse senza errori. Usato per limit/port

@@ -18,24 +18,28 @@ const usbWatchdogTemplate = `# =================================================
 # ============================================================
 # Genera eventi quando lo studente collega/scollega dispositivi USB
 # di classe non sicura. Filtra HID/Mouse/Keyboard/Audio integrati.
+# Le liste sono iniettate dal server al momento del download (dipendono
+# dalla config del docente).
 # ============================================================
 
 $plancUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/event"
 
-# Classi PnP da ignorare (device sempre presenti, non interessanti).
-$ignoredClasses = @(
-    'HIDClass', 'Mouse', 'Keyboard',
-    'USB',
-    'Bluetooth',
-    'AudioEndpoint', 'MEDIA',
-    'System', 'Computer', 'Processor', 'Battery',
-    'DiskDrive', 'Volume',
-    'Net'
-)
+# Classi PnP da ignorare (config docente).
+$ignoredClasses = @(__IGNORED_CLASSES__)
+# Allowlist VID:PID (formato "1234:5678") per device legittimi.
+$allowVidPid = @(__ALLOW_VID_PID__)
+
+function Get-VidPid([string]$instanceId) {
+    if ($instanceId -match 'VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})') {
+        return ($matches[1] + ':' + $matches[2]).ToLower()
+    }
+    return ''
+}
 
 function Get-InterestingPnp {
     Get-PnpDevice -PresentOnly -Status OK 2>$null |
         Where-Object { $_.Class -and ($_.Class -notin $ignoredClasses) } |
+        Where-Object { $vp = Get-VidPid $_.InstanceId; $vp -eq '' -or $allowVidPid -notcontains $vp } |
         Select-Object InstanceId, Class, FriendlyName
 }
 
@@ -81,11 +85,42 @@ while ($true) {
 `
 
 // WatchdogUsbScript ritorna lo script PowerShell del plugin USB con
-// IP/porta del docente sostituiti. Usato dall'endpoint
-// /api/scripts/watchdog/usb.ps1 per servirlo agli studenti.
-func WatchdogUsbScript(ipDocente string, portaWeb int) string {
+// IP/porta del docente sostituiti + denylist/allowlist iniettate
+// dalla config del plugin in DB.
+//
+// `ignoredClasses` sono le classi PnP che il polling salta (default
+// HID/Mouse/Audio/...).  `allowVidPid` sono coppie hex "1234:5678"
+// (case-insensitive) per device legittimi del docente.
+func WatchdogUsbScript(ipDocente string, portaWeb int, ignoredClasses, allowVidPid []string) string {
 	return strings.NewReplacer(
 		"__IP_DOCENTE__", ipDocente,
 		"__PORTA_WEB__", fmt.Sprintf("%d", portaWeb),
+		"__IGNORED_CLASSES__", psStringArray(ignoredClasses),
+		"__ALLOW_VID_PID__", psStringArray(lowercase(allowVidPid)),
 	).Replace(usbWatchdogTemplate)
+}
+
+// psStringArray formatta uno slice di stringhe come array PowerShell:
+//
+//	["a", "b", "c"]  →  'a','b','c'
+//
+// Singoli apici escapati con il pattern PowerShell `''`. Le stringhe
+// vengono inserite nella sintassi `@(...)` del template.
+func psStringArray(items []string) string {
+	out := make([]string, 0, len(items))
+	for _, s := range items {
+		s = strings.ReplaceAll(s, "'", "''")
+		out = append(out, "'"+s+"'")
+	}
+	return strings.Join(out, ",")
+}
+
+// lowercase ritorna una copia di items con tutto in minuscolo. Usato
+// per allowVidPid (Get-VidPid lo confronta in lowercase).
+func lowercase(items []string) []string {
+	out := make([]string, len(items))
+	for i, s := range items {
+		out[i] = strings.ToLower(s)
+	}
+	return out
 }

@@ -526,6 +526,22 @@ body.veyon-on .toolbar-veyon { display: flex; }
 .watchdog-status { font-size: 0.8em; color: var(--muted, #888); margin-left: auto; }
 .watchdog-plugin.enabled .watchdog-status { color: #4ade80; }
 .watchdog-plugin .hint { margin: 6px 0 0 0; }
+.watchdog-config-editor { margin-top: 10px; }
+.watchdog-config-editor summary { cursor: pointer; font-size: 0.85em; color: var(--accent, #b77dd4); user-select: none; }
+.watchdog-config-editor summary:hover { text-decoration: underline; }
+.watchdog-config-json {
+    width: 100%;
+    margin-top: 8px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    background: rgba(0,0,0,0.18);
+    color: inherit;
+    border: 1px solid var(--border, rgba(255,255,255,0.12));
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+}
+.watchdog-config-editor .toolbar-group { margin-top: 6px; }
 
 /* Pannello eventi watchdog sopra la griglia IP */
 .watchdog-events-panel {

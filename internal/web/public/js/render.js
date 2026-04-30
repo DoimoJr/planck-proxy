@@ -1038,6 +1038,39 @@ export function renderWatchdogPluginsList() {
         desc.className = 'hint';
         desc.textContent = plugin.description;
         wrap.appendChild(desc);
+
+        // Config editor (collapsable). Le modifiche entrano in vigore
+        // alla prossima Distribuisci proxy_on (gli studenti riscaricano
+        // lo script con la nuova config).
+        const det = document.createElement('details');
+        det.className = 'watchdog-config-editor';
+        const sum = document.createElement('summary');
+        sum.textContent = 'Modifica configurazione (JSON)';
+        det.appendChild(sum);
+        const ta = document.createElement('textarea');
+        ta.className = 'watchdog-config-json';
+        ta.dataset.plugin = plugin.id;
+        ta.spellcheck = false;
+        ta.rows = 6;
+        ta.value = JSON.stringify(plugin.config || {}, null, 2);
+        det.appendChild(ta);
+        const btnRow = document.createElement('div');
+        btnRow.className = 'toolbar-group';
+        const btnSave = document.createElement('button');
+        btnSave.className = 'btn btn-primary';
+        btnSave.dataset.action = 'watchdog-save-config';
+        btnSave.dataset.plugin = plugin.id;
+        btnSave.textContent = 'Salva configurazione';
+        const btnReset = document.createElement('button');
+        btnReset.className = 'btn';
+        btnReset.dataset.action = 'watchdog-reset-config';
+        btnReset.dataset.plugin = plugin.id;
+        btnReset.textContent = 'Ripristina default';
+        btnRow.appendChild(btnSave);
+        btnRow.appendChild(btnReset);
+        det.appendChild(btnRow);
+        wrap.appendChild(det);
+
         root.appendChild(wrap);
     }
 }

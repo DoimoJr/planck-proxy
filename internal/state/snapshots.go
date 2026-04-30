@@ -43,7 +43,7 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 		Classe:              s.classe,
 		Modo:                s.modo,
 		InattivitaSogliaSec: s.inattivitaSogliaSec,
-		DominiAI:            classify.DominiAI,
+		DominiAI:            classify.AIDomains(),
 		PatternSistema:      classify.PatternSistema,
 		Studenti:            studCopy,
 		Presets:             []string{},

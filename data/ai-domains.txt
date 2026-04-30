@@ -1,0 +1,156 @@
+# Planck - lista domini AI
+# Una entry per riga. Match per substring case-insensitive.
+# Le righe che iniziano con # sono commenti, le righe vuote sono separatori visivi.
+# Sezioni con `# === titolo ===` per organizzare.
+
+
+# === Chatbot principali (USA/Europa) ===
+openai.com
+chatgpt.com
+anthropic.com
+claude.ai
+gemini.google.com
+bard.google.com
+aistudio.google.com
+notebooklm.google
+copilot.microsoft.com
+perplexity.ai
+you.com
+phind.com
+mistral.ai
+groq.com
+meta.ai
+grok.com
+pi.ai
+inflection.ai
+heypi.com
+duck.ai
+huggingface.co
+cohere.com
+poe.com
+character.ai
+
+# === Chatbot cinesi / asiatici ===
+deepseek.com
+doubao.com
+yiyan.baidu.com
+ernie.baidu.com
+chatglm.cn
+bigmodel.cn
+kimi.com
+kimi.moonshot.cn
+moonshot.ai
+qwen.ai
+tongyi.aliyun.com
+minimax.io
+minimaxi.com
+hailuoai.com
+baichuan-ai.com
+01.ai
+lingyiwanwu.com
+alice.yandex.ru
+
+# === Wrapper / aggregatori di modelli ===
+t3.chat
+chathub.gg
+openrouter.ai
+together.ai
+together.xyz
+fireworks.ai
+lobehub.com
+lobechat.com
+ollama.com
+replicate.com
+deepai.org
+venice.ai
+
+# === Chatbot generici (legacy ma ancora usati) ===
+cleverbot.com
+simsimi.com
+
+# === Code assistants / "vibe coding" ===
+cursor.com
+cursor.sh
+windsurf.com
+sourcegraph.com
+v0.dev
+v0.app
+bolt.new
+lovable.dev
+replit.com
+continue.dev
+aider.chat
+devin.ai
+manus.im
+genspark.ai
+blackbox.ai
+codeium.com
+tabnine.com
+
+# === Generazione immagini/video (solo se usabili per cheating testuale) ===
+midjourney.com
+stability.ai
+
+# === Scrittura, parafrasi, essay writer ===
+writesonic.com
+chatsonic.com
+jasper.ai
+copy.ai
+quillbot.com
+grammarly.com
+caktus.ai
+textero.io
+textcortex.com
+smodin.io
+neuroflash.com
+rytr.me
+wordtune.com
+paraphraser.io
+scribbr.com
+zerogpt.com
+wordvice.ai
+eduwriter.ai
+jenni.ai
+paperpal.com
+
+# === Risolutori compiti / matematica AI ===
+wolframalpha.com
+photomath.com
+mathway.com
+symbolab.com
+socratic.org
+mathsolver.microsoft.com
+gauthmath.com
+gauth.ai
+brainly.com
+brainly.co
+mathgptpro.com
+math-gpt.org
+mathful.com
+math.bot
+chegg.com
+coursehero.com
+studocu.com
+
+# === AI su documenti / PDF chat ===
+chatpdf.com
+pdf.ai
+askyourpdf.com
+humata.ai
+monica.im
+
+# === Estensioni / assistenti browser con backend web ===
+maxai.me
+harpa.ai
+getmerlin.in
+merlin.foyer.work
+sider.ai
+arvin.chat
+
+# === Ricerca accademica AI ===
+scispace.com
+consensus.app
+elicit.com
+elicit.org
+scite.ai
+researchrabbit.ai

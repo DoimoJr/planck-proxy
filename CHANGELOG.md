@@ -5,6 +5,69 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.3.0] — 2026-04-30
+
+Phase 6: **auto-classification AI**. La lista dei domini AI ora vive
+in un file di testo nel repo (`data/ai-domains.txt`) invece che hardcoded
+nel codice Go. Planck pulla l'ultima versione da GitHub al boot e
+quando l'utente clicca "Aggiorna ora" nelle Impostazioni, con
+fallback graceful sulla copia embedded se non c'e' connettivita'.
+
+### Aggiunto
+
+- **`data/ai-domains.txt`** (root del repo): file canonico, una entry
+  per riga, commenti `#` e sezioni. Aggiungere domini = aprire una
+  PR su questo file. Tutti i Planck installati raccolgono la modifica
+  al prossimo refresh.
+
+- **`classify.RefreshAIList(url, dataDir)`**: scarica + valida +
+  salva cache in `<dataDir>/ai-domains-cache.txt` + promuove la
+  lista corrente. Timeout 10s, sanity check `>= 10` domini per evitare
+  di sovrascrivere con HTML 404 o pagine error.
+
+- **`classify.LoadAICache(dataDir)`**: carica la cache scritta da
+  un refresh precedente. Usato a boot prima del fetch async.
+
+- **3 layer di fallback**:
+  1. Try cache (`<dataDir>/ai-domains-cache.txt`) — se presente, usa
+  2. Async tenta refresh remote — se ok, sovrascrive cache
+  3. Embedded (built-in nel binario, ~129 domini) — sempre disponibile
+
+  Niente blocco al boot: la lista parte sempre dall'embedded e si
+  promuove asincronicamente quando il fetch ritorna.
+
+- **`POST /api/ai/refresh`** + **`GET /api/ai/status`**: refresh
+  manuale dalla UI. Lo status mostra count + source
+  (`embedded`/`cache`/`remote`) + timestamp ultima update.
+
+- **UI Settings** (Impostazioni → nuova card "Lista AI auto-aggiornata"):
+  status corrente + bottone "🔄 Aggiorna ora". Toast con esito.
+
+- **SSE event `ai-list`**: broadcast quando la lista viene
+  aggiornata. La UI ricarica il count + sorgente in tempo reale.
+
+### Cambiato
+
+- **`classify.DominiAI` (var) → `classify.AIDomains()` (func)**.
+  La nuova funzione ritorna uno snapshot atomico della lista
+  corrente. I 3 chiamanti aggiornati (`Classifica`, `BlockAllAI`,
+  `ConfigSnapshotData`).
+
+- **Test `TestEmbeddedMatchesDataFile`** (in `source_test.go`)
+  assicura che `internal/classify/embedded_ai_domains.txt` e
+  `data/ai-domains.txt` siano sempre identici. Se si aggiorna uno
+  dei due, l'altro va sincronizzato (`cp`) — il test fallisce
+  altrimenti.
+
+### Note di upgrade
+
+- Niente azione manuale richiesta. Al primo boot Planck prova il
+  fetch da GitHub: se va, scarica la lista corrente; se no, usa
+  l'embedded che e' la stessa di alpha.5.5 (~129 domini).
+- L'URL del fetch e' hardcoded a `raw.githubusercontent.com/DoimoJr/
+  planck-proxy/main/data/ai-domains.txt`. Override via PR sul codice.
+- Il binary resta ~12 MB (lista AI ~3 KB embedded).
+
 ## [v2.2.0] — 2026-04-30
 
 Phase 5.x parte 2: **plugin Network** (rileva nuove interfacce di rete)

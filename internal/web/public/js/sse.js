@@ -105,6 +105,10 @@ function setStato(connesso) {
     card.classList.remove('connected', 'disconnected');
     card.classList.add(connesso ? 'connected' : 'disconnected');
     $('stat-status').textContent = connesso ? 'LIVE' : 'OFF';
+
+    // Banner top "riconnessione..." quando perdiamo SSE.
+    const banner = document.getElementById('connection-banner');
+    if (banner) banner.classList.toggle('hidden', connesso);
 }
 
 /**
@@ -182,6 +186,24 @@ export function avviaSSE() {
             renderAll();
         } else if (msg.type === 'alive') {
             state.aliveMap.set(msg.ip, msg.ts);
+            renderAll();
+        } else if (msg.type === 'watchdog') {
+            // Aggiungi alla coda globale (cap a 200 ultimi).
+            state.watchdogEvents.push(msg);
+            if (state.watchdogEvents.length > 200) state.watchdogEvents.shift();
+            // Per-IP (cap a 20 ultimi per IP, sufficiente per badge + tooltip).
+            if (msg.ip) {
+                let arr = state.watchdogEventsPerIp.get(msg.ip);
+                if (!arr) { arr = []; state.watchdogEventsPerIp.set(msg.ip, arr); }
+                arr.push(msg);
+                if (arr.length > 20) arr.shift();
+            }
+            // Notifica audio/desktop su severity warning+ se notifiche on.
+            if (msg.severity === 'warning' || msg.severity === 'critical') {
+                if (state.notifiche && 'Notification' in window && Notification.permission === 'granted') {
+                    new Notification('Planck Watchdog', { body: msg.format || msg.plugin });
+                }
+            }
             renderAll();
         }
     };

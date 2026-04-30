@@ -1382,71 +1382,122 @@ Il server estrae l'IP del client dal socket, registra `aliveMap[ip] = now()`, br
 
 ### 5.16 Protocollo Veyon (client side)
 
-Planck v2 implementa il **client del protocollo Veyon Master ↔ veyon-server**. Sorgente di verita' del protocollo: il codice C++ Qt del progetto Veyon (https://github.com/veyon/veyon, principalmente `core/src/`).
+> **Nota**: questa sezione e' stata riscritta dopo l'implementazione effettiva (alpha.4). La versione precedente era basata sulla doc Veyon e su recon di sorgente, e in alcuni punti ha mancato la realta' a livello di trasporto. Il protocollo NON e' Qt-puro su TCP raw: e' RFB v3.8 (VNC) con un security type custom Veyon che incapsula l'auth + i comandi feature. La verita' attuale di sotto e' stata validata byte-per-byte contro `veyon-server 4.10.0` in Docker (`test/veyon-rig`).
 
-#### 5.16.1 Trasporto
+Sorgente di verita' del protocollo: il codice C++ Qt di Veyon (https://github.com/veyon/veyon, branch `main`). File chiave da leggere quando si tocca questa parte:
 
-- TCP, porta default 11100 sui PC studenti
-- TLS opzionale (Veyon server di default accetta TLS via openssl, certificati self-signed firmati dalla chiave master)
-- Framing: `[uint32 length BE][payload]`
-- Payload: messaggi binari Qt-serialized (QVariantMap → QDataStream)
+- `core/src/RfbVeyonAuth.h` — security type ID + enum auth methods
+- `core/src/VeyonConnection.cpp` — flow client-side
+- `core/src/VncServerProtocol.cpp` + `server/src/ServerAuthenticationManager.cpp` — flow server-side
+- `core/src/VariantArrayMessage.cpp` — framing dei messaggi
+- `core/src/VariantStream.cpp` — `QDataStream::Qt_5_5` come versione di serializzazione
+- `core/src/CryptoCore.h` — `DefaultSignatureAlgorithm = QCA::EMSA3_SHA512` (= RSA SHA-512 PKCS#1 v1.5)
+- `core/src/FeatureMessage.{h,cpp}` — wrapping dei comandi feature dentro RFB extension
+- `plugins/<feature>/...` — implementazione per-feature, da consultare quando un comando non funziona come atteso
 
-⚠️ Nota implementativa: Qt usa un proprio formato di serializzazione binaria non-standard. Reimplementarlo da zero in Go richiede leggere `qdatastream.h`/`qmetatype.h` e replicare. Esistono libs Go embrionali per questo (es. `github.com/dlclark/regexp2` non c'entra; vedi librerie per Qt deserialization Go — da valutare se usare o reimplementare il sottoinsieme che ci serve).
+#### 5.16.1 Trasporto reale
 
-**Decisione pragmatica per MVP**: implementare manualmente il subset di QDataStream necessario (solo i tipi che usa Veyon: QString, QByteArray, QVariantMap, QVariantList, qint32, ecc.). Stima: ~300 righe Go, lavoro una tantum.
+- TCP plain, porta default **11100** sul PC studente. **Niente TLS** sulla porta 11100 in default config — il cifrato e' opzionale e ad oggi non lo usiamo.
+- Sopra TCP gira **RFB v3.8** (Remote Framebuffer Protocol, RFC 6143), con greeting `RFB 003.008\n` (12 byte) scambiato in entrambi i sensi.
+- Veyon aggiunge un **security type custom** (byte ID `0x28` = 40) al menu standard di RFB security types (None=1, VNCAuth=2, ecc.). Il server propone solo questo type; il client lo sceglie e prosegue.
+- Dentro il security type Veyon viaggiano due cose:
+  1. Il **flow di auth Veyon** (vedi §5.16.2)
+  2. Dopo l'auth, l'handshake RFB normale (`ClientInit` 1 byte → `ServerInit`)
+- Il **canale "feature"** (RunProgram, ScreenLock, ...) e' un'estensione RFB: messaggi con tipo RFB byte `0x29` (= 41) seguiti da un `VariantArrayMessage`.
+
+Framing `VariantArrayMessage` (definito in `core/src/VariantArrayMessage.cpp`):
+
+```
+[uint32 BE length][N × QVariant]
+```
+
+Il payload e' una sequenza di `QVariant` serializzati con `QDataStream::Qt_5_5` (versione 16). Tipi usati da Veyon: `bool, qint32, qint64, double, QString, QByteArray, QStringList, QUuid, QRect, QVariantList, QVariantMap`.
+
+> **Decisione**: implementato manualmente in `internal/veyon/qds` (~500 LoC inclusi commenti, 39 unit test su fixture byte-level). Niente cgo, niente Qt SDK a build time, single-binary preservato. Vedi anche §5.16.6 per le alternative scartate.
 
 #### 5.16.2 Handshake autenticazione (KeyFile)
 
-Sequenza:
-1. Client (Planck): apre TCP+TLS a server:11100
-2. Server: invia `AuthChallenge` (random nonce)
-3. Client: firma il nonce con la chiave privata RSA/EC, invia `AuthResponse`
-4. Server: verifica firma con la chiave pubblica registrata, risponde `AuthOk` o `AuthFail`
-5. Da qui in poi, scambio messaggi feature
+Sequenza completa, validata vs il rig:
 
-Riferimento source: `core/src/AuthenticationManager.cpp`, `core/src/AuthKeysManager.cpp`.
+1. **Client → Server**: TCP connect su porta 11100.
+2. **Server → Client**: `RFB 003.008\n` (12 byte).
+3. **Client → Server**: `RFB 003.008\n` (echo).
+4. **Server → Client**: `[u8 N=1][u8 0x28]` (un solo security type custom Veyon).
+5. **Client → Server**: `[u8 0x28]` (sceglie Veyon).
+6. **Server → Client**: `VariantArrayMessage` con `[qint32 authTypeCount, qint32 t_1, ..., qint32 t_N]`. Gli auth type sono un enum `RfbVeyonAuth::Type` (Invalid=0, KeyFile=3, Logon=4, Token=5).
+7. **Client → Server**: `VariantArrayMessage` con `[qint32 chosenAuthType=3, QString username]`. Per KeyFile l'username puo' essere "" — non vuoto causa heap corruption nel server (bug loro, evitato lato nostro).
+8. **Server → Client**: `VariantArrayMessage` **vuoto** (4 byte `00 00 00 00`) come marker di transizione di stato. Va consumato e ignorato.
+9. **Server → Client**: `VariantArrayMessage` con `[QByteArray challenge]` (128 byte random).
+10. **Client**: firma `SHA-512(challenge)` con la chiave privata RSA, padding **PKCS#1 v1.5** (`QCA::EMSA3_SHA512`).
+11. **Client → Server**: `VariantArrayMessage` con `[QString keyName, QByteArray signature]`. `keyName` e' il nome assegnato in `veyon-cli authkeys create` (es. `"teacher"`).
+12. **Server → Client**: SecurityResult RFB (4 byte BE, 0=OK, 1=failed). Su failed segue una reason string `[u32 len][bytes]`.
+13. **Client → Server**: ClientInit (1 byte shared-flag). Veyon richiede sempre `1`.
+14. **Server → Client**: ServerInit standard RFB (`[u16 width][u16 height][16 byte pixelFormat][u32 nameLen][nameLen bytes name]`). I valori non sono significativi per il control plane Planck — vengono letti e ignorati.
+
+Da qui la connessione e' pronta per ricevere/inviare `FeatureMessage`.
 
 #### 5.16.3 Comandi feature
 
-Ogni feature ha un UUID stabile (definito in `core/src/Feature.h` di Veyon). Comando feature = messaggio con:
+Wire format di `FeatureMessage` (da `core/src/FeatureMessage.cpp`):
+
 ```
-{
-    "feature_uid": "<uuid>",
-    "command": "start" | "stop" | "query",
-    "arguments": { ... feature-specific ... }
-}
+[u8 0x29 = RfbMessageType]    // marca questo come RFB extension Veyon
+[u32 BE length]                // VariantArrayMessage header
+[QVariant(QUuid featureUUID)]
+[QVariant(qint32 command)]     // FeatureMessage::Command enum
+[QVariant(QVariantMap arguments)]
 ```
 
-UUID delle feature usate (estratti dal sorgente Veyon):
-| Feature | UUID |
-|---|---|
-| ScreenLock | `ccb535a2-1d24-4cc1-a709-8b47d2b2ac79` |
-| RunProgram | `da9ca56a-b2ad-4fff-8f8a-929b2927b442` |
-| PowerControl (su/giu/log off/reboot) | `f483be1d-ddf4-4df3-bd6f-23a7b6249f9d` |
-| FileTransfer | `4a70bd5a-fab2-4a4b-a92a-a1660a6105b7` |
-| ScreenshotManagement | `ea197ac6-0e06-46be-8f2c-b21a26b05b88` (deferred ma in roadmap MVP) |
+`FeatureMessage::Command` (`core/src/FeatureMessage.h`):
 
-⚠️ Verificare gli UUID al momento dell'implementazione contro il sorgente Veyon corrente — sono in `<feature>/<feature>FeaturePlugin.cpp`.
+```
+Default = 0    // significato dipende dal plugin (di solito "start")
+Invalid = -1
+Init    = -2
+```
 
-#### 5.16.4 Screenshot one-shot via VNC
+UUID feature attualmente cablate in `internal/veyon/feature.go` (estratti dal sorgente Veyon corrente; verifica vs versione server se cambiano):
 
-Per Screenshot non vogliamo aprire un canale VNC streaming completo. Tre opzioni:
+| Feature | UUID | Argomenti |
+|---|---|---|
+| ScreenLock | `ccb535a2-1d24-4cc1-a709-8b47d2b2ac79` | nessuno |
+| StartApp (ex RunProgram) | `da9ca56a-b2ad-4fff-8f8a-929b2927b442` | `{applications: QStringList}` |
+| Reboot | `4f7d98f0-395a-4fff-b968-e49b8d0f748c` | nessuno |
+| PowerDown | `6f5a27a0-0e2f-496e-afcc-7aae62eede10` | nessuno |
+| Logoff | `7311d43d-ab53-439e-a03a-8cb25f7ed526` | nessuno |
+| TextMessage | `e75ae9c8-ac17-4d00-8f0d-019348346208` | `{text: QString}` |
+| OpenURL | `8a11a75d-b3db-48b6-b9cb-f8422ddd5b0c` | `{websiteUrls: QStringList}` |
 
-- **(a)** Usare la feature `ScreenshotManagement` di Veyon che gia' implementa "cattura uno screenshot e salvalo": il server cattura e ritorna un PNG come messaggio. **Preferito.**
-- (b) Aprire una connessione RFB transient, fare un solo `FramebufferUpdateRequest`, leggere il primo frame, chiudere.
-- (c) Snapshot via altra via (skip).
+⚠️ FileTransfer (`4a70bd5a-fab2-4a4b-a92a-a1660a6105b7`) **non e' implementato**. Per il caso "distribuisci proxy_on.bat" usiamo `StartApp` + powershell `iwr` che scarica lo script da Planck stesso (Planck gia' lo serve via `/api/scripts/proxy_on.bat`). Niente FileTransfer custom.
 
-Decisione: **(a)** se la feature `ScreenshotManagement` di Veyon supporta la cattura on-demand (verificare al momento dell'implementazione). Altrimenti fallback a (b).
+⚠️ Screenshot non e' incapsulato come FeatureMessage: Veyon WebAPI espone `GET /api/v1/framebuffer?format=png` per quello, e una sessione RFB completa puo' richiedere un `FramebufferUpdate`. Per il MVP non lo facciamo.
+
+#### 5.16.4 Pattern di connessione lato Planck
+
+`internal/state/veyon.go` usa **dial-send-close** per ogni comando: aprire una nuova connessione (handshake completo, ~500ms incluso TCP+RFB+auth+ClientInit/ServerInit), inviare il FeatureMessage, chiudere. Niente pool di connessioni.
+
+Trade-off: latenza piu' alta vs niente da gestire (reconnect, watchdog, scadenze auth, race condition multi-tenant). Per click manuali della UI docente la latenza e' invisibile. Se in futuro arrivassimo a comandi automatici ad alta frequenza (Screenshot live, screen sharing), un pool diventa necessario.
 
 #### 5.16.5 Edge cases protocol
 
 | Scenario | Comportamento |
 |---|---|
-| TLS handshake fallisce (cert untrusted, ecc.) | Errore `VEYON_TLS_FAILED`, log con dettagli, suggerimento di rigenerare keys |
-| Server timeout (no response in 5s) | Errore `VEYON_TIMEOUT`, retry singolo, poi fallimento |
-| Auth fail | Errore `VEYON_AUTH_FAILED` |
-| Feature UID sconosciuto al server (versione vecchia) | Errore `VEYON_FEATURE_NOT_SUPPORTED`, UI mostra warning sulla card |
-| File transfer interrotto | Errore con percentuale di completamento, possibilita' di retry |
+| Server non in ascolto su :11100 | Errore `VEYON_DIAL` con il `connection refused` originale di Go. UI mostra alert |
+| RFB greeting inatteso | Errore con il greeting effettivo ricevuto (debug aid) |
+| Server propone solo Logon (es. config sbagliata server-side) | Errore "server non offre AuthKeyFile" con la lista degli auth offerti |
+| Server propone una cosa che non parsiamo | Errore in parse del VarMsg, log con hex |
+| SecurityResult = failed | Errore con la reason string del server (di solito "FAIL") |
+| Username non vuoto in KeyFile auth | Server crash (heap corruption) — sempre vuoto |
+| Feature UID sconosciuto al server | Server semplicemente non risponde (silent drop). Lato client non vediamo l'errore — al momento accettiamo |
+
+#### 5.16.6 Alternative al QDataStream manuale
+
+Considerate prima di scegliere l'implementazione manuale:
+
+- **`github.com/therecipe/qt`** — bindings Go per Qt. Scartata: progetto effettivamente abbandonato (ultimo commit 2020), incompatibile con Qt 6, richiede `GO111MODULE=off`, license LGPL-3.0 (incompatibile col nostro MIT senza relicensare).
+- **`github.com/mappu/miqt`** — bindings Go per Qt5/Qt6 attivamente mantenuti. Scartata: rompe la promessa di single-binary portable (cgo, Qt SDK al build time, Qt DLLs al runtime, ~50MB di bundle vs 11MB attuali).
+- **Veyon WebAPI plugin** (`docs.veyon.io/en/latest/developer/webapi.html`) — REST/JSON sopra HTTP, copre quasi tutto cio' che serve. Scartata su richiesta dell'utente per "fare le cose proprio come Veyon Master fa": il path nativo via RFB+QDataStream.
+- **Reimplementare a mano in Go** — scelta finale. ~500 LoC di QDataStream + ~400 LoC di RFB+auth+features. Bounded, deterministico, niente dipendenze esterne.
 
 ---
 

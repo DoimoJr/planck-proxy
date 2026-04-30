@@ -1,10 +1,28 @@
-# Binario Node.js bundled (91 MB). L'utente lo scarica separatamente (vedi README).
+# Binario Node.js bundled (91 MB, solo v1). L'utente lo scarica separatamente (vedi README).
 node.exe
 *.exe
+
+# Binari Go (planck su Linux/macOS — niente estensione)
+/planck
+/planck-darwin
+/planck-linux
+
+# Artefatti test Go
+*.test
+*.out
+coverage.txt
 
 # Stato runtime (rigenerato ad ogni avvio)
 _traffico_log.txt
 _blocked_domains.txt
+config.json
+studenti.json
+
+# Script studenti auto-generati a ogni boot da Planck v2 (IP della
+# rete locale → ogni macchina ha valori diversi). I template sono
+# in internal/scripts/scripts.go.
+/proxy_on.bat
+/proxy_off.bat
 
 # Sessioni archiviate (contengono IP + domini visitati dagli studenti = dati sensibili)
 sessioni/*.json
@@ -36,3 +54,7 @@ desktop.ini
 
 # Versione precedente tenuta in locale per confronto
 old/
+
+# Veyon test rig: chiavi RSA generate ad ogni `docker run`, mai committare.
+test/veyon-rig/keys/
+*.pem

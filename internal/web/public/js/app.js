@@ -67,6 +67,15 @@ async function init() {
     renderAll();
     avviaSSE();
 
+    // Veyon: status (sapere se mostrare i bottoni inline + classe).
+    // Async non bloccante: il primo render va comunque, le card si
+    // accendono di Veyon-buttons quando il fetch ritorna.
+    actions.veyonAggiornaStato();
+
+    // Watchdog plugins: carica config + ultimi eventi (Phase 5).
+    actions.watchdogAggiornaPlugins();
+    actions.watchdogAggiornaEventi();
+
     // Countdown: tick ogni secondo (solo aggiorna la UI, zero allocazioni)
     setInterval(renderCountdown, 1000);
     // Refresh complessivo (durata, "ultima attivita'") - ogni 5s
@@ -106,7 +115,8 @@ document.body.addEventListener('click', (e) => {
         case 'nascondi-dominio': actions.nascondiDominio(d); break;
         case 'mostra-dominio': actions.mostraDominio(d); break;
         case 'reset-nascosti': actions.resetNascosti(); break;
-        case 'focus-ip': actions.setFocus(ip); break;
+        case 'focus-ip': actions.handleCardClick(ip, e); break;
+        case 'clear-selection': actions.clearSelection(); break;
         case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
         case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
         case 'vista-griglia': actions.cambiaVistaIp('griglia'); break;
@@ -121,6 +131,7 @@ document.body.addEventListener('click', (e) => {
         case 'preset-save': actions.salvaPreset(); break;
         case 'darkmode': actions.toggleDarkmode(); break;
         case 'notifiche': actions.toggleNotifiche(); break;
+        case 'spegni-server': actions.spegniServer(); break;
         case 'pausa-toggle': actions.togglePausa(); break;
         case 'clear-deadline': actions.annullaDeadline(); break;
         case 'tab': actions.cambiaTab(el.dataset.tab); break;
@@ -133,6 +144,20 @@ document.body.addEventListener('click', (e) => {
         case 'combo-delete': actions.eliminaCombo(); break;
         case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
         case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
+        case 'veyon-configure': actions.veyonConfigura(); break;
+        case 'veyon-clear': actions.veyonRimuovi(); break;
+        case 'veyon-test': actions.veyonTest(); break;
+        case 'veyon-card-lock': e.stopPropagation(); actions.veyonCardLock(el.dataset.ip); break;
+        case 'veyon-card-unlock': e.stopPropagation(); actions.veyonCardUnlock(el.dataset.ip); break;
+        case 'veyon-card-msg': e.stopPropagation(); actions.veyonCardMsg(el.dataset.ip); break;
+        case 'veyon-classe-lock': actions.veyonClasseLock(); break;
+        case 'veyon-classe-unlock': actions.veyonClasseUnlock(); break;
+        case 'veyon-classe-msg': actions.veyonClasseMsg(); break;
+        case 'veyon-classe-reboot': actions.veyonClasseReboot(); break;
+        case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
+        case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
+        case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
+        case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
         case 'archivia-ora': actions.archiviaOra(); break;
         case 'ricarica-sessioni': actions.ricaricaSessioni(); break;
         case 'sessione-apri': e.stopPropagation(); actions.apriSessioneArchiviata(nome); break;
@@ -141,6 +166,58 @@ document.body.addEventListener('click', (e) => {
     }
 
     if (dentroMenu) chiudiMenuOverflow();
+});
+
+// --- Keyboard shortcuts (SPEC §6.7) ---
+//
+// I tab si switchano con Ctrl+1..4. Le azioni "primarie" (Avvia/Ferma,
+// Pausa) hanno shortcuts veloci. ESC svuota selezione/focus. Ctrl+F
+// porta il fuoco sul filtro testuale del Live tab.
+//
+// Non sovrascriviamo gli shortcut quando il fuoco e' su input/textarea
+// (eccetto per il filtro stesso): il prof spesso digita IP/nome studente.
+const TAB_SHORTCUTS = { '1': 'live', '2': 'report', '3': 'storico', '4': 'impostazioni' };
+function isInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+}
+document.addEventListener('keydown', (e) => {
+    // ESC: clear selezione + focus IP, sempre attivo.
+    if (e.key === 'Escape') {
+        if (state.selectedIps.size > 0) { actions.clearSelection(); e.preventDefault(); return; }
+        if (state.focusIp) { actions.clearFocus(); e.preventDefault(); return; }
+    }
+    // Shortcut con Ctrl/Cmd
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    // Ctrl+1..4 sempre attivo (anche da input — comodo)
+    if (TAB_SHORTCUTS[e.key]) {
+        actions.cambiaTab(TAB_SHORTCUTS[e.key]);
+        e.preventDefault();
+        return;
+    }
+    // Gli altri solo se non stiamo digitando in un input
+    if (isInputFocused()) return;
+    if (e.key === 's' || e.key === 'S') {
+        actions.toggleSessione();
+        e.preventDefault();
+    } else if (e.key === 'p' || e.key === 'P') {
+        actions.togglePausa();
+        e.preventDefault();
+    } else if (e.key === 'f' || e.key === 'F') {
+        const filtro = document.querySelector('[data-action="filtro"]');
+        if (filtro) { filtro.focus(); filtro.select(); e.preventDefault(); }
+    } else if (e.key === 'a' || e.key === 'A') {
+        // Seleziona tutti gli IP visibili nella vista Live.
+        if (state.tabAttivo === 'live') {
+            const visibili = Object.keys(state.cfg.studenti || {});
+            state.selectedIps = new Set(visibili);
+            renderAll();
+            e.preventDefault();
+        }
+    }
 });
 
 // --- Input / change ---

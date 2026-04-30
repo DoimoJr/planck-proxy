@@ -335,7 +335,16 @@ function calcolaStatoIp(ip, ora, soglia) {
 export function renderTabellaIp() {
     const container = $('ip-container');
     if (!container) return;
-    const tuttiIps = new Set([...state.perIp.keys(), ...state.aliveMap.keys()]);
+    // Card visibili = unione di:
+    //   - IP della mappa studenti (anche se nessun traffico ne' watchdog ping)
+    //     → permette di inviare comandi Veyon prima della distribuzione del proxy
+    //   - IP che hanno generato traffico (perIp)
+    //   - IP che hanno pingato il watchdog (aliveMap)
+    const tuttiIps = new Set([
+        ...Object.keys(state.cfg.studenti || {}),
+        ...state.perIp.keys(),
+        ...state.aliveMap.keys(),
+    ]);
     const ips = [...tuttiIps].sort((a, b) => ip2long(a) - ip2long(b));
     const ora = Date.now();
     const soglia = state.cfg.inattivitaSogliaSec * 1000;
@@ -449,6 +458,7 @@ function renderListaIp(container, ips, ora, soglia) {
             const rowClass = [];
             if (s.inattivo) rowClass.push('inattivo');
             if (state.focusIp === ip) rowClass.push('focus');
+            if (state.selectedIps.has(ip)) rowClass.push('selected');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
             const nuova = rowClass.join(' ');
             if (tr.className !== nuova) tr.className = nuova;
@@ -498,12 +508,36 @@ function renderGrigliaIp(container, ips, ora, soglia) {
     const grid = scheletroVistaIp(container, 'griglia');
     if (ips.length === 0) {
         grid.textContent = '';
-        if (!grid.querySelector(':scope > .ip-grid-vuota')) {
-            const v = document.createElement('div');
-            v.className = 'ip-grid-vuota';
-            v.textContent = 'Nessun IP ancora rilevato.';
-            grid.appendChild(v);
+        const v = document.createElement('div');
+        v.className = 'ip-grid-vuota';
+
+        const titolo = document.createElement('div');
+        titolo.className = 'empty-title';
+        titolo.textContent = 'Nessuno studente connesso ancora.';
+        v.appendChild(titolo);
+
+        const hint = document.createElement('div');
+        hint.className = 'empty-hint';
+        const haStudenti = Object.keys(state.cfg.studenti || {}).length > 0;
+        const haVeyon = !!state.veyonConfigured;
+        if (haVeyon && haStudenti) {
+            hint.textContent = 'Clicca "Distribuisci proxy" per attivare il monitoraggio sui PC studente.';
+        } else if (haStudenti) {
+            hint.textContent = 'Configura Veyon nelle Impostazioni per distribuire automaticamente il proxy_on.bat agli studenti.';
+        } else {
+            hint.textContent = 'Aggiungi studenti alla mappa nelle Impostazioni, oppure attendi che il proxy venga lanciato sui PC studente.';
         }
+        v.appendChild(hint);
+
+        if (haVeyon && haStudenti) {
+            const cta = document.createElement('button');
+            cta.type = 'button';
+            cta.className = 'empty-cta';
+            cta.dataset.action = 'veyon-distribuisci-proxy';
+            cta.textContent = '📁 Distribuisci proxy ora';
+            v.appendChild(cta);
+        }
+        grid.appendChild(v);
         return;
     }
     // Rimuovi eventuale placeholder "vuoto" ereditato da un render precedente.
@@ -519,12 +553,18 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             card.innerHTML = '<div class="ip-card-head">'
                 + '<span class="watchdog-dot"></span>'
                 + '<div class="nome-wrap"></div>'
+                + '<span class="watchdog-event-badge" hidden></span>'
                 + '</div>'
                 + '<div class="ip-card-metriche">'
                 + '<div class="ip-card-num"></div>'
                 + '<div class="ip-card-ultima"></div>'
                 + '</div>'
-                + '<div class="ip-card-tags"></div>';
+                + '<div class="ip-card-tags"></div>'
+                + '<div class="ip-card-veyon">'
+                + '<button type="button" data-action="veyon-card-lock" data-ip="' + ip + '" title="Blocca schermo">🔒</button>'
+                + '<button type="button" data-action="veyon-card-unlock" data-ip="' + ip + '" title="Sblocca schermo">🔓</button>'
+                + '<button type="button" data-action="veyon-card-msg" data-ip="' + ip + '" title="Messaggio">💬</button>'
+                + '</div>';
             return card;
         },
         (card, ip) => {
@@ -532,6 +572,7 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const classi = ['ip-card'];
             if (s.inattivo) classi.push('inattivo');
             if (state.focusIp === ip) classi.push('focus');
+            if (state.selectedIps.has(ip)) classi.push('selected');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
             const nuova = classi.join(' ');
             if (card.className !== nuova) card.className = nuova;
@@ -573,6 +614,19 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const visibili = dominiOrd.slice(0, DOMINI_CARD_MAX);
             const extra = dominiOrd.length - visibili.length;
             syncTagsDominio(tags, visibili, extra);
+
+            // Badge eventi watchdog (Phase 5).
+            const badge = head.querySelector('.watchdog-event-badge');
+            if (badge) {
+                const n = watchdogBadgeCount(ip);
+                if (n > 0) {
+                    badge.hidden = false;
+                    badge.textContent = '⚠️ ' + n;
+                    badge.title = n + ' eventi watchdog negli ultimi 5 min';
+                } else {
+                    badge.hidden = true;
+                }
+            }
         }
     );
 }
@@ -938,16 +992,138 @@ function renderSelectCombo() {
 // Render completo (throttled)
 // ========================================================================
 
+/**
+ * Aggiorna la "selection bar" sopra il pannello IP. Visibile solo se
+ * c'e' una multi-selezione attiva. Mostra count + bottoni per le azioni
+ * Veyon piu' comuni (lock/messaggio) e un "Deseleziona tutti".
+ */
+/**
+ * Renderizza la card "Watchdog plugins" nelle Impostazioni: per ogni
+ * plugin un toggle abilita/disabilita + descrizione. La config raw
+ * (JSON) e' nascosta in <details> per non sovraccaricare l'UI.
+ */
+export function renderWatchdogPluginsList() {
+    const root = $('watchdog-plugins-list');
+    if (!root) return;
+    root.textContent = '';
+    if (!state.watchdogPlugins.length) {
+        const p = document.createElement('p'); p.className = 'hint';
+        p.textContent = 'Nessun plugin registrato.';
+        root.appendChild(p);
+        return;
+    }
+    for (const plugin of state.watchdogPlugins) {
+        const wrap = document.createElement('div');
+        wrap.className = 'watchdog-plugin' + (plugin.enabled ? ' enabled' : '');
+        const head = document.createElement('div');
+        head.className = 'watchdog-plugin-head';
+        const toggle = document.createElement('label');
+        toggle.className = 'watchdog-toggle';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!plugin.enabled;
+        cb.dataset.action = 'watchdog-toggle';
+        cb.dataset.plugin = plugin.id;
+        const span = document.createElement('span');
+        span.textContent = plugin.name;
+        toggle.appendChild(cb);
+        toggle.appendChild(span);
+        head.appendChild(toggle);
+        const status = document.createElement('span');
+        status.className = 'watchdog-status';
+        status.textContent = plugin.enabled ? 'attivo' : 'inattivo';
+        head.appendChild(status);
+        wrap.appendChild(head);
+        const desc = document.createElement('p');
+        desc.className = 'hint';
+        desc.textContent = plugin.description;
+        wrap.appendChild(desc);
+        root.appendChild(wrap);
+    }
+}
+
+/**
+ * Pannello eventi watchdog sopra la griglia IP. Mostra gli ultimi 5
+ * eventi con severity warning/critical degli ultimi 5 minuti, con tag
+ * per IP/plugin. Nascosto se non ci sono eventi rilevanti.
+ */
+export function renderWatchdogEventsPanel() {
+    const panel = $('watchdog-events-panel');
+    if (!panel) return;
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    const recenti = state.watchdogEvents
+        .filter(e => e.ts >= cutoff && e.severity !== 'info')
+        .slice(-5)
+        .reverse();
+    if (recenti.length === 0) {
+        panel.classList.add('hidden');
+        panel.textContent = '';
+        return;
+    }
+    panel.classList.remove('hidden');
+    panel.innerHTML = '<strong>⚠️ Watchdog (ultimi 5 min):</strong>';
+    for (const ev of recenti) {
+        const row = document.createElement('div');
+        row.className = 'watchdog-event watchdog-' + ev.severity;
+        const ipLabel = ev.nomeStudente || ev.ip;
+        const text = ev.format || (ev.plugin + ' ' + JSON.stringify(ev.payload || {}));
+        row.textContent = `[${ipLabel}] ${text}`;
+        panel.appendChild(row);
+    }
+}
+
+/**
+ * Conta gli eventi watchdog "rilevanti" (severity warning/critical)
+ * negli ultimi 5 minuti per un IP. Usato per il badge sulla card.
+ */
+function watchdogBadgeCount(ip) {
+    const arr = state.watchdogEventsPerIp.get(ip);
+    if (!arr) return 0;
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    let n = 0;
+    for (const e of arr) {
+        if (e.ts >= cutoff && e.severity !== 'info') n++;
+    }
+    return n;
+}
+
+export function renderSelectionBar() {
+    const bar = $('selection-bar');
+    if (!bar) return;
+    const n = state.selectedIps.size;
+    if (n === 0) {
+        bar.classList.add('hidden');
+        bar.textContent = '';
+        return;
+    }
+    bar.classList.remove('hidden');
+    // Bottoni Veyon nella bar appaiono solo se Veyon e' configurato.
+    const veyonOn = !!state.veyonConfigured;
+    bar.innerHTML =
+        '<span class="selection-count">' + n + ' selezionat' + (n === 1 ? 'o' : 'i') + '</span>'
+        + (veyonOn
+            ? '<button class="btn" data-action="veyon-classe-lock" title="Blocca schermo">🔒</button>'
+            + '<button class="btn" data-action="veyon-classe-unlock" title="Sblocca schermo">🔓</button>'
+            + '<button class="btn" data-action="veyon-classe-msg" title="Messaggio">💬</button>'
+            + '<button class="btn btn-warning" data-action="veyon-classe-reboot" title="Riavvia">🔄</button>'
+            + '<button class="btn btn-danger" data-action="veyon-classe-poweroff" title="Spegni">⏻</button>'
+            : '')
+        + '<button class="btn" data-action="clear-selection">Deseleziona tutti</button>';
+}
+
 /** Esegue tutti i renderer sincronamente. Chiamato da `renderAll` dentro RAF. */
 function _renderAllSync() {
     renderSidebar();
     renderStats();
     renderPausaEBottoni();
     renderTabellaIp();
+    renderSelectionBar();
+    renderWatchdogEventsPanel();
     renderUltimeRichieste();
     renderFocus();
     renderReport();
     renderImpostazioni();
+    renderWatchdogPluginsList();
     renderCountdown();
 }
 

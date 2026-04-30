@@ -7,12 +7,17 @@
     <link rel="stylesheet" href="monitor.css">
 </head>
 <body>
+    <!-- Connection lost banner: shown da renderAll quando state.connesso=false. -->
+    <div id="connection-banner" class="hidden">⚠️ Connessione al server persa. Tentativo di riconnessione...</div>
+    <!-- Toast container: popolato da js/toast.js. -->
+    <div id="toast-container"></div>
     <div id="ai-banner"></div>
 
     <div class="topbar">
         <nav class="tab-nav">
             <button data-action="tab" data-tab="live" class="tab-btn active">Live</button>
             <button data-action="tab" data-tab="report" class="tab-btn">Report</button>
+            <button data-action="tab" data-tab="storico" class="tab-btn">Storico</button>
             <button data-action="tab" data-tab="impostazioni" class="tab-btn">Impostazioni</button>
         </nav>
         <div class="topbar-right">
@@ -20,6 +25,7 @@
             <span id="countdown-display" class="countdown"></span>
             <button data-action="darkmode" id="btn-darkmode" class="btn btn-icon" title="Tema chiaro/scuro" aria-label="Tema"></button>
             <button data-action="notifiche" id="btn-notifiche" class="btn btn-icon" title="Avvisi sonori + desktop su rilevamento AI" aria-label="Notifiche"></button>
+            <button data-action="spegni-server" class="btn btn-icon" title="Spegni Planck (server)" aria-label="Spegni server">⏻</button>
         </div>
     </div>
 
@@ -100,6 +106,21 @@
                     </div>
                 </div>
 
+                <!-- Toolbar Veyon: visibile solo se Veyon e' configurato (CSS body.veyon-on). -->
+                <div class="toolbar toolbar-veyon">
+                    <div class="toolbar-group">
+                        <span class="hint-inline">Azioni classe:</span>
+                        <button data-action="veyon-classe-lock" class="btn" title="Blocca schermo">🔒 Lock</button>
+                        <button data-action="veyon-classe-unlock" class="btn" title="Sblocca schermo">🔓 Unlock</button>
+                        <button data-action="veyon-classe-msg" class="btn" title="Mostra un messaggio">💬 Messaggio</button>
+                        <button data-action="veyon-distribuisci-proxy" class="btn btn-primary" title="Distribuisce proxy_on.vbs su tutti gli studenti (esecuzione silenziosa)">📁 Distribuisci proxy</button>
+                        <button data-action="veyon-disinstalla-proxy" class="btn" title="Distribuisce proxy_off.vbs (rimuove il proxy)">🚫 Rimuovi proxy</button>
+                        <span class="hint-inline" style="margin-left:auto">Power:</span>
+                        <button data-action="veyon-classe-reboot" class="btn btn-warning" title="Riavvia">🔄 Reboot</button>
+                        <button data-action="veyon-classe-poweroff" class="btn btn-danger" title="Spegni">⏻ Off</button>
+                    </div>
+                </div>
+
                 <div class="stat-row">
                     <div class="stat-card"><div class="numero" id="stat-richieste">0</div><div class="etichetta">Richieste</div></div>
                     <div class="stat-card"><div class="numero" id="stat-domini">0</div><div class="etichetta">Domini</div></div>
@@ -118,6 +139,10 @@
                                     <button data-action="vista-lista" id="btn-vista-lista" class="btn-view" title="Vista a lista">&#x2630;</button>
                                 </div>
                             </div>
+                            <!-- Selection bar: appare solo quando selectedIps.size > 0. Renderizzata da renderSelectionBar(). -->
+                            <div id="selection-bar" class="selection-bar hidden"></div>
+                            <!-- Pannello eventi watchdog: appare solo se ci sono eventi recenti. -->
+                            <div id="watchdog-events-panel" class="watchdog-events-panel hidden"></div>
                             <div class="card-scroll" id="ip-container"></div>
                         </div>
                     </div>
@@ -167,6 +192,23 @@
                     <div class="report-bars" id="report-top-studenti">-</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ====================== TAB STORICO (placeholder Phase 7) ====================== -->
+    <div id="tab-storico" class="tab-panel">
+        <div style="padding: 40px; max-width: 720px; margin: 0 auto;">
+            <h2>Storico cross-session</h2>
+            <p style="color: var(--text-muted)">
+                Questa funzionalita' arrivera' nella Phase 7 della roadmap (vedi
+                <code>SPEC.md</code>): permettera' di cercare uno studente
+                attraverso tutte le sessioni passate, vedere il suo trend di
+                attivita', e confrontare due verifiche fianco a fianco.
+            </p>
+            <p style="color: var(--text-muted)">
+                Per ora consulta una singola sessione archiviata dal tab
+                <strong>Report</strong> (selettore sessione in alto a destra).
+            </p>
         </div>
     </div>
 
@@ -267,6 +309,45 @@
                 <button data-action="archivia-ora" class="btn">Archivia sessione corrente</button>
                 <button data-action="ricarica-sessioni" class="btn">Aggiorna lista</button>
                 <ul class="sessioni-list" id="sessioni-list"></ul>
+            </div>
+
+            <div class="card" id="card-veyon">
+                <h3>Veyon (controllo studenti)</h3>
+                <p class="hint">Importa la chiave master generata con Veyon Configurator (PEM). Una volta configurata, Planck può inviare comandi (lock schermo, lancio app, messaggi) ai PC studenti che hanno veyon-server in esecuzione.</p>
+
+                <div id="veyon-status-row" class="settings-grid">
+                    <label>Stato</label>
+                    <div id="veyon-status">caricamento...</div>
+                </div>
+
+                <h4 style="margin-top:14px">Configurazione</h4>
+                <div class="settings-grid">
+                    <label>Nome chiave</label>
+                    <input type="text" id="veyon-keyname" placeholder="es. teacher" style="max-width:240px">
+
+                    <label>Chiave privata (PEM)</label>
+                    <textarea id="veyon-pem" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:11px;width:100%"></textarea>
+
+                    <label>Porta server studente</label>
+                    <input type="number" id="veyon-port" value="11100" min="1" max="65535" style="max-width:120px">
+                </div>
+                <div class="toolbar-group" style="margin-top:8px">
+                    <button data-action="veyon-configure" class="btn btn-primary">Salva configurazione</button>
+                    <button data-action="veyon-clear" class="btn btn-danger">Rimuovi</button>
+                </div>
+
+                <h4 style="margin-top:14px">Test connessione</h4>
+                <div class="aggiungi-studente">
+                    <input type="text" id="veyon-test-ip" placeholder="IP studente (es. 192.168.6.15)">
+                    <button data-action="veyon-test" class="btn">Test</button>
+                </div>
+                <div id="veyon-test-result" class="hint" style="margin-top:6px"></div>
+            </div>
+
+            <div class="card" id="card-watchdog">
+                <h3>Watchdog plugins</h3>
+                <p class="hint">Plugin di monitoraggio remoto che girano sui PC studenti come script PowerShell. Polling ogni 5s, eventi inviati a Planck via HTTP. Si attivano col bottone qui sotto e vengono lanciati alla prossima distribuzione del proxy_on.bat.</p>
+                <div id="watchdog-plugins-list"></div>
             </div>
 
             <div class="card">

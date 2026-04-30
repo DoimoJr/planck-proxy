@@ -457,3 +457,190 @@ tr.filtro-hidden { display: none; }
     .main-panels { flex-direction: column; }
     .report-grid, .impostazioni-layout { grid-template-columns: 1fr; }
 }
+
+/* ====================================================================
+   Veyon UI (Phase 4)
+   - Inline buttons sulle card studente (lock + messaggio).
+   - Toolbar globale "Azioni classe".
+   - Tutto nascosto finche' la chiave master non e' importata
+     (`body.veyon-on` settato da actions.veyonAggiornaStato).
+   ==================================================================== */
+.ip-card-veyon {
+    display: none;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.ip-card-veyon button {
+    background: transparent;
+    border: 1px solid var(--border, rgba(255,255,255,0.15));
+    color: inherit;
+    padding: 2px 8px;
+    font-size: 0.85em;
+    cursor: pointer;
+    border-radius: 3px;
+    line-height: 1.2;
+}
+.ip-card-veyon button:hover { background: var(--hover, rgba(255,255,255,0.05)); }
+
+.toolbar-veyon { display: none; padding: 4px 12px; border-top: 1px solid var(--border, rgba(255,255,255,0.08)); }
+.toolbar-veyon .hint-inline { color: var(--muted, #888); margin-right: 4px; }
+
+body.veyon-on .ip-card-veyon { display: flex; }
+body.veyon-on .toolbar-veyon { display: flex; }
+
+/* Multi-select sulle card studente (Phase 4 polish).
+   Ctrl/Shift+click toggle. Stato visivo: bordo accent doppio.
+   La selection-bar appare sopra la griglia quando c'e' selezione. */
+.ip-card.selected, tr.selected {
+    outline: 2px solid var(--accent, #b77dd4);
+    outline-offset: -2px;
+}
+
+.selection-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    background: rgba(183, 125, 212, 0.12);
+    border: 1px solid var(--accent, #b77dd4);
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+.selection-bar.hidden { display: none; }
+.selection-bar .selection-count { font-weight: 600; margin-right: auto; }
+.selection-bar .btn { padding: 2px 10px; font-size: 0.85em; }
+
+/* Watchdog plugins (Phase 5) */
+.watchdog-plugin {
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+.watchdog-plugin.enabled { border-left: 3px solid #4ade80; }
+.watchdog-plugin-head { display: flex; align-items: center; gap: 12px; }
+.watchdog-toggle { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.watchdog-status { font-size: 0.8em; color: var(--muted, #888); margin-left: auto; }
+.watchdog-plugin.enabled .watchdog-status { color: #4ade80; }
+.watchdog-plugin .hint { margin: 6px 0 0 0; }
+
+/* Pannello eventi watchdog sopra la griglia IP */
+.watchdog-events-panel {
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid #f59e0b;
+    border-radius: 3px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}
+.watchdog-events-panel.hidden { display: none; }
+.watchdog-events-panel strong { display: block; margin-bottom: 4px; }
+.watchdog-event { padding: 1px 0; }
+.watchdog-event.watchdog-warning { color: #f59e0b; }
+.watchdog-event.watchdog-critical { color: #f87171; font-weight: 600; }
+
+/* Badge ⚠️ N sulla card studente */
+.watchdog-event-badge {
+    background: #f59e0b;
+    color: #1a1a1a;
+    font-size: 0.75em;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+    font-weight: 600;
+}
+.watchdog-event-badge[hidden] { display: none; }
+
+/* ====================================================================
+   Toast system (Phase 8 polish)
+   ==================================================================== */
+#toast-container {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 99998;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+.toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 280px;
+    max-width: 480px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: var(--card, #252a33);
+    color: var(--text, #e0e0e0);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    border-left: 4px solid #888;
+    font-size: 0.9em;
+    opacity: 0;
+    transform: translateX(40px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.toast.toast-show { opacity: 1; transform: translateX(0); }
+.toast.toast-hide { opacity: 0; transform: translateX(40px); }
+.toast-success { border-left-color: #4ade80; }
+.toast-error   { border-left-color: #f87171; }
+.toast-info    { border-left-color: #60a5fa; }
+.toast-icon { flex-shrink: 0; font-size: 1.1em; }
+.toast-msg  { flex: 1; word-break: break-word; }
+.toast-close {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font-size: 1.4em;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.5;
+    padding: 0 4px;
+}
+.toast-close:hover { opacity: 1; }
+
+/* ====================================================================
+   Connection lost banner (SSE disconnesso)
+   ==================================================================== */
+#connection-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 99997;
+    background: #f59e0b;
+    color: #1a1a1a;
+    text-align: center;
+    padding: 5px 12px;
+    font-size: 0.85em;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(0,0,0,0.15);
+}
+#connection-banner.hidden { display: none; }
+
+/* ====================================================================
+   Empty state migliorato per il pannello IP
+   ==================================================================== */
+.ip-grid-vuota {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--muted, #888);
+}
+.ip-grid-vuota .empty-title { font-size: 1.05em; font-weight: 600; margin-bottom: 6px; color: var(--text, #e0e0e0); }
+.ip-grid-vuota .empty-hint { font-size: 0.9em; }
+.ip-grid-vuota .empty-cta {
+    margin-top: 12px;
+    display: inline-block;
+    padding: 6px 16px;
+    background: var(--accent, #b77dd4);
+    color: #1a1a1a;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.ip-grid-vuota .empty-cta:hover { opacity: 0.9; }
+

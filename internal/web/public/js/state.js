@@ -60,6 +60,15 @@ export const state = {
     filtro: '',
     /** @type {string|null} IP su cui il traffico e' filtrato (click su riga/card). */
     focusIp: null,
+    /**
+     * Multi-selezione (Phase 4 polish). Set di IP selezionati con Ctrl/
+     * Shift+click sulle card. Quando non vuoto, le azioni Veyon "classe"
+     * agiscono sulla selezione invece che su tutti gli IP attivi.
+     * @type {Set<string>}
+     */
+    selectedIps: new Set(),
+    /** @type {string|null} Ultimo IP cliccato — anchor per Shift+click range selection. */
+    selectionAnchor: null,
     darkmode: localStorage.getItem('darkmode') === '1',
     notifiche: localStorage.getItem('notifiche') === '1',
     /** @type {'live'|'report'|'impostazioni'} */
@@ -94,6 +103,36 @@ export const state = {
     settings: null,
     /** Diventa true quando si modifica un settings key in `SETTINGS_RESTART` (banner orange). */
     riavvioRichiesto: false,
+
+    /**
+     * Stato della configurazione Veyon. True quando una master key e' stata
+     * importata: i bottoni Veyon (lock, msg, distribuisci) diventano cliccabili
+     * e visibili. Aggiornato da `veyonAggiornaStato()` (boot + cambia tab).
+     */
+    veyonConfigured: false,
+
+    // ============================================================
+    // Watchdog plugins (Phase 5)
+    // ============================================================
+
+    /**
+     * Lista dei plugin watchdog registrati lato server, ognuno con
+     * stato enabled/disabled e config corrente. Caricato a boot da
+     * /api/watchdog/plugins, aggiornato post toggle/save.
+     * @type {Array<{id:string,name:string,description:string,enabled:boolean,config:any}>}
+     */
+    watchdogPlugins: [],
+
+    /**
+     * Eventi watchdog recenti per IP (ultimi 5 min). Renderizzati come
+     * badge sulla card studente + nel pannello eventi. Map IP→array di
+     * eventi {plugin, ts, severity, format, payload}.
+     * @type {Map<string, Array<object>>}
+     */
+    watchdogEventsPerIp: new Map(),
+
+    /** Coda globale degli ultimi N eventi watchdog (per il pannello "Eventi"). */
+    watchdogEvents: [],
 };
 
 /** Persiste il Set dei domini nascosti. */

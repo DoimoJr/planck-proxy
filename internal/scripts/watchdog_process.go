@@ -48,6 +48,13 @@ function Send-Event($action, $proc) {
     } catch {}
 }
 
+$heartbeatUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/heartbeat"
+function Send-Heartbeat {
+    try {
+        Invoke-RestMethod -Uri $heartbeatUrl -Method POST -Body '{"plugin":"process"}' -ContentType "application/json" -TimeoutSec 3 | Out-Null
+    } catch {}
+}
+
 # Snapshot iniziale: i processi gia' presenti al boot (eg cmd lanciato
 # dal docente per debug) non sono "started".
 $baseline = @{}
@@ -55,6 +62,8 @@ foreach ($p in Get-Process) {
     if (Test-Suspect $p.Name) { $baseline[$p.Id] = $p }
 }
 
+$heartbeatEvery = 6
+$tick = 0
 while ($true) {
     Start-Sleep -Seconds 5
     $current = @{}
@@ -72,6 +81,8 @@ while ($true) {
         }
     }
     $baseline = $current
+    $tick++
+    if ($tick % $heartbeatEvery -eq 0) { Send-Heartbeat }
 }
 `
 

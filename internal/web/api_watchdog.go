@@ -59,6 +59,32 @@ type watchdogEventBody struct {
 	Payload map[string]any `json:"payload"`
 }
 
+type watchdogHeartbeatBody struct {
+	Plugin string `json:"plugin"`
+}
+
+// handleWatchdogHeartbeat riceve un heartbeat da uno script .ps1
+// (sono ancora vivo). Aggiorna lastSeen ma NON persiste in DB e NON
+// broadcasta — niente rumore, solo registrazione interna. La detection
+// "watchdog killato" e' fatta da una goroutine periodica nello state.
+func (a *API) handleWatchdogHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body watchdogHeartbeatBody
+	if err := decodeJSONBody(r, &body); err != nil || body.Plugin == "" {
+		writeError(w, http.StatusBadRequest, "Body deve essere {plugin}", "BAD_BODY")
+		return
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	ip = strings.TrimPrefix(ip, "::ffff:")
+	a.state.RegistraWatchdogHeartbeat(ip, body.Plugin)
+	writeOK(w, nil)
+}
+
 // handleWatchdogEvent riceve eventi dai watchdog scripts che girano sui
 // PC studenti. Niente auth Basic (stesso trust model di /_alive — LAN).
 // Lo studente IP viene preso da r.RemoteAddr (X-Forwarded-For ignorato).
@@ -123,6 +149,10 @@ type usbPluginConfig struct {
 type processPluginConfig struct {
 	DenyList []string `json:"denyList"`
 }
+type networkPluginConfig struct {
+	SuspiciousPatterns []string `json:"suspiciousPatterns"`
+	IgnorePatterns     []string `json:"ignorePatterns"`
+}
 
 func (a *API) handleScriptWatchdogUsb(w http.ResponseWriter, r *http.Request) {
 	cfg, ip, port, ok := a.prepareWatchdogScript(w, r, "usb", "usb_watchdog.ps1")
@@ -142,6 +172,16 @@ func (a *API) handleScriptWatchdogProcess(w http.ResponseWriter, r *http.Request
 	var c processPluginConfig
 	_ = json.Unmarshal(cfg, &c)
 	_, _ = w.Write([]byte(scripts.WatchdogProcessScript(ip, port, c.DenyList)))
+}
+
+func (a *API) handleScriptWatchdogNetwork(w http.ResponseWriter, r *http.Request) {
+	cfg, ip, port, ok := a.prepareWatchdogScript(w, r, "network", "network_watchdog.ps1")
+	if !ok {
+		return
+	}
+	var c networkPluginConfig
+	_ = json.Unmarshal(cfg, &c)
+	_, _ = w.Write([]byte(scripts.WatchdogNetworkScript(ip, port, c.SuspiciousPatterns, c.IgnorePatterns)))
 }
 
 // prepareWatchdogScript fa i check comuni a tutti gli endpoint .ps1:

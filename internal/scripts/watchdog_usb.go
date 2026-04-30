@@ -60,12 +60,23 @@ function Send-Event($action, $device) {
     }
 }
 
+# Heartbeat: ogni iterazione del loop principale segnala a Planck
+# che siamo vivi. Soglia server-side: HeartbeatTimeout (~90s).
+$heartbeatUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/heartbeat"
+function Send-Heartbeat {
+    try {
+        Invoke-RestMethod -Uri $heartbeatUrl -Method POST -Body '{"plugin":"usb"}' -ContentType "application/json" -TimeoutSec 3 | Out-Null
+    } catch {}
+}
+
 # Snapshot iniziale: device gia' presenti al boot non sono "added".
 $baseline = @{}
 foreach ($d in Get-InterestingPnp) {
     $baseline[$d.InstanceId] = $d
 }
 
+$heartbeatEvery = 6  # ogni 6 iterazioni da 5s -> heartbeat ogni 30s
+$tick = 0
 while ($true) {
     Start-Sleep -Seconds 5
     $current = @{}
@@ -81,6 +92,8 @@ while ($true) {
         }
     }
     $baseline = $current
+    $tick++
+    if ($tick % $heartbeatEvery -eq 0) { Send-Heartbeat }
 }
 `
 

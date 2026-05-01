@@ -18,11 +18,21 @@ _blocked_domains.txt
 config.json
 studenti.json
 
+# DB SQLite v2 (config, sessioni, classi, mappa studenti) — dati personali.
+planck.db
+planck.db-shm
+planck.db-wal
+
+# Cache lista AI scaricata da GitHub al boot (rigenerata).
+ai-domains-cache.txt
+
 # Script studenti auto-generati a ogni boot da Planck v2 (IP della
 # rete locale → ogni macchina ha valori diversi). I template sono
 # in internal/scripts/scripts.go.
 /proxy_on.bat
 /proxy_off.bat
+/proxy_on.vbs
+/proxy_off.vbs
 
 # Sessioni archiviate (contengono IP + domini visitati dagli studenti = dati sensibili)
 sessioni/*.json

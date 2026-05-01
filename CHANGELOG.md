@@ -5,6 +5,28 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.3.1] — 2026-05-01
+
+Patch: fix UI "Domini ignorati" che appariva vuota al primo load.
+
+### Risolto
+
+- **Domini ignorati vuoti in Impostazioni**: il client leggeva la
+  risposta di `GET /api/settings` come `setRes.settings` (proprieta'
+  inesistente), quindi `state.settings` restava `null` al boot. La
+  lista si popolava solo al primo SSE `settings` (es. dopo un cambio
+  manuale). Fix in `app.js`: la API ritorna l'oggetto piatto, viene
+  letto direttamente.
+
+### Pulizia
+
+- Rimossi i file legacy della v1 dalla root del repo: `node.exe`
+  (~91 MB), `server.js`, `domains.js`, `avvia.bat`, `blocked.html`,
+  e i backup `.v1.bak` di `config.json`, `studenti.json`,
+  `_blocked_domains.txt`, `presets/*.json`. Il DB SQLite e' ormai
+  l'unica fonte di verita'; i backup erano stati lasciati per
+  paracadute post-migrazione.
+
 ## [v2.3.0] — 2026-04-30
 
 Phase 6: **auto-classification AI**. La lista dei domini AI ora vive

@@ -38,7 +38,7 @@ async function init() {
         fetch('/api/config').then(r => r.json()),
         fetch('/api/history').then(r => r.json()),
         fetch('/api/sessioni').then(r => r.json()).catch(() => ({ sessioni: [] })),
-        fetch('/api/settings').then(r => r.json()).catch(() => ({ settings: null })),
+        fetch('/api/settings').then(r => r.json()).catch(() => null),
     ]);
 
     state.cfg = cfgRes;
@@ -51,7 +51,9 @@ async function init() {
     state.pausato = !!histRes.pausato;
     state.deadlineISO = histRes.deadlineISO || null;
     state.sessioniArchivio = sesRes.sessioni || [];
-    state.settings = setRes.settings || null;
+    // /api/settings ritorna l'oggetto piatto (proxy, web, modo, dominiIgnorati, ...).
+    // L'SSE settings invece wrappa in {type, settings}, gestito separatamente in sse.js.
+    state.settings = setRes;
 
     if (histRes.alive) {
         for (const [ip, ts] of Object.entries(histRes.alive)) state.aliveMap.set(ip, ts);

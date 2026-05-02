@@ -5,61 +5,6 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
-## [v2.4.0] — 2026-05-02
-
-UI redesign in stile **Apple Liquid Glass**: pannelli translucenti con
-backdrop-blur, mesh wallpaper dietro a tutto, forme piu' organiche,
-microinteractions piu' fluide. Nessun cambio funzionale ne' di API.
-
-### Aggiunto
-
-- **Wallpaper mesh-gradient** dietro l'app: 4 radial blob su base
-  off-white (light) o blu-notte (dark). E' il fondo che il backdrop-filter
-  dei pannelli pesca per produrre la translucenza tinta.
-
-- **Design tokens glass** in `:root` / `body.dark`:
-  - `--glass-bg` / `--glass-bg-strong` / `--glass-bg-soft` (3 livelli di
-    opacita' per pannelli/modali/cards).
-  - `--glass-border` con highlight bianco sottile per simulare il riflesso
-    del bordo del vetro.
-  - `--glass-highlight` (gradient lineare top→trasparente per specular).
-  - `--glass-shadow` / `--glass-shadow-lift` (multi-layer near + ambient).
-  - `--glass-blur` 30px / `--glass-blur-strong` 50px / `--glass-blur-soft` 16px.
-  - Radius scale (`--radius-sm` 10px → `--radius-pill`).
-  - Easings (`--ease-spring`, `--ease-out`).
-
-- **Componenti glass-ificati**:
-  - `.topbar`, `.sidebar > .card`, `.toolbar`, `.toolbar-veyon`.
-  - Banner `#ai-banner` (rosso translucent + pulse soft, no flicker
-    aggressivo) e `#connection-banner` (arancione translucent).
-  - `.tab-btn` active diventa pill-shape glass con micro-shadow.
-  - `.ip-card`, `.stat-card` con specular top + hover spring + shadow lift.
-  - `.toast` glass premium + slide+scale spring.
-  - `.menu-overflow-panel` (kebab) glass dropdown con divider sottili.
-  - Bottoni `.btn`, `.btn-primary/danger/warning/icon` pill con gradient
-    leggero, tap feedback `scale(0.97)`.
-  - Input/select con focus ring sfumato accent + radius pill/sm.
-
-- **`prefers-reduced-motion`**: disattiva animation/transition globalmente.
-- **`:focus-visible`** coerente (ring accent) su bottoni, tab, menu, input.
-
-### Cambiato
-
-- Palette dark piu' profonda (`#0e1220` background, `#1a1f2e` card,
-  `#0a0e1c → #0f1428` wallpaper) per stagliarsi sotto il glass.
-- Animazione `blink` ammorbidita (opacity 0.62 invece di 0.4) per ridurre
-  affaticamento visivo durante sessioni lunghe.
-- `.card` base ora glass: si propaga a tutte le sezioni di Report,
-  Impostazioni, sidebar e pannelli Live senza tocchi mirati.
-
-### Note
-
-- Edge in modalita' app (Chromium) supporta pieno backdrop-filter, niente
-  fallback necessari per il target principale.
-- `.ip-card` usa `contain: layout paint` per limitare il costo del blur
-  con 20+ studenti attivi.
-- Nessun cambio JS, API, persistenza: il DB v2.3.x e' compatibile al 100%.
-
 ## [v2.3.1] — 2026-05-01
 
 Patch: fix UI "Domini ignorati" che appariva vuota al primo load.

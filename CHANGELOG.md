@@ -5,6 +5,35 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.6.2] — 2026-05-04
+
+planck.exe ora ha un'icona embedded (placeholder).
+
+### Aggiunto
+
+- **`assets/planck.ico`**: icona multi-risoluzione (16/32/48/64/128/256
+  px) — "P" bianca su cerchio viola Planck `#8e44ad`. Generata
+  programmaticamente da `tools/genicon`. Sostituibile rimpiazzando
+  il file con una versione migliore (vedi build.bat per il setup).
+
+- **`cmd/planck/rsrc_windows_amd64.syso`**: blob risorse Windows con
+  l'icona embedded. Generato via `github.com/akavel/rsrc` da
+  `assets/planck.ico`. Il suffix `_windows_amd64` fa si' che `go build`
+  lo linki solo per quel target (cross-compile Linux non lo include).
+
+- **`tools/genicon/main.go`**: tool standalone che disegna l'icona
+  programmaticamente (cerchio anti-aliased + "P" composta da
+  primitive geometriche, niente font esterni richiesti) e scrive
+  `assets/planck.ico` come container ICO multi-risoluzione con PNG
+  embedded (formato Vista+).
+
+### Note
+
+- Per rigenerare l'icona (es. dopo aver scelto un design migliore):
+  `go run ./tools/genicon` → `rsrc -ico assets/planck.ico -o cmd/planck/rsrc_windows_amd64.syso -arch amd64`.
+- Il binario Linux (`planck-linux`) non e' interessato — gli .syso
+  Windows non vengono linkati durante il cross-compile.
+
 ## [v2.6.1] — 2026-05-04
 
 Patch: fix bug "Rimuovi proxy a volte non si toglie davvero".

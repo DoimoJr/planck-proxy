@@ -5,6 +5,54 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.7.0] — 2026-05-04
+
+UX cleanup all'avvio: niente flash della finestra `cmd`, icona Planck
+sulla taskbar, lifecycle "single-process" (chiudi la finestra app =
+spegni il server).
+
+### Cambiato
+
+- **Subsystem GUI** (Windows): build con `-ldflags "-H=windowsgui"`.
+  Il binario non e' piu' un'app console → niente console che lampeggia
+  o resta aperta dietro la finestra Edge. L'icona embeddata (v2.6.2)
+  diventa anche l'icona del processo nella taskbar.
+
+- **Log su file**: con subsystem GUI non c'e' stderr/stdout, quindi i
+  `log.Printf` venivano persi. Ora redirezionati a `planck.log` accanto
+  al binario, troncato ad ogni boot (file di sessione corrente, comodo
+  per debug post-mortem). Timestamp con microsecondi.
+
+- **Lifecycle browser → server**: la funzione che apriva Edge usava
+  `cmd.Start()` e abbandonava il sub-process. Ora usa `cmd.Wait()` +
+  `os.Exit(0)`: chiudere la finestra dell'app spegne automaticamente
+  Planck. Niente piu' processi orfani da uccidere a mano dopo l'uso.
+
+  Trick chiave: passa `--user-data-dir=<path>` al browser per forzare
+  un'istanza isolata e dedicata. Senza, Edge si attaccherebbe a
+  un'istanza esistente (se ne hai una) e `cmd.Wait()` ritornerebbe
+  immediatamente lasciando la finestra orfana.
+
+- **Favicon servito** dal web server: `internal/web/public/favicon.ico`
+  (copia sincronizzata da `assets/planck.ico` via `tools/genicon`) +
+  `<link rel="icon">` in `index.html`. Edge in app mode usa il
+  favicon come icona della finestra → adesso vedi l'icona Planck
+  sulla taskbar invece di quella generica di Edge.
+
+### Aggiunto
+
+- `.gitignore`: ignora `planck.log` e `.planck-browser-profile/`
+  (profile dir Edge dedicata e isolata, contiene cookies/cache della
+  finestra app — non ha nulla a che vedere col profilo personale di
+  Edge dell'utente).
+
+### Note
+
+- `PLANCK_NO_BROWSER=1` resta valido per modalita' headless: niente
+  browser, niente auto-shutdown, Planck gira finche' lo killi a mano.
+- `planck-linux` non e' interessato dal flag `-H=windowsgui` (e'
+  Windows-only). La modalita' app sub-process resta uguale a prima.
+
 ## [v2.6.2] — 2026-05-04
 
 planck.exe ora ha un'icona embedded (placeholder).

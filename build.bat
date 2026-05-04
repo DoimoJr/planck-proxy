@@ -11,7 +11,9 @@
 ::
 :: Il "go build" sotto include automaticamente il .syso (nome con
 :: suffix _windows_amd64 = arch-specific, linkato solo per quel target).
-go build -o planck.exe -trimpath -ldflags="-s -w" ./cmd/planck
+:: -H=windowsgui: subsystem GUI invece di console (no cmd flash all'avvio,
+:: icona dell'.exe nella taskbar, log redirected su planck.log).
+go build -o planck.exe -trimpath -ldflags="-s -w -H=windowsgui" ./cmd/planck
 if errorlevel 1 (
     echo Build fallita.
     exit /b 1

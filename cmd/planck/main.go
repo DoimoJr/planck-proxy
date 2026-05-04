@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	Versione = "2.6.2"
+	Versione = "2.7.0"
 	Fase     = "stable"
 )
 
@@ -53,67 +53,75 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
-// openBrowserAppMode lancia il browser in modalita' "app" (finestra senza
-// barra URL, senza tab, senza menu) puntato sull'URL fornito. Comportamento
-// "single-page-app desktop look" per Planck.
+// openBrowserAndWaitForClose lancia Edge (o Chrome) in modalita' app
+// (finestra senza barra URL/tab/menu) puntato sull'URL fornito, ASPETTA
+// che la finestra venga chiusa, poi termina il processo Planck con
+// os.Exit(0). Risultato: chiudere la finestra dell'app = spegnere il
+// server. Lifecycle "single-process" trasparente per l'utente.
 //
-// Su Windows preferisce Edge (sempre installato su 10/11), poi Chrome,
-// poi fallback alla shell `start <url>` che apre il default browser
-// in modalita' tab normale.
+// Trick chiave: `--user-data-dir=<path>` forza una nuova istanza
+// isolata di Edge/Chrome, cosi' il sub-process e' dedicato alla nostra
+// finestra (e non si attacca a un'istanza esistente del browser, dove
+// `cmd.Wait()` ritornerebbe subito lasciando la finestra orfana).
 //
-// Skipped se PLANCK_NO_BROWSER=1 (utile per server headless).
-// Skipped silenziosamente se il sub-process fallisce (Planck continua).
-func openBrowserAppMode(url string) {
+// Su Windows preferisce Edge (sempre installato su 10/11), poi Chrome.
+// Niente browser → log warning + return (Planck resta vivo, l'utente
+// lo killa manualmente da Task Manager o spegne dalla UI).
+//
+// Skipped se PLANCK_NO_BROWSER=1: in modalita' headless niente browser
+// e niente auto-shutdown.
+func openBrowserAndWaitForClose(url, profileDir string) {
 	if os.Getenv("PLANCK_NO_BROWSER") == "1" {
 		return
 	}
 
-	// Candidati Edge (preferito perche' presente su ogni Win10/11)
-	edgePaths := []string{
+	// Candidati: Edge prima (sempre presente su Win10/11), poi Chrome.
+	candidates := []string{
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-	}
-	if p, err := exec.LookPath("msedge.exe"); err == nil {
-		edgePaths = append([]string{p}, edgePaths...)
-	}
-	for _, p := range edgePaths {
-		if _, err := os.Stat(p); err == nil {
-			if err := exec.Command(p, "--app="+url).Start(); err == nil {
-				log.Printf("Aperta finestra Edge in modalita' app su %s", url)
-				return
-			}
-		}
-	}
-
-	// Candidati Chrome
-	chromePaths := []string{
 		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
 		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
 	}
-	if p, err := exec.LookPath("chrome.exe"); err == nil {
-		chromePaths = append([]string{p}, chromePaths...)
+	if p, err := exec.LookPath("msedge.exe"); err == nil {
+		candidates = append([]string{p}, candidates...)
 	}
-	for _, p := range chromePaths {
-		if _, err := os.Stat(p); err == nil {
-			if err := exec.Command(p, "--app="+url).Start(); err == nil {
-				log.Printf("Aperta finestra Chrome in modalita' app su %s", url)
-				return
-			}
-		}
+	if p, err := exec.LookPath("chrome.exe"); err == nil {
+		candidates = append(candidates, p)
 	}
 
-	// Fallback: default browser via cmd start (apre come tab normale)
-	if err := exec.Command("cmd", "/c", "start", "", url).Start(); err == nil {
-		log.Printf("Aperto default browser su %s", url)
-		return
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		cmd := exec.Command(p, "--app="+url, "--user-data-dir="+profileDir)
+		if err := cmd.Start(); err != nil {
+			log.Printf("Browser %s: errore avvio (%v), provo prossimo", p, err)
+			continue
+		}
+		log.Printf("Browser avviato (%s, PID %d). Chiusura finestra → shutdown del server.", filepath.Base(p), cmd.Process.Pid)
+		_ = cmd.Wait()
+		log.Println("Browser chiuso, spengo Planck.")
+		os.Exit(0)
 	}
-	log.Printf("Nessun browser disponibile per aprire %s automaticamente", url)
+
+	log.Printf("Nessun browser app-mode trovato. Apri manualmente %s e termina Planck dalla UI quando hai finito.", url)
 }
 
 func main() {
 	webPort := envOrDefault("PLANCK_WEB_PORT", "9999")
 	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 	dataDir := dataDirDefault()
+
+	// Redirect log a file: con subsystem GUI (Windows) il binario non ha
+	// console attaccata e i log su stderr vanno persi. Scriviamo in
+	// `planck.log` accanto al DB, troncato ad ogni boot (file di sessione
+	// corrente, comodo per debug post-mortem).
+	logPath := filepath.Join(dataDir, "planck.log")
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
+		log.SetOutput(logFile)
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+		// Niente defer Close: il processo termina con os.Exit, l'OS chiude.
+	}
 
 	// Persistenza: apri SQLite (creandolo se non esiste) e applica le
 	// migrations dello schema.
@@ -227,10 +235,14 @@ func main() {
 	log.Printf("In ascolto...")
 
 	// Apri il browser (Edge in modalita' app) dopo un breve delay,
-	// per dare tempo ai server HTTP di completare il bind.
+	// per dare tempo ai server HTTP di completare il bind. La funzione
+	// e' bloccante: aspetta che la finestra browser venga chiusa, poi
+	// chiama os.Exit(0). Lifecycle "single-process": chiudi la finestra
+	// = spegni Planck.
 	go func() {
 		time.Sleep(400 * time.Millisecond)
-		openBrowserAppMode("http://localhost:" + webPort)
+		profileDir := filepath.Join(dataDir, ".planck-browser-profile")
+		openBrowserAndWaitForClose("http://localhost:"+webPort, profileDir)
 	}()
 
 	// Lancio i due server in parallelo. Se uno fallisce (es. porta occupata),

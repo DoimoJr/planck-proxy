@@ -42,16 +42,24 @@ func main() {
 
 	out := buildICO(pngs, sizes)
 
-	dest := filepath.Join("assets", "planck.ico")
-	if err := os.MkdirAll("assets", 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "mkdir assets: %v\n", err)
-		os.Exit(1)
+	// Scriviamo in due posti: assets/planck.ico (master, usato da rsrc
+	// per generare il syso) + internal/web/public/favicon.ico (servito
+	// dal web server, usato da Edge in app mode come icona finestra).
+	destinations := []string{
+		filepath.Join("assets", "planck.ico"),
+		filepath.Join("internal", "web", "public", "favicon.ico"),
 	}
-	if err := os.WriteFile(dest, out, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "write %s: %v\n", dest, err)
-		os.Exit(1)
+	for _, dest := range destinations {
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", filepath.Dir(dest), err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(dest, out, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s: %v\n", dest, err)
+			os.Exit(1)
+		}
+		fmt.Printf("scritto %s (%d byte, %d risoluzioni)\n", dest, len(out), len(sizes))
 	}
-	fmt.Printf("scritto %s (%d byte, %d risoluzioni)\n", dest, len(out), len(sizes))
 }
 
 // makeIcon disegna un cerchio viola pieno con anti-aliasing al bordo +

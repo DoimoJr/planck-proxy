@@ -26,6 +26,13 @@ planck.db-wal
 # Cache lista AI scaricata da GitHub al boot (rigenerata).
 ai-domains-cache.txt
 
+# Log file (rigenerato ad ogni boot, file di sessione corrente).
+planck.log
+
+# Profile dir Edge/Chrome usata per la finestra app-mode (cookies,
+# cache, ecc., dedicata e isolata da quella personale dell'utente).
+.planck-browser-profile/
+
 # Script studenti auto-generati a ogni boot da Planck v2 (IP della
 # rete locale → ogni macchina ha valori diversi). I template sono
 # in internal/scripts/scripts.go.

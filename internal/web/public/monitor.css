@@ -416,31 +416,14 @@ tr.filtro-hidden { display: none; }
 .sessioni-list, .link-list { list-style: none; padding: 0; margin-top: 6px; max-height: 200px; overflow-y: auto; }
 .sessioni-list li { display: flex; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--border); font-size: 0.85em; gap: 8px; }
 
-/* Mappa studenti editabile */
-.classi-toolbar { flex-wrap: wrap; margin-top: 8px; }
-.classe-select { min-width: 200px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.85em; }
-.mappa-studenti { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-.mappa-studenti th { font-size: 0.7em; color: var(--text-muted); text-transform: uppercase; text-align: left; padding: 6px; border-bottom: 1px solid var(--border); }
-.mappa-studenti td { padding: 2px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.mappa-studenti td.col-ip { font-family: monospace; color: var(--text-muted); font-size: 0.85em; width: 160px; }
-.mappa-studenti td.col-nome { width: auto; }
-.mappa-studenti td.col-azioni { width: 30px; text-align: center; }
-.mappa-studenti .edit-studente {
-    width: 100%; padding: 4px 6px; font-size: 0.9em;
-    border: 1px solid transparent; background: transparent; color: var(--text);
-    border-radius: 3px; font-weight: 600;
-}
-.mappa-studenti .edit-studente:hover { border-color: var(--border); }
-.mappa-studenti .edit-studente:focus { outline: none; border-color: var(--accent); background: var(--bg); }
-.mappa-studenti .hint-cell { padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85em; }
-
+/* Form "aggiungi" inline (riusato da: aggiungi-ignorato, veyon-test).
+   Layout flex con input full-width + bottone in coda. */
 .aggiungi-studente { display: flex; gap: 8px; margin: 10px 0 6px; align-items: center; }
 .aggiungi-studente input {
     padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
     background: var(--bg); color: var(--text); font-size: 0.85em;
+    flex: 1;
 }
-.aggiungi-studente input#nuovo-ip { width: 160px; font-family: monospace; }
-.aggiungi-studente input#nuovo-nome { flex: 1; }
 
 .sessioni-list li { cursor: pointer; }
 .sessioni-list li:hover { background: var(--hover); }

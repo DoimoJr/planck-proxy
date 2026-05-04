@@ -140,13 +140,6 @@ document.body.addEventListener('click', (e) => {
         case 'pausa-toggle': actions.togglePausa(); break;
         case 'clear-deadline': actions.annullaDeadline(); break;
         case 'tab': actions.cambiaTab(el.dataset.tab); break;
-        case 'reload-studenti': actions.ricaricaStudenti(); break;
-        case 'elimina-studente': actions.eliminaStudente(el.dataset.ip); break;
-        case 'aggiungi-studente': actions.aggiungiStudente(); break;
-        case 'svuota-studenti': actions.svuotaMappaStudenti(); break;
-        case 'combo-load': actions.caricaCombo(); break;
-        case 'combo-save': actions.salvaCombo(); break;
-        case 'combo-delete': actions.eliminaCombo(); break;
         case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
         case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
         case 'veyon-configure': actions.veyonConfigura(); break;
@@ -243,22 +236,15 @@ document.body.addEventListener('change', (e) => {
         actions.impostaDeadline(el.value);
     } else if (el.dataset.action === 'report-sessione-select') {
         actions.apriSessioneArchiviata(el.value);
-    } else if (el.dataset.action === 'sel-combo') {
-        actions.aggiornaStatoCombo();
-    } else if (el.dataset.action === 'edit-studente') {
-        actions.modificaStudente(el.dataset.ip, el.value);
     } else if (el.dataset.action === 'settings-field') {
         actions.settingsCampoModificato(el);
     }
 });
 
-// Invio nei campi di aggiunta studente = aggiungi
+// Invio nei campi del tab Impostazioni
 document.body.addEventListener('keydown', (e) => {
     const el = e.target;
-    if (e.key === 'Enter' && el.dataset.action === 'nuovo-studente-key') {
-        e.preventDefault();
-        actions.aggiungiStudente();
-    } else if (e.key === 'Enter' && el.dataset.action === 'nuovo-ignorato-key') {
+    if (e.key === 'Enter' && el.dataset.action === 'nuovo-ignorato-key') {
         e.preventDefault();
         actions.aggiungiIgnorato();
     }

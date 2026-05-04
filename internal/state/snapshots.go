@@ -22,7 +22,6 @@ type ConfigSnapshot struct {
 	PatternSistema      []string          `json:"patternSistema"`
 	Studenti            map[string]string `json:"studenti"`
 	Presets             []string          `json:"presets"`
-	Classi              []Combo           `json:"classi"`
 	// LanIP e' l'IP del PC docente che gli studenti usano per raggiungere
 	// Planck (set a boot via PLANCK_LAN_IP o auto-detected). Stesso valore
 	// embeddato nel proxy_on.bat. La UI lo usa per "Distribuisci" senza
@@ -47,7 +46,6 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 		PatternSistema:      classify.PatternSistema,
 		Studenti:            studCopy,
 		Presets:             []string{},
-		Classi:              []Combo{},
 		LanIP:               s.lanIP,
 	}
 	s.mu.RUnlock()
@@ -55,13 +53,6 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 	// Letture disco fuori dal lock (le file ops sono lente).
 	if presets, err := s.store.ListaPresets(); err == nil {
 		snap.Presets = presets
-	}
-	if combo, err := s.store.ListaClassi(); err == nil {
-		out := make([]Combo, len(combo))
-		for i, c := range combo {
-			out[i] = Combo{Classe: c.Classe, Lab: c.Lab, File: c.File}
-		}
-		snap.Classi = out
 	}
 	return snap
 }

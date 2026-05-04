@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	Versione = "2.5.1"
+	Versione = "2.6.0"
 	Fase     = "stable"
 )
 
@@ -168,24 +168,24 @@ func main() {
 	// "Distribuisci proxy" senza dover chiedere ogni volta.
 	st.SetLanIP(lanIP)
 
-	// Auto-import master key Veyon via veyon-cli (best-effort). Se
-	// Veyon Configurator e' installato e c'e' una master key nel suo
-	// keystore, la importiamo subito senza UI manuale. Errori loggati
-	// ma non bloccanti (l'utente puo' sempre caricare la chiave da UI).
+	// Veyon: reset stato precedente + auto-import dal veyon-cli del PC
+	// docente corrente. Il binario Planck e' portatile su chiavetta
+	// (l'utente lo porta in piu' laboratori), quindi ad ogni avvio
+	// dobbiamo prendere la master key del laboratorio CORRENTE — mai
+	// fidarsi di quella precedente residua su disco.
+	_ = st.VeyonClear()
 	if name, err := st.AutoImportVeyonKey(); err != nil {
-		log.Printf("Veyon auto-import non riuscito (non critico): %v", err)
+		log.Printf("Veyon auto-import non riuscito (non critico, sara' disabled per questa sessione): %v", err)
 	} else if name != "" {
-		log.Printf("Veyon: master key '%s' importata automaticamente da veyon-cli", name)
+		log.Printf("Veyon: master key '%s' importata da veyon-cli del laboratorio corrente", name)
 	}
 
-	// LAN discovery: popola la mappa studenti col range fisso .1-.30 del
-	// /24 del docente (convenzione standard laboratorio). Una sola volta
-	// al boot, niente probing — gli IP gia' mappati con un nome reale
-	// non vengono toccati (vedi MergeStudentiAuto). Le card studente
-	// appaiono subito nella grid Live anche prima che i PC siano accesi.
+	// Mappa studenti: range fisso .1-.30 del /24 del docente. In-memory
+	// only, rigenerato ad ogni boot (binario portatile → ogni laboratorio
+	// ha il suo /24, niente residui dal lab precedente).
 	if ips := discover.DefaultRange(lanIP); len(ips) > 0 {
-		st.MergeStudentiAuto(ips)
-		log.Printf("discover: mappa studenti pre-popolata col range .%d-.%d del /24 di %s (%d IP)",
+		st.SetStudentiIPs(ips)
+		log.Printf("discover: mappa studenti col range .%d-.%d del /24 di %s (%d IP)",
 			discover.DefaultFirst, discover.DefaultLast, lanIP, len(ips))
 	}
 

@@ -238,97 +238,26 @@ func (s *State) broadcastDeadline(iso string) {
 // Studenti (mappa IP → nome)
 // ============================================================
 
-// SetStudent aggiunge o aggiorna una voce IP→nome.
-func (s *State) SetStudent(ip, nome string) {
-	ip = strings.TrimSpace(ip)
-	nome = strings.TrimSpace(nome)
-	if ip == "" || nome == "" {
-		return
-	}
-	s.mu.Lock()
-	s.studenti[ip] = nome
-	stud := s.studentiCopyLocked()
-	s.mu.Unlock()
-	s.persistStudenti(stud)
-	s.broadcastStudenti(stud)
-}
-
-// DeleteStudent rimuove una voce dalla mappa.
-func (s *State) DeleteStudent(ip string) {
-	ip = strings.TrimSpace(ip)
-	if ip == "" {
-		return
-	}
-	s.mu.Lock()
-	delete(s.studenti, ip)
-	stud := s.studentiCopyLocked()
-	s.mu.Unlock()
-	s.persistStudenti(stud)
-	s.broadcastStudenti(stud)
-}
-
-// ClearStudents svuota tutta la mappa.
-func (s *State) ClearStudents() {
-	s.mu.Lock()
-	s.studenti = map[string]string{}
-	s.mu.Unlock()
-	s.persistStudenti(map[string]string{})
-	s.broadcastStudenti(map[string]string{})
-}
-
-// SetStudenti sostituisce in blocco la mappa studenti corrente. Usato
-// dall'endpoint /api/classi/load (carica una combo salvata).
-func (s *State) SetStudenti(stud map[string]string) {
-	s.mu.Lock()
-	s.studenti = make(map[string]string, len(stud))
-	for k, v := range stud {
-		s.studenti[k] = v
-	}
-	cp := s.studentiCopyLocked()
-	s.mu.Unlock()
-	s.persistStudenti(cp)
-	s.broadcastStudenti(cp)
-}
-
-// MergeStudentiAuto aggiunge alla mappa studenti gli IP scoperti via
-// discovery LAN, SENZA sovrascrivere voci esistenti (preserva i nomi
-// reali se l'utente ha rinominato). IP gia' presenti nella mappa vengono
-// ignorati. Persiste e broadcasta solo se la mappa e' davvero cambiata.
+// SetStudentiIPs sostituisce in blocco la lista degli IP da renderizzare
+// nella UI Live. Chiamato al boot col range fisso del /24 corrente
+// (vedi cmd/planck/main.go). Tutti i nomi sono stringa vuota: la UI mostra
+// l'IP come label.
 //
-// Il nome assegnato agli IP nuovi e' stringa vuota: la UI mostra l'IP
-// stesso come label finche' l'utente non assegna un nome reale.
-func (s *State) MergeStudentiAuto(ips []string) {
-	if len(ips) == 0 {
-		return
-	}
+// In-memory only: NON persistita (il binario e' portatile, ogni boot in un
+// laboratorio diverso rigenera la lista dal LAN IP corrente).
+func (s *State) SetStudentiIPs(ips []string) {
 	s.mu.Lock()
-	added := 0
+	s.studenti = make(map[string]string, len(ips))
 	for _, ip := range ips {
 		ip = strings.TrimSpace(ip)
 		if ip == "" {
 			continue
 		}
-		if _, exists := s.studenti[ip]; exists {
-			continue
-		}
 		s.studenti[ip] = ""
-		added++
-	}
-	if added == 0 {
-		s.mu.Unlock()
-		return
 	}
 	cp := s.studentiCopyLocked()
 	s.mu.Unlock()
-	s.persistStudenti(cp)
 	s.broadcastStudenti(cp)
-	log.Printf("discover: aggiunti %d IP nuovi alla mappa studenti", added)
-}
-
-func (s *State) persistStudenti(stud map[string]string) {
-	if err := s.store.SaveStudenti(stud); err != nil {
-		log.Printf("state: errore save studenti: %v", err)
-	}
 }
 
 func (s *State) studentiCopyLocked() map[string]string {

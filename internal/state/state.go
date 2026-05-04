@@ -31,14 +31,6 @@ type Entry struct {
 	Blocked bool          `json:"blocked"`
 }
 
-// Combo identifica una mappa salvata di studenti per coppia (classe, lab).
-// Stub in 1.4-1.5; la persistenza su disco arriva in Phase 1.6.
-type Combo struct {
-	Classe string `json:"classe"`
-	Lab    string `json:"lab"`
-	File   string `json:"file"`
-}
-
 // Broker e' l'interfaccia minima che State usa per emettere eventi SSE.
 type Broker interface {
 	Broadcast(msg any)
@@ -129,8 +121,10 @@ func New(broker Broker) *State {
 }
 
 // NewWithStore costruisce uno State con un Store SQLite.
-// I dati vengono caricati dal DB al boot (config, studenti, bloccati);
-// se il DB e' fresh si parte coi default.
+// Carica dal DB: config (titolo, modo, soglia, porte, auth, ignorati) e
+// blocklist. NON carica piu' la mappa studenti ne' la chiave Veyon: sono
+// rigenerate ad ogni boot (il binario e' portatile tra laboratori → ogni
+// avvio rigenera lo stato dipendente dalla LAN corrente).
 func NewWithStore(broker Broker, st *store.Store) *State {
 	ignorati := make([]string, len(dominiIgnoratiDefault))
 	copy(ignorati, dominiIgnoratiDefault)
@@ -182,17 +176,12 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		if len(cfg.DominiIgnorati) > 0 {
 			s.dominiIgnorati = cfg.DominiIgnorati
 		}
-		s.veyonKeyName = cfg.VeyonKeyName
+		// veyonKeyName / studenti NON caricati da DB: rigenerati ad ogni
+		// boot (chiave via veyon-cli del PC corrente; mappa via range
+		// /24 del LAN IP corrente).
 		s.veyonPort = cfg.VeyonPort
 	} else if err != nil {
 		log.Printf("state: errore lettura config: %v", err)
-	}
-
-	// Carica mappa studenti correnti.
-	if stud, err := st.LoadStudenti(); err == nil {
-		s.studenti = stud
-	} else {
-		log.Printf("state: errore lettura studenti: %v", err)
 	}
 
 	// Carica blocklist.
@@ -225,7 +214,6 @@ func (s *State) saveConfigLocked() {
 		AuthUser:            s.authUser,
 		AuthPasswordHash:    s.authPasswordHash,
 		DominiIgnorati:      append([]string{}, s.dominiIgnorati...),
-		VeyonKeyName:        s.veyonKeyName,
 		VeyonPort:           s.veyonPort,
 	}
 	if err := s.store.SaveConfig(cfg); err != nil {

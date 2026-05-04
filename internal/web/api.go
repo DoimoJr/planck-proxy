@@ -69,7 +69,6 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings", auth(a.handleSettings))
 	mux.HandleFunc("/api/sessioni", auth(a.handleSessioni))
 	mux.HandleFunc("/api/presets", auth(a.handlePresets))
-	mux.HandleFunc("/api/classi", auth(a.handleClassi))
 	mux.HandleFunc("/api/stream", auth(a.broker.HandleStream))
 
 	// Mutations (Phase 1.5)
@@ -92,10 +91,6 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/update", auth(a.handleSettingsUpdate))
 	mux.HandleFunc("/api/settings/ignorati/add", auth(a.handleIgnoratiAdd))
 	mux.HandleFunc("/api/settings/ignorati/remove", auth(a.handleIgnoratiRemove))
-
-	mux.HandleFunc("/api/students/set", auth(a.handleStudentSet))
-	mux.HandleFunc("/api/students/delete", auth(a.handleStudentDelete))
-	mux.HandleFunc("/api/students/clear", auth(a.handleStudentClear))
 
 	// Download script studenti (Phase 1.7)
 	mux.HandleFunc("/api/scripts/proxy_on.vbs", auth(a.handleScriptProxyOn))
@@ -134,9 +129,6 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
 	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))
 	mux.HandleFunc("/api/preset/delete", auth(a.handlePresetDelete))
-	mux.HandleFunc("/api/classi/save", auth(a.handleClassiSave))
-	mux.HandleFunc("/api/classi/load", auth(a.handleClassiLoad))
-	mux.HandleFunc("/api/classi/delete", auth(a.handleClassiDelete))
 	mux.HandleFunc("/api/sessioni/archivia", auth(a.handleSessioniArchivia))
 	mux.HandleFunc("/api/sessioni/load", auth(a.handleSessioniLoad))
 	mux.HandleFunc("/api/sessioni/delete", auth(a.handleSessioniDelete))
@@ -255,18 +247,6 @@ func (a *API) handlePresets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"presets": lista})
-}
-
-func (a *API) handleClassi(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	combo, err := a.state.Store().ListaClassi()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Errore lettura classi: "+err.Error(), "STORE_ERROR")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"classi": combo})
 }
 
 // ============================================================
@@ -463,49 +443,6 @@ func (a *API) handleIgnoratiRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
-// POST handlers — Studenti
-// ============================================================
-
-type studentBody struct {
-	IP   string `json:"ip"`
-	Nome string `json:"nome"`
-}
-
-func (a *API) handleStudentSet(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body studentBody
-	if err := decodeJSONBody(r, &body); err != nil || body.IP == "" || body.Nome == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {ip, nome}", "BAD_BODY")
-		return
-	}
-	a.state.SetStudent(body.IP, body.Nome)
-	writeOK(w, nil)
-}
-
-func (a *API) handleStudentDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body studentBody
-	if err := decodeJSONBody(r, &body); err != nil || body.IP == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {ip}", "BAD_BODY")
-		return
-	}
-	a.state.DeleteStudent(body.IP)
-	writeOK(w, nil)
-}
-
-func (a *API) handleStudentClear(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	a.state.ClearStudents()
-	writeOK(w, nil)
-}
-
-// ============================================================
 // Shutdown (Phase 1.7+)
 // ============================================================
 
@@ -640,77 +577,6 @@ func (a *API) handlePresetDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.state.Store().DeletePreset(body.Nome); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	writeOK(w, nil)
-}
-
-// ============================================================
-// POST handlers — Classi (Phase 1.6, persistence-backed)
-// ============================================================
-
-type classeBody struct {
-	Classe string `json:"classe"`
-	Lab    string `json:"lab"`
-}
-
-func (a *API) handleClassiSave(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	// Salva la mappa studenti corrente come snapshot per quella combo.
-	cfg := a.state.ConfigSnapshotData()
-	c := store.ClasseFile{
-		Classe:    body.Classe,
-		Lab:       body.Lab,
-		Mappa:     cfg.Studenti,
-		UpdatedAt: time.Now().UnixMilli(),
-	}
-	if err := a.state.Store().SaveClasse(c); err != nil {
-		if err == store.ErrNomeInvalido {
-			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	writeOK(w, map[string]any{"classe": body.Classe, "lab": body.Lab})
-}
-
-func (a *API) handleClassiLoad(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	c, err := a.state.Store().LoadClasse(body.Classe, body.Lab)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
-		return
-	}
-	a.state.SetStudenti(c.Mappa)
-	writeOK(w, map[string]any{"caricati": len(c.Mappa)})
-}
-
-func (a *API) handleClassiDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	if err := a.state.Store().DeleteClasse(body.Classe, body.Lab); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return
 	}

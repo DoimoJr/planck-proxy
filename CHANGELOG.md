@@ -5,6 +5,67 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.6.0] — 2026-05-04
+
+**Portabile tra laboratori senza setup.** Rimosso il concetto di
+"classe + laboratorio salvato" e l'editing manuale dei nomi studente.
+Il binario in chiavetta funziona out-of-the-box in qualsiasi lab della
+scuola: ogni boot rigenera mappa studenti e chiave Veyon dal contesto
+locale (LAN del PC docente corrente + veyon-cli del PC docente
+corrente).
+
+> **Breaking change**: rimosse 6 API (`/api/students/*`, `/api/classi/*`).
+> Le tabelle DB `studenti_correnti` e `combo` vengono ignorate ma non
+> droppate (preservano integrita' delle sessioni archiviate v2.5.x).
+
+### Cambiato
+
+- **Mappa studenti**: ora una semplice lista degli IP `.1`-`.30` del /24
+  del docente, generata in-memory ad ogni boot. Niente piu' nomi
+  modificabili, niente piu' persistenza, niente residui da lab
+  precedenti. Le card Live mostrano l'IP come label.
+
+- **Chiave Veyon**: NON piu' persistita in DB. Ad ogni boot:
+  1. `VeyonClear()` resetta lo stato precedente.
+  2. `AutoImportVeyonKey()` re-importa la master key da `veyon-cli`
+     del PC docente corrente. Se sei in un lab diverso, prendi la
+     chiave di quel lab. Niente residui dalla chiavetta usata altrove.
+
+- **Tab Impostazioni**: rimossa la card "Mappa studenti" (con dropdown
+  classe/lab, tabella IP→nome, form aggiungi). La card "Veyon" ora
+  mostra solo lo stato (importazione automatica) + il test connessione.
+
+- **Filtro Live**: placeholder cambiato da "Filtra domini/IP/studenti…"
+  a "Filtra domini/IP…" (i nomi non esistono piu').
+
+### Rimosso
+
+- API: `POST /api/students/{set,delete,clear}`, `GET /api/classi`,
+  `POST /api/classi/{save,load,delete}`.
+- Backend: `state.SetStudent/DeleteStudent/ClearStudents/SetStudenti/
+  MergeStudentiAuto`. Sostituiti da un singolo `SetStudentiIPs(ips)`
+  in-memory only.
+- Backend: `store.LoadStudenti/SaveStudenti/LoadClasse/SaveClasse/
+  DeleteClasse/ListaClassi`. File `internal/store/{studenti,classi}.go`
+  cancellati.
+- Backend: package `internal/persist/` (legacy v1.6 file-based, gia'
+  non importato dal binario runtime).
+- Frontend: `renderMappaStudenti`, `renderSelectCombo`,
+  `modificaStudente`, `aggiungiStudente`, `svuotaMappaStudenti`,
+  `caricaCombo`, `salvaCombo`, `eliminaCombo`, dispatcher associati.
+- Migrate v1: blocchi per `studenti.json` e `classi/*.json` (ora skip).
+
+### Note
+
+- **Restano nei DB esistenti** (sia v2.5.x che migrazioni v1) le righe
+  delle tabelle `studenti_correnti` e `combo`. Sono dormienti — il
+  binario non le legge piu'. Le sessioni archiviate con
+  `entries.nome_studente != ''` mantengono il valore storicizzato.
+- **Veyon richiede `veyon-cli`**: ogni PC docente che vuoi usare
+  come laboratorio deve avere Veyon Configurator installato (con la
+  master key del lab importata nel suo keystore). Senza, Veyon resta
+  disabled per quella sessione.
+
 ## [v2.5.1] — 2026-05-04
 
 Patch: il ping sweep del /24 introdotto in v2.5.0 si comportava male su

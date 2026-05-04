@@ -875,8 +875,7 @@ function aggiornaSettingsInput(el, val) {
 
 /**
  * Rigenera il tab Impostazioni: sincronizza il form settings, banner
- * "riavvio richiesto", lista domini ignorati, mappa studenti, dropdown
- * combo classe+lab, lista sessioni archiviate.
+ * "riavvio richiesto", lista domini ignorati, lista sessioni archiviate.
  */
 export function renderImpostazioni() {
     if (state.tabAttivo !== 'impostazioni') return;
@@ -892,7 +891,6 @@ export function renderImpostazioni() {
     if (banner) banner.classList.toggle('hidden', !state.riavvioRichiesto);
 
     renderIgnorati();
-    renderMappaStudenti();
 
     const sessioniEl = $('sessioni-list');
     const select = $('report-sessione-select');
@@ -922,71 +920,9 @@ function renderIgnorati() {
         : '<li class="hint">Nessun dominio ignorato.</li>';
 }
 
-/**
- * Rigenera la tabella mappa studenti preservando il focus/selezione se
- * l'utente sta attualmente editando un input. Senza questa preservazione,
- * ogni SSE `studenti` broadcast (inclusi quelli triggerati dal typing
- * dell'utente stesso) ruberebbe il focus a meta' parola.
- */
-function renderMappaStudenti() {
-    const tbody = $('studenti-tbody');
-    if (!tbody) return;
-
-    const active = document.activeElement;
-    const activeIp = (active && active.classList.contains('edit-studente')) ? active.dataset.ip : null;
-    const activeSel = activeIp ? [active.selectionStart, active.selectionEnd] : null;
-
-    const entries = Object.entries(state.cfg.studenti || {}).sort(([a], [b]) => ip2long(a) - ip2long(b));
-    $('count-studenti').textContent = entries.length;
-
-    tbody.innerHTML = entries.length > 0
-        ? entries.map(([ip, nome]) => `<tr>
-            <td class="col-ip">${escapeHtml(ip)}</td>
-            <td class="col-nome"><input type="text" class="edit-studente" data-action="edit-studente" data-ip="${attrEscape(ip)}" value="${attrEscape(nome)}"></td>
-            <td class="col-azioni"><button class="btn-block" data-action="elimina-studente" data-ip="${attrEscape(ip)}" title="Elimina">X</button></td>
-        </tr>`).join('')
-        : '<tr><td colspan="3" class="hint-cell">Nessuno studente mappato. Aggiungi una riga sotto o carica una classe.</td></tr>';
-
-    if (activeIp) {
-        const nuovoInput = tbody.querySelector(`.edit-studente[data-ip="${CSS.escape(activeIp)}"]`);
-        if (nuovoInput) {
-            nuovoInput.focus();
-            if (activeSel) nuovoInput.setSelectionRange(activeSel[0], activeSel[1]);
-        }
-    }
-
-    renderSelectCombo();
-}
-
-/**
- * Rigenera i due dropdown classe/lab dalla lista `state.cfg.classi`.
- * Abilita Load/Delete solo se la combinazione selezionata esiste in archivio.
- */
-function renderSelectCombo() {
-    const tutte = state.cfg.classi || [];
-    const classi = [...new Set(tutte.map(c => c.classe))].sort();
-    const lab = [...new Set(tutte.map(c => c.lab))].sort();
-
-    const selClasse = $('sel-classe');
-    const selLab = $('sel-lab');
-    if (!selClasse || !selLab) return;
-
-    const valClasse = selClasse.value;
-    const valLab = selLab.value;
-
-    selClasse.innerHTML = '<option value="">-- Classe --</option>'
-        + classi.map(c => `<option value="${attrEscape(c)}">${escapeHtml(c)}</option>`).join('');
-    selClasse.value = classi.includes(valClasse) ? valClasse : '';
-
-    selLab.innerHTML = '<option value="">-- Laboratorio --</option>'
-        + lab.map(l => `<option value="${attrEscape(l)}">${escapeHtml(l)}</option>`).join('');
-    selLab.value = lab.includes(valLab) ? valLab : '';
-
-    const esiste = selClasse.value && selLab.value
-        && tutte.some(c => c.classe === selClasse.value && c.lab === selLab.value);
-    $('btn-combo-load').disabled = !esiste;
-    $('btn-combo-delete').disabled = !esiste;
-}
+// renderMappaStudenti / renderSelectCombo: rimossi in v2.6.0. La mappa
+// IP→nome non e' piu' editabile (gli IP del /24 corrente sono generati
+// server-side al boot e mostrati come label IP raw).
 
 // ========================================================================
 // Render completo (throttled)

@@ -40,7 +40,7 @@
                         <h2>Domini (<span id="count-domini">0</span>)</h2>
                         <button class="btn-collassa" data-action="toggle-sidebar" title="Nascondi domini" aria-label="Nascondi pannello domini">&#xAB;</button>
                     </div>
-                    <input class="filtro-input" type="text" placeholder="Filtra domini/IP/studenti..." data-action="filtro">
+                    <input class="filtro-input" type="text" placeholder="Filtra domini/IP..." data-action="filtro">
                     <div class="dominio-list" id="lista-domini">
                         <div class="sezione-domini" id="sezione-ai" style="display:none">
                             <h3 class="ai-header">AI (<span id="count-ai">0</span>)</h3>
@@ -269,40 +269,6 @@
                 </div>
             </div>
 
-            <div class="card" id="card-studenti">
-                <h3>Mappa studenti (IP &rarr; nome)</h3>
-                <p class="hint">Puoi modificare direttamente qui. Ogni cambiamento viene salvato automaticamente in <code>studenti.json</code>.</p>
-
-                <div class="toolbar-group classi-toolbar">
-                    <select id="sel-classe" data-action="sel-combo" class="classe-select">
-                        <option value="">-- Classe --</option>
-                    </select>
-                    <select id="sel-lab" data-action="sel-combo" class="classe-select">
-                        <option value="">-- Laboratorio --</option>
-                    </select>
-                    <button data-action="combo-load" id="btn-combo-load" class="btn btn-primary" disabled>Carica</button>
-                    <button data-action="combo-save" class="btn">Salva combinazione</button>
-                    <button data-action="combo-delete" id="btn-combo-delete" class="btn btn-danger" disabled>Elimina</button>
-                </div>
-
-                <h4 style="margin-top:14px">Mappa attuale (<span id="count-studenti">0</span>)</h4>
-                <table class="mappa-studenti">
-                    <thead><tr><th>IP</th><th>Nome</th><th></th></tr></thead>
-                    <tbody id="studenti-tbody"></tbody>
-                </table>
-
-                <div class="aggiungi-studente">
-                    <input type="text" id="nuovo-ip" placeholder="IP (es. 192.168.1.15)" data-action="nuovo-studente-key">
-                    <input type="text" id="nuovo-nome" placeholder="Nome" data-action="nuovo-studente-key">
-                    <button data-action="aggiungi-studente" class="btn btn-primary">Aggiungi</button>
-                </div>
-
-                <div class="toolbar-group" style="margin-top:12px">
-                    <button data-action="reload-studenti" class="btn">Ricarica da file</button>
-                    <button data-action="svuota-studenti" class="btn btn-danger">Svuota mappa</button>
-                </div>
-            </div>
-
             <div class="card">
                 <h3>Archivio sessioni</h3>
                 <p class="hint">All'"Avvia sessione" la precedente (se aveva dati) viene archiviata in <code>sessioni/</code>. L'archivio sopravvive ai riavvii.</p>
@@ -313,27 +279,11 @@
 
             <div class="card" id="card-veyon">
                 <h3>Veyon (controllo studenti)</h3>
-                <p class="hint">Importa la chiave master generata con Veyon Configurator (PEM). Una volta configurata, Planck può inviare comandi (lock schermo, lancio app, messaggi) ai PC studenti che hanno veyon-server in esecuzione.</p>
+                <p class="hint">Planck importa automaticamente la chiave master del PC docente al boot tramite <code>veyon-cli</code>. Niente upload manuale: spostati in un altro laboratorio e Planck prende la chiave di quella postazione.</p>
 
                 <div id="veyon-status-row" class="settings-grid">
                     <label>Stato</label>
                     <div id="veyon-status">caricamento...</div>
-                </div>
-
-                <h4 style="margin-top:14px">Configurazione</h4>
-                <div class="settings-grid">
-                    <label>Nome chiave</label>
-                    <input type="text" id="veyon-keyname" placeholder="es. teacher" style="max-width:240px">
-
-                    <label>Chiave privata (PEM)</label>
-                    <textarea id="veyon-pem" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:11px;width:100%"></textarea>
-
-                    <label>Porta server studente</label>
-                    <input type="number" id="veyon-port" value="11100" min="1" max="65535" style="max-width:120px">
-                </div>
-                <div class="toolbar-group" style="margin-top:8px">
-                    <button data-action="veyon-configure" class="btn btn-primary">Salva configurazione</button>
-                    <button data-action="veyon-clear" class="btn btn-danger">Rimuovi</button>
                 </div>
 
                 <h4 style="margin-top:14px">Test connessione</h4>

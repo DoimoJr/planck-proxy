@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	Versione = "2.5.0"
+	Versione = "2.5.1"
 	Fase     = "stable"
 )
 
@@ -178,25 +178,15 @@ func main() {
 		log.Printf("Veyon: master key '%s' importata automaticamente da veyon-cli", name)
 	}
 
-	// LAN discovery: ping sweep del /24 del docente per popolare la mappa
-	// studenti con gli IP attivi. Sweep iniziale sincrono (~2s) cosi' la
-	// UI parte gia' popolata; poi loop periodico ogni 60s per scoprire
-	// PC accesi successivamente. Gli IP gia' mappati con un nome reale
-	// non vengono toccati (vedi MergeStudentiAuto).
-	if lanIP != "" && lanIP != "127.0.0.1" {
-		go func() {
-			// Sweep iniziale: bloccante per popolare la UI al primo render.
-			ips := discover.Sweep(lanIP, discover.DefaultTimeout)
-			st.MergeStudentiAuto(ips)
-			log.Printf("discover: sweep iniziale completato, %d IP attivi nel /24 di %s", len(ips), lanIP)
-
-			// Loop periodico.
-			for {
-				time.Sleep(60 * time.Second)
-				ips := discover.Sweep(lanIP, discover.DefaultTimeout)
-				st.MergeStudentiAuto(ips)
-			}
-		}()
+	// LAN discovery: popola la mappa studenti col range fisso .1-.30 del
+	// /24 del docente (convenzione standard laboratorio). Una sola volta
+	// al boot, niente probing — gli IP gia' mappati con un nome reale
+	// non vengono toccati (vedi MergeStudentiAuto). Le card studente
+	// appaiono subito nella grid Live anche prima che i PC siano accesi.
+	if ips := discover.DefaultRange(lanIP); len(ips) > 0 {
+		st.MergeStudentiAuto(ips)
+		log.Printf("discover: mappa studenti pre-popolata col range .%d-.%d del /24 di %s (%d IP)",
+			discover.DefaultFirst, discover.DefaultLast, lanIP, len(ips))
 	}
 
 	// Watchdog plugins (Phase 5): registra i built-in.

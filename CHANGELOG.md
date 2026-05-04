@@ -5,6 +5,37 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.5.1] — 2026-05-04
+
+Patch: il ping sweep del /24 introdotto in v2.5.0 si comportava male su
+LAN reali (timeout intermittenti, IP non-studente inclusi, latenza
+variabile). Sostituito con un approccio piu' semplice e prevedibile.
+
+### Cambiato
+
+- **`internal/discover`** ora genera un range fisso `.1`–`.30` del /24
+  del docente (convenzione standard laboratorio scolastico). Una sola
+  chiamata sincrona al boot, niente probing periodico, niente shell-out
+  a `ping.exe`.
+
+- Le card studente nella grid Live appaiono subito anche per i PC
+  spenti — quando lo studente accende e installa il proxy, la card
+  esistente comincia a popolarsi senza refresh.
+
+### Note migrazione da v2.5.0
+
+Se hai gia' v2.5.0 installato, la tua mappa studenti puo' contenere
+voci scoperte dal vecchio ping sweep (router, NAS, telefoni nel /24).
+Apri **Impostazioni → Mappa studenti** e usa il bottone **X** per
+rimuovere quelle che non sono PC studente. Le voci `.1`–`.30` sono
+quelle generate dalla nuova logica.
+
+### Rimosso
+
+- `discover.Sweep()`, `discover.DefaultTimeout`, `discover.DefaultConcurrency`
+  e `pingOnce()`. Il package `discover` ora espone solo `DefaultRange()`,
+  `DefaultFirst` e `DefaultLast`.
+
 ## [v2.5.0] — 2026-05-04
 
 Auto-setup all'avvio: il software prende da solo la chiave master Veyon

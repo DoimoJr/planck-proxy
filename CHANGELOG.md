@@ -5,6 +5,54 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.6.1] — 2026-05-04
+
+Patch: fix bug "Rimuovi proxy a volte non si toglie davvero".
+
+### Risolto
+
+- **proxy_off.vbs su Windows 11 24H2+**: usava `wmic process delete`
+  per killare il watchdog VBS che riapplica il proxy ogni 5 secondi.
+  WMIC e' **deprecato in Windows 11 e rimosso in 24H2** → il kill
+  falliva silenziosamente, il watchdog continuava a girare e dopo
+  ~5s riapplicava `ProxyEnable=1` in HKCU sovrascrivendo il
+  `ProxyEnable=0` settato da proxy_off. Effetto: lato docente
+  l'azione "Rimuovi proxy" sembrava riuscita, ma sul PC studente
+  il proxy "tornava" subito.
+
+### Cambiato
+
+- **Kill via PowerShell** (`Get-CimInstance Win32_Process` +
+  `Stop-Process`): disponibile su Windows 7+, sostituisce
+  completamente WMIC. Filtraggio per `CommandLine -match`
+  (regex) per ammazzare i processi giusti senza colpire proxy_off
+  stesso.
+
+- **Stop flag come kill "gentile"**: proxy_off ora crea
+  `%TEMP%\planck_stop.flag`. Il watchdog VBS controlla questo
+  file ad ogni iterazione e si auto-termina (settando
+  `ProxyEnable=0` per buona misura) quando lo trova. Funziona
+  anche se PowerShell fallisse per qualche edge case.
+
+- **Sequenza proxy_off**: 1) crea flag → 2) sleep 6s (un ciclo
+  watchdog + margine) → 3) ProxyEnable=0 → 4) kill defensivo via
+  PowerShell → 5) cleanup file + flag + self-delete.
+
+- **proxy_on.vbs**: anche il kill dei watchdog precedenti (per
+  evitare duplicati al ridistribuire il proxy) ora usa PowerShell
+  invece di WMIC. In piu' cancella `planck_stop.flag` al boot,
+  altrimenti il watchdog appena lanciato uscirebbe immediatamente.
+
+### Note
+
+- I PC studente che hanno gia' ricevuto il vecchio proxy_on.vbs
+  v2.6.0 hanno il watchdog senza check del flag stop. Il fix
+  diventa effettivo dopo una "Distribuisci proxy" con questa
+  release: il nuovo watchdog include il check.
+- Per fermare un watchdog v2.6.0 residuo su un PC studente: una
+  sola "Rimuovi proxy" v2.6.1 lo killa via PowerShell (il path
+  defensivo); non si appoggia piu' al flag.
+
 ## [v2.6.0] — 2026-05-04
 
 **Portabile tra laboratori senza setup.** Rimosso il concetto di

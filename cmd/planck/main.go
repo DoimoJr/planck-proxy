@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DoimoJr/planck-proxy/internal/discover"
 	"github.com/DoimoJr/planck-proxy/internal/proxy"
 	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
@@ -28,7 +29,7 @@ import (
 )
 
 const (
-	Versione = "2.3.1"
+	Versione = "2.5.0"
 	Fase     = "stable"
 )
 
@@ -166,6 +167,37 @@ func main() {
 	// Esponi il LAN IP via state cosi' la UI sa quale IP usare per
 	// "Distribuisci proxy" senza dover chiedere ogni volta.
 	st.SetLanIP(lanIP)
+
+	// Auto-import master key Veyon via veyon-cli (best-effort). Se
+	// Veyon Configurator e' installato e c'e' una master key nel suo
+	// keystore, la importiamo subito senza UI manuale. Errori loggati
+	// ma non bloccanti (l'utente puo' sempre caricare la chiave da UI).
+	if name, err := st.AutoImportVeyonKey(); err != nil {
+		log.Printf("Veyon auto-import non riuscito (non critico): %v", err)
+	} else if name != "" {
+		log.Printf("Veyon: master key '%s' importata automaticamente da veyon-cli", name)
+	}
+
+	// LAN discovery: ping sweep del /24 del docente per popolare la mappa
+	// studenti con gli IP attivi. Sweep iniziale sincrono (~2s) cosi' la
+	// UI parte gia' popolata; poi loop periodico ogni 60s per scoprire
+	// PC accesi successivamente. Gli IP gia' mappati con un nome reale
+	// non vengono toccati (vedi MergeStudentiAuto).
+	if lanIP != "" && lanIP != "127.0.0.1" {
+		go func() {
+			// Sweep iniziale: bloccante per popolare la UI al primo render.
+			ips := discover.Sweep(lanIP, discover.DefaultTimeout)
+			st.MergeStudentiAuto(ips)
+			log.Printf("discover: sweep iniziale completato, %d IP attivi nel /24 di %s", len(ips), lanIP)
+
+			// Loop periodico.
+			for {
+				time.Sleep(60 * time.Second)
+				ips := discover.Sweep(lanIP, discover.DefaultTimeout)
+				st.MergeStudentiAuto(ips)
+			}
+		}()
+	}
 
 	// Watchdog plugins (Phase 5): registra i built-in.
 	wdReg := watchdog.NewRegistry()

@@ -5,6 +5,56 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.5.0] — 2026-05-04
+
+Auto-setup all'avvio: il software prende da solo la chiave master Veyon
+e popola la mappa studenti con i PC attivi nella LAN del docente. Niente
+piu' creazione manuale di classe/laboratorio prima di poter usare le
+funzioni base.
+
+### Aggiunto
+
+- **`internal/discover/`**: ping sweep concorrente del /24 derivato dal
+  LAN IP del docente. Implementazione tramite shell-out a `ping`/`ping.exe`
+  (no raw ICMP → niente privilegi admin richiesti). Concorrenza
+  semaforica a 32, timeout 250ms per IP, sweep totale ~2s per /24.
+
+  Sweep iniziale al boot (sincrono) + loop periodico ogni 60s per
+  scoprire PC accesi successivamente. Gli IP gia' mappati con un nome
+  reale non vengono mai sovrascritti.
+
+- **`state.MergeStudentiAuto(ips)`**: aggiunge IP alla mappa studenti
+  preservando le voci esistenti. Persiste e broadcasta solo se la
+  mappa cambia davvero.
+
+- **`internal/veyon.AutoImport(dataDir)`**: cerca `veyon-cli` nei path
+  standard Windows/Linux/macOS, lista le auth keys via
+  `veyon-cli authkeys list`, sceglie la prima master (preferendo il
+  nome `master` se presente) e la esporta via
+  `veyon-cli authkeys export <name>/private`. Fallback silenzioso al
+  flusso manuale se veyon-cli manca o nessuna chiave e' importata nel
+  Configurator.
+
+- **`state.AutoImportVeyonKey()`**: wrapper boot-time. No-op se
+  l'utente ha gia' configurato Veyon manualmente (preserva la sua
+  scelta). Errore non-fatale: il flusso `POST /api/veyon/configure`
+  resta sempre disponibile come fallback.
+
+### Cambiato
+
+- Il primo avvio non richiede piu' di passare dalle Impostazioni: la
+  UI parte gia' con le card studente popolate (IP visti via ping) e
+  con i bottoni Veyon attivi (chiave importata da veyon-cli).
+
+### Note
+
+- L'auto-discovery puo' includere device non-studente del /24 (router,
+  printer, NAS, telefoni). Si rimuovono dalla UI Impostazioni →
+  Mappa studenti → bottone X sulla riga.
+- L'auto-import Veyon si attiva solo se `veyon-cli` e' raggiungibile.
+  In Linux su distro senza Veyon Configurator l'utente continua col
+  flusso manuale.
+
 ## [v2.3.1] — 2026-05-01
 
 Patch: fix UI "Domini ignorati" che appariva vuota al primo load.

@@ -75,6 +75,35 @@ func (s *State) VeyonConfigure(keyName string, privateKeyPEM []byte) error {
 	return nil
 }
 
+// AutoImportVeyonKey tenta l'auto-import della master key Veyon via
+// `veyon-cli authkeys export` al boot. No-op se Veyon e' gia' configurato
+// (l'utente ha gia' caricato una chiave manualmente) o se veyon-cli non e'
+// presente sulla macchina del docente.
+//
+// Errore non-nil indica solo che l'auto-import non e' andato a buon fine:
+// il chiamante puo' loggare e continuare — il flusso manuale via
+// /api/veyon/configure resta sempre disponibile.
+func (s *State) AutoImportVeyonKey() (string, error) {
+	s.mu.RLock()
+	already := s.veyonKeyName != "" && fileExists(s.veyonKeyPath())
+	s.mu.RUnlock()
+	if already {
+		return "", nil
+	}
+	dir := s.store.DataDir()
+	if dir == "" {
+		return "", fmt.Errorf("dataDir non disponibile (NoOp store?)")
+	}
+	res, err := veyon.AutoImport(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := s.VeyonConfigure(res.KeyName, res.PEMBytes); err != nil {
+		return "", fmt.Errorf("configure dopo auto-import: %w", err)
+	}
+	return res.KeyName, nil
+}
+
 // VeyonClear rimuove la configurazione Veyon (file su disco + keyName).
 func (s *State) VeyonClear() error {
 	path := s.veyonKeyPath()

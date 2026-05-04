@@ -290,6 +290,41 @@ func (s *State) SetStudenti(stud map[string]string) {
 	s.broadcastStudenti(cp)
 }
 
+// MergeStudentiAuto aggiunge alla mappa studenti gli IP scoperti via
+// discovery LAN, SENZA sovrascrivere voci esistenti (preserva i nomi
+// reali se l'utente ha rinominato). IP gia' presenti nella mappa vengono
+// ignorati. Persiste e broadcasta solo se la mappa e' davvero cambiata.
+//
+// Il nome assegnato agli IP nuovi e' stringa vuota: la UI mostra l'IP
+// stesso come label finche' l'utente non assegna un nome reale.
+func (s *State) MergeStudentiAuto(ips []string) {
+	if len(ips) == 0 {
+		return
+	}
+	s.mu.Lock()
+	added := 0
+	for _, ip := range ips {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		if _, exists := s.studenti[ip]; exists {
+			continue
+		}
+		s.studenti[ip] = ""
+		added++
+	}
+	if added == 0 {
+		s.mu.Unlock()
+		return
+	}
+	cp := s.studentiCopyLocked()
+	s.mu.Unlock()
+	s.persistStudenti(cp)
+	s.broadcastStudenti(cp)
+	log.Printf("discover: aggiunti %d IP nuovi alla mappa studenti", added)
+}
+
 func (s *State) persistStudenti(stud map[string]string) {
 	if err := s.store.SaveStudenti(stud); err != nil {
 		log.Printf("state: errore save studenti: %v", err)

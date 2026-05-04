@@ -15,6 +15,11 @@
     <div id="ai-banner"></div>
 
     <div class="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <span>Planck</span>
+            <span class="brand-sub">· Proxy</span>
+        </div>
         <nav class="tab-nav">
             <button data-action="tab" data-tab="live" class="tab-btn active">Live</button>
             <button data-action="tab" data-tab="report" class="tab-btn">Report</button>
@@ -75,9 +80,10 @@
             <div class="main">
                 <div class="toolbar">
                     <div class="toolbar-group">
-                        <button data-action="session-toggle" id="btn-sessione" class="btn-primary">Avvia sessione</button>
-                        <button data-action="pausa-toggle" id="btn-pausa" class="btn btn-warning">Pausa</button>
-                        <button data-action="block-all-ai" class="btn-danger">Blocca AI</button>
+                        <button data-action="session-toggle" id="btn-sessione" class="btn btn-primary">Rec sessione</button>
+                        <span class="sep big"></span>
+                        <button data-action="pausa-toggle" id="btn-pausa" class="btn block" title="Blocca tutti i domini">Blocca tutto</button>
+                        <button data-action="block-all-ai" class="btn block">Blocca AI</button>
                         <button data-action="unblock-all-ai" class="btn">Sblocca AI</button>
                         <details class="menu-overflow">
                             <summary class="btn btn-icon" title="Altre azioni" aria-label="Altre azioni">&#x22EE;</summary>

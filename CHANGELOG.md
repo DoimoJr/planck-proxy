@@ -5,6 +5,94 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.8.0] — 2026-05-04
+
+UI redesign basato su un mockup di **Claude Designer** (claude.ai/design)
+condiviso con l'utente come bundle handoff. Iterato fino a una direzione
+"Linear-style" precisa: palette neutra grayscale + 4 colori semantici
+(ok/warn/alert/info), zero accent decorativo, densita' alta, dark mode
+prima-class.
+
+### Cambiato
+
+- **Palette completa rifatta** in `monitor.css` `:root` / `body.dark`:
+  - Light: `#fafaf9` bg / `#fff` surface / `#1a1a18` text / `#e2e2df`
+    border. Semantici: `#2f9e6a` ok / `#c98a2b` warn / `#c63d3d` alert
+    / `#4a7bd1` info / `#9a9a93` muted (con varianti `*-bg` rgba .10-.16).
+  - Dark: `#0e0e0d` bg / `#181816` surface / `#f0f0ec` text / `#2a2a27`
+    border. Semantici scuri matcheggiati per contrasto.
+  - Variabili vecchie (`--card`, `--accent`, `--danger`, ecc.) restano
+    come **alias** dei nuovi token: il codice esistente continua a
+    funzionare senza modifiche.
+
+- **Spacing/radius scale** standardizzata: `--s-1 .. --s-6` (4-32px),
+  `--r-1 .. --r-4` (3-12px). Tipografia: `--font-ui` (system-ui),
+  `--font-mono` (ui-monospace) per IP e log.
+
+- **Topbar** rifatta a 38px: brand "■ Planck · Proxy" a sinistra, tabs
+  rectangular pill (active = surface-2 + border), topbar-right con
+  pausa-indicator + countdown + theme toggle + spegni server.
+
+- **Tab buttons**: stile rectangular (radius `--r-2`, bg `--surface-2`
+  on active) invece del precedente underline.
+
+- **Toolbar sessione** Linear-style: bottoni height 26px, radius `--r-2`.
+  - "Avvia sessione" → "Rec sessione" (testo allineato al design).
+  - "Pausa" → **"Blocca tutto"** con classe `.btn.block` (toggle on/off).
+    Off: bordo+testo rosso su `--alert-bg` tinted. On: filled rosso pieno
+    + dot bianco pulse top-right.
+  - "Blocca AI" stessa pattern `.btn.block` (consistenza visiva).
+  - Separator piu' marcato (`.sep.big`) tra Rec/Stop e Blocca.
+
+- **Action toolbar (Veyon)** sempre visibile sotto la toolbar sessione
+  (bg `--surface-2`, border-bottom). Era nascosta finche' Veyon non era
+  configurato; ora che l'auto-import via veyon-cli rende la chiave
+  sempre disponibile (v2.6.0+), ha senso averla sempre presente.
+
+- **Stat strip** 5 colonne in grid con border 1px tra le celle (no piu'
+  card separate con shadow). Label uppercase 10px + numero 22px tabular
+  semibold + sub line. Status mostra "LIVE" / "OFF" in maiuscolo.
+
+- **Card studente**: padding 8×10 invece di 10×12, radius `--r-2`,
+  status dot 6px posizionato top-left fuori dal bordo (`-3px`). Stati:
+  `.ai` border alert + box-shadow inset (alta visibilita'),
+  `.watchdog` border warn, `.inattivo` opacity .55, `.focus`/`.selected`
+  border info + box-shadow inset.
+
+- **Banner AI** sottile: padding `--s-3 --s-4` (stesso della toolbar),
+  pill "AI" inline con animation `planck-pulse` (opacity 1→.55, 2.4s).
+  Sostituito il `flash-banner` di tipo alternato che era affaticante.
+
+- **Sidebar items**: monospace 10.5px, padding sottile, hover background
+  `--hover` morbido, niente border-bottom tra item.
+
+- **Pausa indicator + countdown** sottili (font 10/11px, padding
+  ridotto, radius `--r-1`).
+
+### Note
+
+- Il design **Liquid Glass** che era stato esplorato in v2.4.0 e poi
+  revertato resta deprecato. Il designer ha chiesto inizialmente
+  Liquid Glass ma dopo il primo confronto fianco-a-fianco con la
+  variante Flat ha confermato che il glass non funzionava neanche
+  come "vetro su chrome / flat su contenuti".
+- Il bundle handoff e' ignorato in `.gitignore` (`design/`): contiene
+  solo file di lavoro (HTML/JSX/CSS prototype + chat transcript), non
+  e' source code da mantenere.
+- DB e API sono **invariati**: solo CSS + due microcambi al markup
+  (brand topbar, classi `.btn.block` su Pausa/Blocca AI) e al render
+  JS (label "Blocca tutto"/"Sblocca tutto", "Rec sessione"/"Stop").
+
+### Per dopo (v2.9+)
+
+Componenti del design non ancora portati:
+- Vista lista commutabile (segmented control griglia/lista in toolbar).
+- Click su card → detail pane laterale con azioni rapide + storico
+  domini + watchdog espanso.
+- Multi-select Cmd/Ctrl+click + floating selection bar in basso al
+  centro (esiste parzialmente come `selection-bar`).
+- Event log panel (feed cronologico AI+watchdog filtrabile).
+
 ## [v2.7.0] — 2026-05-04
 
 UX cleanup all'avvio: niente flash della finestra `cmd`, icona Planck

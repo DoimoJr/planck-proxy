@@ -72,6 +72,9 @@ desktop.ini
 # Versione precedente tenuta in locale per confronto
 old/
 
+# Bundle handoff da Claude Designer (mockup di lavoro, non source).
+design/
+
 # Veyon test rig: chiavi RSA generate ad ogni `docker run`, mai committare.
 test/veyon-rig/keys/
 *.pem

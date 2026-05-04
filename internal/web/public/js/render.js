@@ -216,11 +216,13 @@ export function renderPausaEBottoni() {
     const btn = $('btn-pausa');
     const ind = $('pausa-indicator');
     if (state.pausato) {
-        btn.textContent = 'Riprendi';
+        btn.textContent = 'Sblocca tutto';
+        btn.classList.add('active');
         btn.classList.add('attivo');
         ind.classList.remove('hidden');
     } else {
-        btn.textContent = 'Pausa';
+        btn.textContent = 'Blocca tutto';
+        btn.classList.remove('active');
         btn.classList.remove('attivo');
         ind.classList.add('hidden');
     }
@@ -228,11 +230,11 @@ export function renderPausaEBottoni() {
     const btnSes = $('btn-sessione');
     if (btnSes) {
         if (state.sessioneAttiva) {
-            btnSes.textContent = 'Ferma sessione';
+            btnSes.textContent = 'Stop sessione';
             btnSes.classList.remove('btn-primary');
             btnSes.classList.add('btn-danger');
         } else {
-            btnSes.textContent = 'Avvia sessione';
+            btnSes.textContent = 'Rec sessione';
             btnSes.classList.remove('btn-danger');
             btnSes.classList.add('btn-primary');
         }

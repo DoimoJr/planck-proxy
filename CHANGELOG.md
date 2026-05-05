@@ -5,6 +5,191 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.0] — 2026-05-05
+
+Iterazione successiva al redesign v2.8.0: chiusura del lavoro su detail
+pane, vista lista, sidebar dx full-height, blocchi per-IP, fix avvio,
+fix render iniziale che impediva il funzionamento dei toggle.
+
+### Aggiunto
+
+- **Blocchi per-IP** (additivi rispetto alla blocklist globale):
+  - Schema: nuova tabella `bloccati_per_ip(ip, dominio, added_at)`
+    (migration v3, applicata al primo avvio).
+  - State: `blocchiPerIp map[ip]map[dominio]struct{}` con
+    `BlockForIp` / `UnblockForIp` / `ClearBlocksForIp` + broadcast
+    SSE `blocchi-per-ip`.
+  - Logica blocco: `DominioBloccato(dominio, clientIP)` controlla
+    sia la blocklist globale sia `blocchiPerIp[clientIP]` (OR).
+  - API: `POST /api/block-per-ip {ip, dominio}`,
+    `POST /api/unblock-per-ip {ip, dominio}`,
+    `POST /api/clear-blocks-for-ip {ip}`.
+  - `ClearBlocklist` svuota anche tutti i blocchi per-IP per
+    coerenza con il bottone Reset.
+  - UI: sezione "Blocchi attivi" nel detail pane con bottone × per
+    rimuovere singoli; badge `⊘N` rosso accanto al nome (card) o
+    all'IP (riga lista) se l'IP ha blocchi per-IP attivi.
+
+- **Detail pane laterale destro** (`#detail-pane`, 280px):
+  - Click su una card o riga lista lo apre per quell'IP; click sulla
+    stessa card o sulla X chiude. Mutex con stream live (l'altro
+    pannello narrow): quando detail aperto, stream nascosto.
+  - Header: status dot + nome studente + IP mono + bottone X.
+  - Banner AI condizionale (rosso) con dominio AI rilevato + ts.
+  - Azioni rapide 2×2: Blocca schermo / Messaggia / Disconnetti
+    proxy / Blocca dominio (rosso, prompt() pre-popolato con
+    ultimo dominio AI dell'IP, blocco per-IP via `/api/block-per-ip`).
+  - Watchdog: lista plugin con label corte (USB / Processi / Network)
+    e messaggio "ok" specifico per stato verde, oppure dettaglio
+    evento warning/critical troncato.
+  - Domini recenti · N richieste: top 12 domini ordinati per ultima
+    attività; AI in rosso. Sessione: connesso / durata / ultima.
+
+- **Vista lista 8 colonne** (Status dot / Studente / IP / REQ /
+  Ultima / Domini recenti / Watchdog / Stato testuale): righe `idle`
+  in `text-3` con opacità ridotta, header sticky uppercase 10px.
+
+- **Bottone Reset** in toolbar accanto a Blocca tutto / Blocca AI:
+  svuota blocklist (globale + per-IP), disattiva pausa globale,
+  sblocca tutti gli schermi via Veyon (silenzioso, no confirm
+  secondari, una sola conferma utente all'inizio).
+
+- **Endpoint `/api/health`** non autenticato per `WaitForHTTP`
+  affidabile in fase di boot.
+
+- **Single-instance lock** via `planck.pid` accanto al binario:
+  killa l'istanza precedente al boot (con sleep 800ms per il
+  rilascio della porta TCP) — risolve "porta già in uso" al
+  secondo avvio se il processo precedente era rimasto orfano.
+
+- **Stream live header**: dot ok + label "Stream live" + rate
+  `~X.X/s` calcolato come `last60 / 60`.
+
+- **Hide scrollbars globali**: scroll resta funzionante (rotella,
+  trackpad) ma le barre laterali non sono più rese.
+
+- `internal/sysutil/`: `HideConsoleWindow` (CREATE_NO_WINDOW Windows,
+  no-op altri OS), `WaitForPort` (TCP), `WaitForHTTP` (GET reali
+  con timeout 300ms per chiamata).
+
+### Cambiato
+
+- **Sidebar destra full-height**: stream e detail pane sono ora
+  sibling diretti di `.sidebar` e `.main` dentro `.layout`. Si
+  estendono dalla topbar al fondo, fianco a fianco con tutte le
+  toolbar (che restano confinate in `.main`).
+
+- **Sidebar sinistra "Domini"** ridisegnata: chevron > cliccabile
+  + label uppercase + count `text-3` allineato a destra (niente più
+  parentesi). Sezioni AI / Siti / Sistema / Bloccati / Nascosti
+  sempre visibili (anche vuote). Solo "AI" ha label rosso (`var(--alert)`),
+  niente più sfondo tinted. Voci dominio mono 10.5px con padding
+  allineato sotto al chevron. I bottoni block/unblock sono icone
+  SVG che appaiono solo on hover (sempre visibili in alert sui
+  bloccati). `+`/`−` di Sistema/Nascosti rimossi (chevron unificato).
+
+- **Card studente**: badge `⊘N` accanto al nome quando l'IP ha
+  blocchi per-IP attivi; al click la card apre il detail pane
+  invece del solo focus-ip filter.
+
+- **Vista griglia/lista**: stato derivato uniforme
+  (active → idle → watchdog → ai → selected) sia nelle card sia
+  nelle righe della tabella, con `data-state` come fonte di verità.
+
+- **Pulsante Rec sessione**: stato visivo "recording" con classe
+  `.btn-primary.recording` (filled alert + alone box-shadow + dot
+  bianco con animazione `rec-pulse`), label cambia in "Sta
+  registrando", disabilitato durante la registrazione (no
+  double-start). Stop diventa enabled solo quando c'è una sessione
+  attiva. Timer `● rec HH:MM:SS` mono visibile solo in recording.
+
+- **Stop sessione**: confirm dialog arricchito con durata
+  (HH:MM:SS) e count eventi non-sistema, calcolati al volo.
+
+- **Archiviazione sessione**: ora avviene **solo** premendo Stop.
+  `SessionStart` su una sessione già attiva è un no-op (l'utente
+  vede un toast: "Premi Stop per archiviarla prima di avviarne
+  un'altra"). Era prima auto-archiviante in fase di Start, dietro
+  alle quinte.
+
+- **Detail pane Watchdog labels**: USB / Processi / Network (corte)
+  con `okDetail` specifico per ognuno (`nessun dispositivo`,
+  `nessun processo sospetto`, `instradato via proxy`).
+
+- **Stream live (panel destro)**: header design-aligned (dot ok +
+  label + rate auto-right), riga `.stream-row` grid 52px+1fr mono
+  10px, no border-bottom righe, AI con bg+color alert su tutta la
+  riga, no più nome studente / parentesi quadre / pill solo sul
+  dominio.
+
+- **Toggle Blocca AI**: ora legge lo stato dal DOM (`btn.classList`)
+  e fa feedback ottimistico immediato. `UnblockAllAI` lato server
+  fa doppio sweep — prima per stringa esatta da
+  `classify.AIDomains()`, poi per `Classifica()` su ogni dominio
+  bloccato — per catturare voci residue di vecchie liste AI.
+
+- **Net.Listen esplicito** + `http.Serve` in goroutine: il TCP è
+  in stato LISTEN al ritorno di `net.Listen`, le connessioni entrano
+  nella backlog del kernel anche prima che `Serve` chiami `Accept`.
+
+- **WaitForPort + WaitForHTTP** prima del browser launch:
+  - `127.0.0.1:9090` (proxy) — se il PC docente ha proxy_on attivo,
+    Edge passa per il proxy anche per localhost:9999.
+  - `/api/health` — verifica HTTP reale (non solo TCP listening).
+  - `time.Sleep(500ms)` aggiuntivo: Edge a freddo crea il profilo
+    `--user-data-dir` e può fare la prima GET prima di stabilire
+    la connessione.
+
+- **Browser launch**: cleanup dei lock files Chromium
+  (`SingletonLock`, `SingletonSocket`, `SingletonCookie`, `lockfile`)
+  prima di lanciare Edge per evitare l'attach a istanza fantasma.
+  Se `cmd.Wait()` ritorna in <2 secondi, Planck **non** si auto-spegne
+  (era attach a istanza esistente, non un vero exit utente).
+
+- **Icona dell'app** rifatta a partire dal brand-dot del logo:
+  quadrato nero pieno centrato (~62% del canvas) con angoli
+  arrotondati 2/10 del lato. Sostituisce la "P" su cerchio viola.
+  6 risoluzioni (16/32/48/64/128/256) embeddato via
+  `rsrc_windows_amd64.syso` + servito come `favicon.ico` per il
+  browser.
+
+### Risolto
+
+- **Render iniziale rotto** (sintomo: i dispositivi comparivano
+  solo dopo aver toggleato sidebar o cambiato tab). Causa: due
+  null reference in renderer chiamati durante `init()` →
+  `aggiornaSelectPresets` su `#preset-select` rimosso, e
+  `renderFocus` su `#panel-ip-titolo` rimosso, throw che
+  interrompeva `init()` prima di `avviaSSE()`. Fix: null guards
+  + try/catch isolato per **ogni** renderer in `_renderAllSync`
+  (logga `[planck] renderer crash: <name>` e prosegue).
+
+- **Toggle Blocca AI / Blocca tutto non funzionavano** (cambiavano
+  grafica ma non lo stato). Stessa causa del render iniziale: SSE
+  non veniva mai connesso perché `init()` crashava prima di
+  `avviaSSE()`. Risolto coi null guards di cui sopra.
+
+- **"Pagina non raggiungibile" al primo avvio** (sintomo: dovevi
+  chiudere e riaprire il binario). Causa: lock files Chromium
+  residui causavano `cmd.Wait()` di Edge a ritornare in
+  pochi millisecondi → vecchio comportamento `os.Exit(0)` →
+  Planck moriva prima che la pagina caricasse. Risolto con
+  cleanup lock files + soglia 2s che mantiene Planck attivo
+  invece di auto-spegnersi.
+
+- **`setStato` SSE crasha su `parentElement` di null** (cambiamento
+  delle stat card nel redesign): nuova logica che aggiorna la pill
+  `.stat-card.status .live-pill` (toggle dot.ok ↔ dot.alert + label
+  LIVE/OFF), null-guard se la card è assente in qualche layout.
+
+### Known issues / da fare
+
+- "OS / browser / MAC" nella sezione Sessione del detail pane sono
+  segnaposto `—`: Planck non raccoglie ancora User-Agent o ARP-MAC.
+- Bottone "Disconnetti proxy" del detail pane usa lo stesso endpoint
+  Veyon di "Remove proxy" filtrato a un IP — non ancora testato su
+  PC studente reale.
+
 ## [v2.8.0] — 2026-05-04
 
 UI redesign basato su un mockup di **Claude Designer** (claude.ai/design)

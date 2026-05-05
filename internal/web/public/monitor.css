@@ -352,7 +352,149 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 }
 .dominio-item.blocked-item:hover .btn-unblock { color: var(--alert); }
 
-/* BANNER AI */
+/* ============== BANNER UNIFICATO ALERT (AI + WD) ============== */
+/* Posizione: sotto la topbar, sopra .layout (toolbar). Stessa altezza
+   visiva ~38-50px. Non occupa mai piu' di 1 riga. */
+.banner {
+    display: flex; align-items: center; gap: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.banner.hidden { display: none; }
+.banner strong { font-weight: 600; white-space: nowrap; }
+.banner > span { white-space: nowrap; }
+.banner.alert-unified.ai {
+    background: var(--alert-bg);
+    color: var(--alert);
+    border-color: color-mix(in oklab, var(--alert) 30%, var(--border));
+}
+.banner.alert-unified.wd {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-color: color-mix(in oklab, var(--warn) 30%, var(--border));
+}
+.banner.alert-unified.slide {
+    color: #fff;
+    border-color: transparent;
+}
+.banner.alert-unified.slide.ai { background: var(--alert); }
+.banner.alert-unified.slide.wd { background: var(--warn); }
+.banner .pill {
+    background: var(--alert); color: #fff;
+    padding: 1px 5px; border-radius: var(--r-1);
+    font-size: 9.5px; font-weight: 600; letter-spacing: .04em;
+    line-height: 1.3;
+    flex-shrink: 0;
+}
+.banner .pill.warn { background: var(--warn); }
+.banner .pill.pulse { animation: planck-pulse 2.4s ease-in-out infinite; }
+.banner-spacer { flex: 1; }
+.banner-sample {
+    color: var(--text-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+}
+.banner.alert-unified.slide .banner-sample { color: rgba(255,255,255,.85); }
+.banner .banner-btn {
+    height: 22px; padding: 0 8px;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; color: inherit;
+    border: 1px solid currentColor;
+    border-radius: var(--r-2);
+    cursor: pointer;
+    font-family: inherit; font-size: 11px; font-weight: 500;
+    white-space: nowrap; flex-shrink: 0;
+    opacity: .85;
+}
+.banner .banner-btn:hover { opacity: 1; background: var(--hover); }
+.banner.alert-unified.slide .banner-btn {
+    border-color: rgba(255,255,255,.4);
+    background: rgba(255,255,255,.12);
+}
+.banner.alert-unified.slide .banner-btn:hover { background: rgba(255,255,255,.22); }
+.banner .x {
+    color: inherit; opacity: .6; cursor: pointer;
+    font-size: 14px; line-height: 1;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+.banner .x:hover { opacity: 1; }
+
+@keyframes planck-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .55; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .banner .pill.pulse { animation: none; }
+}
+
+/* Log-pane: stesso layout di .detail-pane (ereditato), variazioni minori. */
+.log-pane .log-filtri {
+    display: flex; gap: 4px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.log-pane .log-filtro-btn {
+    height: 22px; padding: 0 8px;
+    background: transparent; color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    cursor: pointer;
+    font-family: inherit; font-size: 10.5px; font-weight: 500;
+}
+.log-pane .log-filtro-btn:hover { background: var(--hover); }
+.log-pane .log-filtro-btn.attivo {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+.log-pane .log-filtro-btn.ai { color: var(--alert); }
+.log-pane .log-filtro-btn.wd { color: var(--warn); }
+.log-pane .log-evento {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: 6px 50px 1fr;
+    gap: 8px; align-items: baseline;
+}
+.log-pane .log-evento .dot { margin-top: 4px; }
+.log-pane .log-evento .log-ts {
+    font-size: 10px; font-family: var(--font-mono); color: var(--text-3);
+}
+.log-pane .log-evento-body { min-width: 0; }
+.log-pane .log-evento-head {
+    font-size: 11.5px; font-weight: 500;
+}
+.log-pane .log-tipo {
+    font-size: 9.5px; font-weight: 600; letter-spacing: .04em;
+    margin-right: 6px;
+}
+.log-pane .log-tipo.ai { color: var(--alert); }
+.log-pane .log-tipo.wd { color: var(--warn); }
+.log-pane .log-evento-detail {
+    font-size: 10.5px; color: var(--text-2); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.log-pane .log-evento-actions {
+    display: flex; gap: 4px; margin-top: 6px;
+}
+.log-pane .log-action-btn {
+    height: 20px; padding: 0 6px;
+    background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-1);
+    cursor: pointer;
+    font-family: inherit; font-size: 10px;
+    white-space: nowrap;
+}
+.log-pane .log-action-btn:hover { background: var(--surface-3); color: var(--text); }
+.log-pane .log-action-btn.danger { color: var(--alert); }
+.log-pane .log-action-btn.ghost { color: var(--text-3); }
+
+/* BANNER AI legacy (TEMPO SCADUTO) — overlay fixed, separato dal nuovo. */
 #ai-banner {
     display: none;
     position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
@@ -772,12 +914,14 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
     font-style: italic;
 }
 
-/* Azioni rapide: 4 bottoni 2x2 (Claude Designer) */
+/* Azioni rapide: griglia 2 colonne. Riga 1-2 = 4 bottoni Veyon (lock,
+   unlock, msg, disconnetti proxy). Riga 3 = "Blocca dominio" full-width. */
 .detail-actions {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 4px;
 }
 .detail-actions .btn { height: 26px; justify-content: center; font-size: 11px; }
+.detail-actions .detail-action-wide { grid-column: 1 / 3; }
 
 /* Badge "⊘N" per indicare blocchi per-IP attivi (card + lista) */
 .ip-card-blocks,
@@ -920,10 +1064,33 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 .ip-list-table tbody tr { cursor: pointer; transition: background .08s; }
 .ip-list-table tbody tr:hover { background: var(--hover); }
 .ip-list-table tbody tr.filtro-hidden { display: none; }
-.ip-list-table tbody tr.multi { background: var(--info-bg); }
+.ip-list-table tbody tr.multi {
+    background: var(--info-bg);
+    box-shadow: inset 2px 0 0 var(--info);
+}
+/* Riga "locked": tinta info-bg + icona lucchetto sostitutiva nello status dot */
+.ip-list-table tbody tr.locked {
+    background: var(--info-bg);
+}
+.ip-list-table tbody tr.locked .col-status .dot { display: none; }
+.ip-list-table tbody tr.locked .col-status::before {
+    content: "";
+    display: inline-block;
+    width: 10px; height: 12px;
+    background: currentColor;
+    color: var(--info);
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V7a4 4 0 0 1 8 0v4'/></svg>") no-repeat center / contain;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V7a4 4 0 0 1 8 0v4'/></svg>") no-repeat center / contain;
+}
+.ip-list-table tbody tr[data-state="selected"]:not(.multi) {
+    box-shadow: inset 2px 0 0 var(--info);
+}
 .ip-list-table tbody tr[data-state="idle"] { color: var(--text-3); opacity: .7; }
+.ip-list-table tbody tr[data-state="offline"] { color: var(--text-3); opacity: .5; }
 .ip-list-table tbody tr[data-state="idle"] .col-studente,
-.ip-list-table tbody tr[data-state="idle"] .col-ip { color: var(--text-3); }
+.ip-list-table tbody tr[data-state="idle"] .col-ip,
+.ip-list-table tbody tr[data-state="offline"] .col-studente,
+.ip-list-table tbody tr[data-state="offline"] .col-ip { color: var(--text-3); }
 
 /* Larghezze colonne */
 .ip-list-table .col-status   { width: 20px; padding-right: 0; }
@@ -960,6 +1127,7 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 .ip-list-table .col-stato { font-size: 11px; }
 .ip-list-table .col-stato.active   { color: var(--ok); }
 .ip-list-table .col-stato.idle     { color: var(--text-3); }
+.ip-list-table .col-stato.offline  { color: var(--text-3); }
 .ip-list-table .col-stato.ai       { color: var(--alert); }
 .ip-list-table .col-stato.watchdog { color: var(--warn); }
 .ip-list-table .col-stato.selected { color: var(--info); }
@@ -981,10 +1149,27 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 /* Stati card via data-state (border colorato + box-shadow inset). */
 .ip-card[data-state="active"]   { border-color: var(--border-strong); }
 .ip-card[data-state="idle"]     { opacity: .55; }
+.ip-card[data-state="offline"]  { opacity: .35; }
 .ip-card[data-state="ai"]       { border-color: var(--alert); box-shadow: 0 0 0 1px var(--alert) inset; }
 .ip-card[data-state="watchdog"] { border-color: var(--warn); }
 .ip-card[data-state="selected"] { border-color: var(--info); box-shadow: 0 0 0 1px var(--info) inset; }
 .ip-card.multi { outline: 1.5px solid var(--info); outline-offset: -1.5px; background: var(--info-bg); }
+
+/* Card "locked": overlay scuro semitrasparente con icona lucchetto centrata.
+   Indica che lo schermo dello studente e' bloccato via Veyon. Tracking
+   client-side (state.lockedIps) — settato/tolto dalle action veyonCard*Lock. */
+.ip-card-lock-overlay {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .55);
+    color: #fff;
+    border-radius: var(--r-2);
+    pointer-events: none; /* il click sulla card resta abilitato */
+}
+.ip-card.locked .ip-card-lock-overlay { display: flex; }
+/* Lock overlay sopra eventuale stato AI/WD: la card sotto resta disponibile
+   ma il lucchetto comunica subito il blocco schermo. */
 
 /* Status dot 6px FUORI dal bordo a sinistra (Claude Designer). */
 .ip-card .status {
@@ -993,6 +1178,8 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
     background: var(--muted);
 }
 .ip-card[data-state="active"]   .status { background: var(--ok); }
+.ip-card[data-state="idle"]     .status { background: var(--muted); }
+.ip-card[data-state="offline"]  .status { background: var(--muted); }
 .ip-card[data-state="ai"]       .status { background: var(--alert); }
 .ip-card[data-state="watchdog"] .status { background: var(--warn); }
 .ip-card[data-state="selected"] .status { background: var(--info); }
@@ -1254,25 +1441,56 @@ body.veyon-on .ip-card-veyon { display: flex; }
 /* Multi-select sulle card studente (Phase 4 polish).
    Ctrl/Shift+click toggle. Stato visivo: bordo accent doppio.
    La selection-bar appare sopra la griglia quando c'e' selezione. */
-.ip-card.selected, tr.selected {
-    outline: 2px solid var(--accent, #b77dd4);
-    outline-offset: -2px;
-}
+/* (regola legacy rimossa: la selezione singola card e' ora gestita da
+   .ip-card[data-state="selected"], la multi da .ip-card.multi. Le righe
+   lista usano data-state="selected" per single + tr.multi per range.) */
 
+/* Selection bar floating pill (Claude Designer): centrata orizzontalmente,
+   ancorata al bottom 24px del panel. .panel ha position: relative cosi'
+   l'absolute della bar si riferisce al pannello principale (grid IP). */
+.panel { position: relative; }
 .selection-bar {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 6px 10px;
-    margin-bottom: 6px;
-    background: rgba(183, 125, 212, 0.12);
-    border: 1px solid var(--accent, #b77dd4);
-    border-radius: 4px;
-    font-size: 0.9em;
+    position: absolute;
+    bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.08);
+    z-index: 10;
+    font-family: var(--font-ui);
+    white-space: nowrap;
+    max-width: calc(100% - 40px);
+    overflow-x: auto;
 }
 .selection-bar.hidden { display: none; }
-.selection-bar .selection-count { font-weight: 600; margin-right: auto; }
-.selection-bar .btn { padding: 2px 10px; font-size: 0.85em; }
+.sel-count {
+    padding: 0 10px 0 8px;
+    font-size: 11.5px; font-weight: 600; color: var(--text);
+    white-space: nowrap;
+}
+.sel-sep {
+    width: 1px; height: 18px; background: var(--border);
+    flex-shrink: 0;
+}
+.sel-btn {
+    height: 26px; padding: 0 10px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: transparent; color: var(--text);
+    border: 0; border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit; font-size: 11.5px; font-weight: 500;
+    white-space: nowrap;
+}
+.sel-btn:hover { background: var(--hover); }
+.sel-btn.danger { color: var(--alert); }
+.sel-btn.danger:hover { background: var(--alert-bg); }
+.sel-btn.ghost {
+    width: 26px; padding: 0; justify-content: center;
+    color: var(--text-3);
+    font-size: 14px;
+}
 
 /* Watchdog plugins (Phase 5) */
 .watchdog-plugin {
@@ -1304,20 +1522,8 @@ body.veyon-on .ip-card-veyon { display: flex; }
 }
 .watchdog-config-editor .toolbar-group { margin-top: 6px; }
 
-/* Pannello eventi watchdog sopra la griglia IP */
-.watchdog-events-panel {
-    background: rgba(245, 158, 11, 0.1);
-    border-left: 3px solid #f59e0b;
-    border-radius: 3px;
-    padding: 6px 10px;
-    margin-bottom: 6px;
-    font-size: 0.85em;
-}
-.watchdog-events-panel.hidden { display: none; }
-.watchdog-events-panel strong { display: block; margin-bottom: 4px; }
-.watchdog-event { padding: 1px 0; }
-.watchdog-event.watchdog-warning { color: #f59e0b; }
-.watchdog-event.watchdog-critical { color: #f87171; font-weight: 600; }
+/* Pannello eventi watchdog sopra la griglia IP — rimosso (ora gli eventi
+   watchdog appaiono nel banner alert in alto + nel log eventi a destra). */
 
 /* Badge ⚠️ N sulla card studente */
 .watchdog-event-badge {

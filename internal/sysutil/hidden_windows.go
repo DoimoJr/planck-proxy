@@ -28,3 +28,28 @@ func HideConsoleWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }
+
+// HideOwnConsole nasconde la finestra console allocata al PROPRIO
+// processo. Usato quando il binario e' compilato col subsystem console
+// (default Go) ma vogliamo comportamento "GUI app" senza il flag
+// -H=windowsgui che triggera Windows Defender (pattern malware).
+//
+// Trade-off: la finestra cmd viene allocata da Windows al lancio e poi
+// nascosta entro pochi ms — l'utente puo' vedere un flash breve, ma il
+// PE header resta "console subsystem" → niente piu' false positive AV.
+//
+// No-op se il processo non ha una console attached (es. lanciato da
+// servizio).
+func HideOwnConsole() {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	getConsoleWindow := kernel32.NewProc("GetConsoleWindow")
+	showWindow := user32.NewProc("ShowWindow")
+
+	hwnd, _, _ := getConsoleWindow.Call()
+	if hwnd == 0 {
+		return // nessuna console (es. servizio Windows)
+	}
+	const SW_HIDE = 0
+	_, _, _ = showWindow.Call(hwnd, SW_HIDE)
+}

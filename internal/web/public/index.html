@@ -46,6 +46,9 @@
 
     <!-- ====================== TAB LIVE ====================== -->
     <div id="tab-live" class="tab-panel active">
+        <!-- Banner alert unificato AI + Watchdog: visibile solo quando ci sono
+             eventi attivi (state.bannerDismissed=false e total > 0). -->
+        <div id="alert-banner" class="banner alert-unified hidden"></div>
         <div class="layout">
             <!-- SIDEBAR -->
             <div class="sidebar" id="sidebar-domini">
@@ -130,6 +133,9 @@
                     </button>
                     <div class="toolbar-right">
                         <span id="rec-timer" class="rec-timer hidden">&#x25CF; rec 00:00:00</span>
+                        <button data-action="log-toggle" id="btn-toggle-log" class="btn" title="Mostra/nascondi log eventi">
+                            LOG
+                        </button>
                         <input id="filtro-toolbar" class="search-input" type="text" placeholder="Studente o IP..." data-action="filtro">
                         <button data-action="toggle-stream" id="btn-toggle-stream" class="btn btn-icon" title="Mostra/nascondi stream live" aria-label="Stream">
                             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -220,8 +226,6 @@
                     <div class="panel">
                         <!-- Selection bar: appare solo quando selectedIps.size > 0. -->
                         <div id="selection-bar" class="selection-bar hidden"></div>
-                        <!-- Pannello eventi watchdog: appare solo se ci sono eventi recenti. -->
-                        <div id="watchdog-events-panel" class="watchdog-events-panel hidden"></div>
                         <!-- Grid IP: niente header, niente wrapper card (Claude Designer). -->
                         <div class="card-scroll" id="ip-container"></div>
                     </div>
@@ -240,6 +244,8 @@
                 </div>
             </div>
             <div class="detail-pane hidden" id="detail-pane"></div>
+            <!-- Log eventi pane (Claude Designer): mutex con stream/detail. -->
+            <div class="detail-pane log-pane hidden" id="log-pane"></div>
         </div>
     </div>
 
@@ -324,6 +330,12 @@
                             <span class="notif-on">🔔 Attive</span>
                             <span class="notif-off">🔕 Disattivate</span>
                         </button>
+                    </div>
+
+                    <label>Solo PC con Veyon</label>
+                    <div>
+                        <input type="checkbox" data-action="settings-field" data-key="discoverVeyonOnly" id="cb-discover-veyon">
+                        <label for="cb-discover-veyon" class="hint-inline">Mostra in grid solo i PC che hanno il servizio Veyon attivo (porta 11100). Disattiva per vedere tutti i Windows in LAN.</label>
                     </div>
                 </div>
 

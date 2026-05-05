@@ -5,6 +5,196 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.5] — 2026-05-05
+
+Iterazione di polish su v2.9.0 dopo testing reale su VM. Focus: multi-
+selezione completa, banner alert unificato + log eventi, scan subnet
+adattivo, stati card a 3 step, fix Defender false positive.
+
+### Aggiunto
+
+- **Multi-selezione completa** secondo design Claude:
+  - Cmd/Ctrl+click toggla l'IP nella selezione; se c'era un detail
+    aperto, il suo IP viene incorporato nella selezione (non perso).
+  - Shift+click range da anchor a IP; se c'era detail aperto, il suo
+    IP entra nel range. Detail/focus chiusi in entrambi i casi.
+  - Plain click toggla detail pane, azzera selezione multi.
+  - Anchor aggiornato sempre all'IP cliccato.
+  - Floating selection bar pillola: centrata bottom 24px, pillola
+    `radius: 999px` con shadow soft, contenuto `N selezionati · sep ·
+    bottoni azione (Blocca schermo / Sblocca / Messaggia / Proxy on /
+    Proxy off / Blocca dominio) · sep · ×`. Le azioni agiscono SOLO
+    sul subset selezionato (gli endpoint Veyon usano `targetIps()`).
+    Card multi: outline `info` + bg `info-bg`. Riga lista multi: bg
+    `info-bg` + border-left `info`.
+
+- **Banner alert unificato AI + Watchdog** (sotto topbar, sopra layout):
+  - Visibile solo se `total > 0 && !dismissed`. Auto-reset al cambio
+    di event-key (nuovo evento riapre il banner se l'utente l'aveva
+    chiuso).
+  - Pill `AI` rosso e/o `WD` giallo (animation `planck-pulse 2.4s` se
+    kind=`pulse`, default).
+  - Headline `N event* · M AI · K watchdog` + sample text con ellipsis.
+  - Bottone "Apri log" + ✕ dismiss.
+  - 3 varianti `bannerKind`: `pulse` (default tinted+animato), `sticky`
+    (tinted no-animation), `slide` (filled solid).
+  - `prefers-reduced-motion: reduce` disabilita animation.
+
+- **Log eventi pane** (pannello laterale destro, mutex con stream/detail):
+  - Header: icona log + "Log eventi" + count totali + ✕.
+  - Filtri rapidi: Tutti · N / AI · N (rosso) / WD · N (giallo).
+  - Feed cronologico inverso: dot color + ts mono + (pill tipo + nome) +
+    dettaglio + 3 azioni mini (Apri studente / Blocca dominio AI /
+    Ignora).
+  - "Ignora" aggiunge id evento a `state.eventiIgnoredIds`, sparisce
+    dal feed e dal banner.
+  - Bottone toggle `LOG` nella toolbar primaria (testuale, non icona)
+    a sinistra del search input — sempre disponibile anche senza
+    eventi attivi. `.btn.attivo` (verde) quando il pannello e' aperto.
+
+- **Subnet-aware LAN scan**: `discover.LocalSubnet(lanIP)` legge la
+  mask reale dell'interfaccia di rete del docente. Lo scan adatta
+  automaticamente al /24, /23, /22, ecc. Subnet > /22 (>1024 host)
+  ricadono su /24 implicito attorno a lanIP per evitare scan massivi.
+  Worker pool a 128 connect concorrenti. Risolve il problema "a casa
+  i PC sono .78-.80 invece di .1-.30".
+
+- **Toggle "Solo PC con Veyon"** in Impostazioni → Generale:
+  - Setting persistito (`discoverVeyonOnly`, default `true`).
+  - Quando attivo, lo scan considera vivi SOLO i PC con :11100 aperto
+    (Veyon Service installato). Esclude router/NAS/altri Windows.
+  - Default OFF probe `:11100, :445, :135` per setup nuovi.
+  - Override env `PLANCK_DISCOVER_VEYON_ONLY=0/1` al boot.
+
+- **Bottone "Sblocca schermo"** nel detail pane azioni rapide (era
+  raggiungibile solo dalla multi-selezione). Layout 5 bottoni: 2x2
+  `(Blocca schermo, Sblocca schermo, Messaggia, Disconnetti proxy)`
+  + riga "Blocca dominio" (rosso) full-width.
+
+- **Stato "screen locked" della card**: tracking client-side via
+  `state.lockedIps`. Quando l'utente blocca lo schermo via Veyon
+  da Planck, la card mostra un overlay scuro semitrasparente (.55
+  alpha) con icona lucchetto centrata. Sblocco → overlay sparisce.
+  Vista lista: riga con bg `info-bg` + lucchetto blu nella colonna
+  status. Reset toolbar pulisce anche `lockedIps`.
+
+- **ESC chain esteso**: priorita' `multi-sel > detail pane > log
+  pane > focus IP > sidebar dx > sidebar sx`. Premendo ESC
+  ripetutamente smonta tutto step-by-step.
+
+- **Single-instance lock** via `planck.pid` accanto al binario:
+  killa l'istanza precedente al boot (con sleep 800ms per il
+  rilascio della porta TCP).
+
+### Cambiato
+
+- **Build flag**: rimosso `-H=windowsgui` (subsystem GUI) — era il
+  trigger principale di SmartScreen/Defender false positive ("App
+  non riconosciuta" + bloccata). Tornato a console subsystem normale
+  (come v2.6.x). La finestra cmd viene nascosta a runtime via
+  `sysutil.HideOwnConsole()` (`ShowWindow(GetConsoleWindow(), SW_HIDE)`):
+  flash brevissimo al boot ma niente piu' avviso anti-virus. Effetto
+  collaterale: anche i `.vbs` distribuiti via Veyon FileTransfer non
+  vengono piu' flaggati (Defender non li associa piu' a un processo
+  master sospetto).
+
+- **Stati card a 3 step** con cutoff temporali separati:
+  - `offline` (grigio scuro, opacity .35): nessun ping watchdog da
+    > 60s (proxy non attivo).
+  - `idle` (grigio chiaro, opacity .55): ping ok ma traffico utente
+    assente da > 3 min (incluso "mai navigato dopo Send proxy").
+  - `active` (verde, piena): ping ok + traffico recente.
+  - Override semantici: `watchdog` (arancio) entro 5 min dall'ultimo
+    evento warn/critical, `ai` (rosso) entro 10 min dall'ultima
+    richiesta AI, `selected` (blu) detail aperto.
+  - Risolve "card resta colorata anche dopo riavvio Planck" e
+    "non distinguibile online ma non naviga vs online attivo".
+
+- **Detail pane flicker fix**: ora salta il rebuild di `innerHTML`
+  se la "content key" (ip + stato + count entries + count blocchi
+  + count plugin) e' invariata. Senza, ogni renderAll (ad ogni
+  evento SSE + setInterval 5s) distruggeva e ricostruiva il DOM
+  dei bottoni → click "perso" → flicker. Stesso fix su `renderLogPanel`.
+
+- **Card studente click sui chip dominio**: rimosso `data-action="blocca"`
+  dai chip → cliccare ovunque sulla card apre il detail pane (prima
+  cliccare un chip bloccava il dominio globalmente). Per bloccare
+  un dominio: bottone "Blocca dominio" del detail pane (per-IP) o
+  sidebar sx Domini.
+
+- **Watchdog events panel** (la striscia gialla sopra la grid IP)
+  rimosso: era ridondante col banner alert + log eventi.
+
+- **`UnblockAllAI`** doppio sweep: prima rimuove le stringhe esatte
+  da `classify.AIDomains()`, poi rimuove qualsiasi dominio nel set
+  bloccati che `Classifica()` riconosce come `TipoAI` (cattura voci
+  residue di vecchie liste AI dopo refresh remote).
+
+- **`SessionStart` no-op se gia' attiva**: archivio solo on-Stop.
+  Toast info "Premi Stop per archiviarla" se l'utente clicca Rec
+  con sessione gia' attiva.
+
+- **`SessionStop` confirm** arricchito con durata HH:MM:SS + count
+  eventi non-sistema calcolati al volo dal client.
+
+- **Bottone Rec sessione** stato visivo "recording": classe
+  `.btn-primary.recording` (filled alert + alone box-shadow + dot
+  bianco con animazione `rec-pulse`), label "Sta registrando",
+  disabilitato durante registrazione (no double-start).
+
+- **Icona dell'app** rifatta dal brand-dot del logo (quadrato nero
+  arrotondato, sostituisce la "P" su cerchio viola). 6 risoluzioni
+  embeddate via `rsrc_windows_amd64.syso` + servito come
+  `favicon.ico` per il browser.
+
+### Risolto
+
+- **Render iniziale rotto** (sintomo: i dispositivi comparivano solo
+  dopo aver toggleato sidebar o cambiato tab). Causa: due null
+  reference in renderer chiamati durante `init()`
+  (`aggiornaSelectPresets` su `#preset-select`, `renderFocus` su
+  `#panel-ip-titolo` rimossi nel redesign). Throw che interrompeva
+  `init()` prima di `avviaSSE()` → SSE mai connesso → toggle non
+  riflettevano lo stato reale. Fix: null guards + try/catch isolato
+  per ogni renderer in `_renderAllSync` (logga `[planck] renderer
+  crash: <name>` e prosegue).
+
+- **`renderCountdown` riga 370 NPE**: countdown rimosso dalla topbar
+  ma il renderer non aveva null guard; crashava bloccando la cascata.
+
+- **`setStato` SSE crasha su `parentElement` di null**: nuova logica
+  che aggiorna la pill `.stat-card.status .live-pill` (toggle
+  `dot.ok ↔ dot.alert` + label LIVE/OFF), null-guard se la card e'
+  assente in qualche layout.
+
+- **"Pagina non raggiungibile" al primo avvio**: Edge si attaccava
+  a istanza fantasma (lock files Chromium residui) → `cmd.Wait()`
+  ritornava in 13ms → Planck `os.Exit(0)`. Fix: cleanup di
+  `SingletonLock`, `SingletonSocket`, `SingletonCookie`, `lockfile`
+  prima di lanciare Edge + soglia 2s che mantiene Planck attivo se
+  l'attach e' prematuro.
+
+- **Toggle "Blocca AI" non aggiornava lo stato del proxy** sebbene
+  cambiasse grafica: stessa causa del render iniziale (SSE non
+  connesso a causa del crash in init). Risolto coi null guards.
+
+- **Defender flagga il binario .exe** (false positive tipo
+  "Trojan:Win32/Wacatac"): risolto rimuovendo `-H=windowsgui`.
+  Pattern PE "console subsystem unsigned" non e' piu' suspicious.
+
+- **Bottoni del detail pane non cliccabili** per flicker: il
+  rebuild di innerHTML ad ogni renderAll distruggeva il bottone
+  durante il click. Risolto con content-key skip.
+
+### Known issues / da fare
+
+- "OS / browser / MAC" nella sezione Sessione del detail pane sono
+  segnaposto `—`: Planck non raccoglie ancora User-Agent o ARP-MAC.
+- Stato "screen locked" e' tracciato client-side: se l'utente blocca
+  da un altro Veyon Master (non Planck), Planck non lo sa.
+- Bottone "Disconnetti proxy" del detail pane filtrato a singolo IP
+  — non ancora testato su PC studente reale.
+
 ## [v2.9.0] — 2026-05-05
 
 Iterazione successiva al redesign v2.8.0: chiusura del lavoro su detail

@@ -685,6 +685,13 @@ func (s *State) UpdateSettings(updates map[string]any) (updated, rejected, richi
 			} else {
 				rejected = append(rejected, key)
 			}
+		case "discoverVeyonOnly":
+			if v, ok := val.(bool); ok {
+				s.discoverVeyonOnly = v
+				updated = append(updated, key)
+			} else {
+				rejected = append(rejected, key)
+			}
 		case "web.auth.user":
 			if v, ok := val.(string); ok && len(v) > 0 && len(v) < 100 {
 				s.authUser = v

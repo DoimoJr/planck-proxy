@@ -540,9 +540,9 @@ function syncTagsDominio(container, domini, extra) {
         ([d]) => d,
         ([d]) => {
             const span = document.createElement('span');
-            span.dataset.action = 'blocca';
-            span.dataset.dominio = d;
-            span.title = 'Click per bloccare';
+            // Niente data-action: i chip sono puramente decorativi.
+            // Click sulla card (incluso sui chip) apre il detail pane via
+            // bubbling al data-action="focus-ip" del parent.
             span.textContent = d;
             return span;
         },
@@ -578,6 +578,88 @@ function syncTagsDominio(container, domini, extra) {
 /** Numero massimo di chip dominio mostrati nella riga lista (overflow → +N). */
 const DOMINI_LISTA_MAX = 4;
 
+/**
+ * Cutoff temporali per gli stati visivi delle card e del detail pane.
+ * Coerenti con quelli del banner alert: una card resta colorata solo
+ * finche' l'evento e' "recente". Senza, eventi vecchi resterebbero
+ * visualmente "appiccicati" alle card per tutta la sessione (e anche
+ * dopo riavvio di Planck, perche' /api/watchdog/events ritorna fino a
+ * 200 eventi storici dal DB).
+ */
+const ALERT_AI_CUTOFF_MS = 10 * 60 * 1000; // 10 min
+const ALERT_WD_CUTOFF_MS = 5 * 60 * 1000;  // 5 min
+
+/**
+ * Cutoff a 3 step per lo stato base della card.
+ *
+ * Logica:
+ *   ping watchdog assente da > OFFLINE_PING_MS  →  offline (proxy non attivo)
+ *   ping ok + traffico assente da > IDLE_TRAFFIC_MS →  idle (online ma non naviga)
+ *   ping ok + traffico recente                  →  active (sta navigando)
+ *
+ * "Mai navigato" rientra in idle: la card e' grigio chiaro (proxy ok)
+ * fino al primo traffico utente.
+ *
+ * Il watchdog VBS pinga ogni 5s; 60s di silenzio = 12 ping persi =
+ * proxy quasi certamente spento.
+ */
+const OFFLINE_PING_MS = 60 * 1000;        // 60s
+const IDLE_TRAFFIC_MS = 3 * 60 * 1000;    // 3 min
+
+/** Ritorna true se l'IP ha una entry AI nelle ultime ALERT_AI_CUTOFF_MS. */
+function hasAIRecente(ip, ora) {
+    const cutoff = ora - ALERT_AI_CUTOFF_MS;
+    const lista = state.perIp.get(ip) || [];
+    for (let i = lista.length - 1; i >= 0; i--) {
+        const e = lista[i];
+        if (e.tipo !== 'ai') continue;
+        const ts = e.ts || (e.ora ? Date.parse(e.ora.replace(' ', 'T') + 'Z') : 0);
+        if (ts >= cutoff) return true;
+        if (ts && ts < cutoff) return false; // sorted, possiamo uscire
+    }
+    return false;
+}
+
+/** Ritorna true se l'IP ha un evento watchdog warning/critical nelle ultime ALERT_WD_CUTOFF_MS. */
+function hasWDRecente(ip, ora) {
+    const cutoff = ora - ALERT_WD_CUTOFF_MS;
+    const evts = state.watchdogEventsPerIp.get(ip) || [];
+    for (let i = evts.length - 1; i >= 0; i--) {
+        const ev = evts[i];
+        if (ev.severity !== 'warning' && ev.severity !== 'critical') continue;
+        if ((ev.ts || 0) >= cutoff) return true;
+    }
+    return false;
+}
+
+/**
+ * Ritorna {aliveAgo, trafficoAgo} in ms per l'IP:
+ *   aliveAgo: tempo dal ping watchdog piu' recente (Infinity se mai pingato)
+ *   trafficoAgo: tempo dall'ultima entry traffico (Infinity se mai navigato)
+ *
+ * I due valori vengono usati separatamente per derivare offline/idle/active.
+ */
+function ipSignals(ip, ora) {
+    const aliveTs = state.aliveMap.get(ip) || 0;
+    const aliveAgo = aliveTs > 0 ? (ora - aliveTs) : Infinity;
+    const lista = state.perIp.get(ip) || [];
+    let trafficoAgo = Infinity;
+    if (lista.length > 0) {
+        const last = lista[lista.length - 1];
+        const ts = last.ts || (last.ora ? Date.parse(last.ora.replace(' ', 'T') + 'Z') : 0);
+        if (ts) trafficoAgo = ora - ts;
+    }
+    return { aliveAgo, trafficoAgo };
+}
+
+/** Calcola lo stato base (offline/idle/active) dall'IP. */
+function statoBase(ip, ora) {
+    const { aliveAgo, trafficoAgo } = ipSignals(ip, ora);
+    if (aliveAgo > OFFLINE_PING_MS) return 'offline';
+    if (trafficoAgo > IDLE_TRAFFIC_MS) return 'idle';
+    return 'active';
+}
+
 function renderListaIp(container, ips, ora, soglia) {
     const body = scheletroVistaIp(container, 'lista');
     syncChildren(body, ips,
@@ -598,14 +680,11 @@ function renderListaIp(container, ips, ora, soglia) {
         },
         (tr, ip) => {
             const s = calcolaStatoIp(ip, ora, soglia);
-            const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
-            const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
-            const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
+            const hasAI = hasAIRecente(ip, ora);
+            const hasWD = hasWDRecente(ip, ora);
 
-            // Stato uniforme alle card (Claude Designer):
-            // active(default) → idle se inattivo → watchdog → ai → selected
-            let stato = 'active';
-            if (s.inattivo) stato = 'idle';
+            // Stato uniforme alle card: offline > idle > active > watchdog > ai > selected
+            let stato = statoBase(ip, ora);
             if (hasWD) stato = 'watchdog';
             if (hasAI) stato = 'ai';
             if (state.focusIp === ip) stato = 'selected';
@@ -613,6 +692,7 @@ function renderListaIp(container, ips, ora, soglia) {
 
             const rowClass = [];
             if (state.selectedIps.has(ip)) rowClass.push('multi');
+            if (state.lockedIps.has(ip)) rowClass.push('locked');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
             const nuova = rowClass.join(' ');
             if (tr.className !== nuova) tr.className = nuova;
@@ -624,6 +704,7 @@ function renderListaIp(container, ips, ora, soglia) {
             const dotClass = ({
                 active: 'dot ok',
                 idle: 'dot muted',
+                offline: 'dot muted',
                 ai: 'dot alert',
                 watchdog: 'dot warn',
                 selected: 'dot info',
@@ -669,10 +750,11 @@ function renderListaIp(container, ips, ora, soglia) {
             if (wdDot.className !== wdClass) wdDot.className = wdClass;
             if (wdDot.title !== s.wd.titolo) wdDot.title = s.wd.titolo;
 
-            // Col 7: stato testuale (attivo/idle/ai/watchdog).
+            // Col 7: stato testuale (attivo/idle/offline/ai/watchdog).
             const statoTxt = ({
                 active: 'attivo',
                 idle: 'idle',
+                offline: 'offline',
                 ai: 'ai',
                 watchdog: 'watchdog',
                 selected: 'attivo',
@@ -755,6 +837,12 @@ function renderGrigliaIp(container, ips, ora, soglia) {
                 + '<span class="watchdog-dot"></span>'
                 + '<span class="wd-label">watchdog</span>'
                 + '<span class="wd-octet"></span>'
+                + '</div>'
+                + '<div class="ip-card-lock-overlay" aria-hidden="true">'
+                + '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="5" y="11" width="14" height="10" rx="2"/>'
+                + '<path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+                + '</svg>'
                 + '</div>';
             return card;
         },
@@ -762,16 +850,14 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const s = calcolaStatoIp(ip, ora, soglia);
 
             // Stato derivato (Claude Designer):
-            //   - ai: l'IP ha aperto un dominio AI (border + box-shadow rosso)
-            //   - watchdog: ci sono eventi watchdog warning/critical recenti
-            //   - selected: detail pane aperto su questo IP
-            //   - active: ha avuto traffico recente
-            //   - idle: opacity .55
-            const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
-            const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
-            const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
-            let stato = 'active';
-            if (s.inattivo) stato = 'idle';
+            //   - offline: PC discoverato dallo scan LAN ma niente proxy
+            //              (nessun traffico, nessun ping watchdog) → grigio
+            //   - idle:    ha avuto traffico/ping ma e' inattivo da >soglia
+            //   - active:  traffico/ping recente attraverso il proxy → verde
+            //   - watchdog/ai/selected: come prima
+            const hasAI = hasAIRecente(ip, ora);
+            const hasWD = hasWDRecente(ip, ora);
+            let stato = statoBase(ip, ora);
             if (hasWD) stato = 'watchdog';
             if (hasAI) stato = 'ai';
             if (state.focusIp === ip) stato = 'selected';
@@ -779,6 +865,7 @@ function renderGrigliaIp(container, ips, ora, soglia) {
 
             const classi = ['ip-card'];
             if (state.selectedIps.has(ip)) classi.push('multi');
+            if (state.lockedIps.has(ip)) classi.push('locked');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
             const nuova = classi.join(' ');
             if (card.className !== nuova) card.className = nuova;
@@ -1302,6 +1389,204 @@ export function renderWatchdogPluginsList() {
  * eventi con severity warning/critical degli ultimi 5 minuti, con tag
  * per IP/plugin. Nascosto se non ci sono eventi rilevanti.
  */
+/**
+ * Aggrega gli eventi attivi (AI + Watchdog) per banner e log.
+ * Ritorna { eventi, aiCount, wdCount, total, lastTs }.
+ *
+ * AI: per ogni IP che ha generato traffico tipo='ai' negli ultimi 10 min,
+ *     una entry con l'ULTIMA richiesta AI di quell'IP.
+ * WD: ultimi N eventi watchdog warning/critical (5 min cutoff).
+ *
+ * Eventi marcati come "ignorati" da `state.eventiIgnoredIds` vengono
+ * filtrati e non contano per banner ne' log feed.
+ */
+function aggregaEventiAlert() {
+    const cutoff = Date.now() - 10 * 60 * 1000; // 10 min
+    const aiByIp = new Map(); // ip -> ultima entry AI
+    for (const e of state.entries) {
+        if (e.tipo !== 'ai') continue;
+        const ts = e.ts || (e.ora ? Date.parse(e.ora.replace(' ', 'T') + 'Z') : 0);
+        if (ts && ts < cutoff) continue;
+        const prev = aiByIp.get(e.ip);
+        if (!prev || (prev.ts || 0) < ts) {
+            aiByIp.set(e.ip, { ...e, ts });
+        }
+    }
+    const eventi = [];
+    for (const [ip, e] of aiByIp.entries()) {
+        const id = 'ai:' + ip + ':' + e.dominio;
+        if (state.eventiIgnoredIds.has(id)) continue;
+        eventi.push({
+            id, type: 'ai', ip, ts: e.ts || 0,
+            who: nomeStudente(ip) || ip,
+            what: e.dominio,
+            detail: 'richiesta AI rilevata',
+        });
+    }
+    const wdCutoff = Date.now() - 5 * 60 * 1000;
+    for (const ev of state.watchdogEvents || []) {
+        if (ev.severity !== 'warning' && ev.severity !== 'critical') continue;
+        if (ev.ts < wdCutoff) continue;
+        const id = 'wd:' + ev.ip + ':' + ev.plugin + ':' + ev.ts;
+        if (state.eventiIgnoredIds.has(id)) continue;
+        const fmt = ev.format || (ev.plugin + ' ' + JSON.stringify(ev.payload || {}));
+        eventi.push({
+            id, type: 'wd', ip: ev.ip, ts: ev.ts,
+            who: ev.nomeStudente || nomeStudente(ev.ip) || ev.ip,
+            what: fmt.length > 50 ? fmt.slice(0, 47) + '…' : fmt,
+            detail: ev.plugin || '',
+            plugin: ev.plugin,
+        });
+    }
+    eventi.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const aiIps = new Set(eventi.filter(x => x.type === 'ai').map(x => x.ip));
+    const wdIps = new Set(eventi.filter(x => x.type === 'wd').map(x => x.ip));
+    return {
+        eventi,
+        aiCount: aiIps.size,
+        wdCount: wdIps.size,
+        total: aiIps.size + wdIps.size,
+        lastTs: eventi.length > 0 ? eventi[0].ts : 0,
+    };
+}
+
+/** Banner alert unificato (sotto topbar). Visibile se total > 0 e !dismissed. */
+export function renderAlertBanner() {
+    const el = $('alert-banner');
+    if (!el) return;
+    const agg = aggregaEventiAlert();
+
+    // Auto-reset dismissed quando arriva un nuovo evento (key cambia).
+    const key = `${agg.aiCount}-${agg.wdCount}-${agg.lastTs}`;
+    if (key !== state.bannerLastEventKey) {
+        state.bannerLastEventKey = key;
+        if (agg.total > 0) state.bannerDismissed = false;
+    }
+
+    if (agg.total === 0 || state.bannerDismissed) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    el.classList.remove('hidden');
+
+    const dominant = agg.aiCount >= agg.wdCount ? 'ai' : 'wd';
+    const kind = state.bannerKind || 'pulse';
+    el.className = `banner alert-unified ${dominant} ${kind}`;
+
+    const parts = [];
+    if (agg.aiCount > 0) parts.push(`${agg.aiCount} AI`);
+    if (agg.wdCount > 0) parts.push(`${agg.wdCount} watchdog`);
+    const headline = `${agg.total} event${agg.total === 1 ? 'o' : 'i'} · ${parts.join(' · ')}`;
+
+    const sample0 = agg.eventi[0];
+    const sampleTxt = sample0
+        ? `· ${escapeHtml(sample0.who)} → ${escapeHtml(sample0.what)}`
+        : '';
+
+    const pulseCls = (kind === 'pulse') ? 'pulse' : '';
+    const pillAi = agg.aiCount > 0 ? `<span class="pill ${pulseCls}">AI</span>` : '';
+    const pillWd = agg.wdCount > 0 ? `<span class="pill warn ${pulseCls}">WD</span>` : '';
+
+    const slideIcon = (kind === 'slide')
+        ? '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 1.5L13 12H1L7 1.5z"/><path d="M7 6v3M7 10.5v.01"/></svg>'
+        : '';
+
+    el.innerHTML = `
+        ${slideIcon}
+        ${pillAi}${pillWd}
+        <strong>${escapeHtml(headline)}</strong>
+        <span class="banner-sample">${sampleTxt}</span>
+        <span class="banner-spacer"></span>
+        <button class="banner-btn" data-action="log-open" title="Apri log eventi">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 2h8v8H2z"/><path d="M4 4.5h4M4 6h4M4 7.5h2.5"/></svg>
+            Apri log
+        </button>
+        <span class="x" data-action="banner-dismiss" title="Chiudi banner">&times;</span>
+    `;
+}
+
+/** Pannello Log eventi (mutex con stream/detail). */
+export function renderLogPanel() {
+    const pane = document.getElementById('log-pane');
+    if (!pane) return;
+    const stream = document.getElementById('panel-richieste');
+    const detail = document.getElementById('detail-pane');
+    const btnToggle = document.getElementById('btn-toggle-log');
+
+    if (!state.logPanelOpen) {
+        pane.classList.add('hidden');
+        if (pane.dataset.lastKey) {
+            pane.innerHTML = '';
+            delete pane.dataset.lastKey;
+        }
+        if (stream && !state.detailIp) stream.classList.remove('hidden-by-detail');
+        if (btnToggle) btnToggle.classList.remove('attivo');
+        return;
+    }
+    pane.classList.remove('hidden');
+    if (stream) stream.classList.add('hidden-by-detail');
+    if (detail) detail.classList.add('hidden'); // detail mutex con log
+    if (btnToggle) btnToggle.classList.add('attivo');
+
+    const agg = aggregaEventiAlert();
+    const filtro = state.logFilter || 'all';
+
+    // Skip rebuild se filtri/eventi non cambiati (no flicker click).
+    const eventiKey = agg.eventi.map(e => e.id).join(',');
+    const key = filtro + '|' + eventiKey + '|' + state.eventiIgnoredIds.size;
+    if (pane.dataset.lastKey === key) return;
+    pane.dataset.lastKey = key;
+    const eventiFiltrati = agg.eventi.filter(e => {
+        if (filtro === 'all') return true;
+        return e.type === filtro;
+    });
+
+    const fmtTs = (ts) => ts ? new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+
+    pane.innerHTML = `
+        <div class="detail-head">
+            <div class="detail-title">
+                <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 2h8v8H2z"/><path d="M4 4.5h4M4 6h4M4 7.5h2.5"/></svg>
+                <div class="detail-title-text">
+                    <div class="detail-nome">Log eventi</div>
+                    <div class="detail-ip">${agg.eventi.length} totali</div>
+                </div>
+            </div>
+            <button class="detail-x" data-action="log-close" title="Chiudi">&times;</button>
+        </div>
+        <div class="log-filtri">
+            <button class="log-filtro-btn ${filtro === 'all' ? 'attivo' : ''}" data-action="log-filter" data-filter="all">Tutti · ${agg.eventi.length}</button>
+            <button class="log-filtro-btn ai ${filtro === 'ai' ? 'attivo' : ''}" data-action="log-filter" data-filter="ai">AI · ${agg.aiCount}</button>
+            <button class="log-filtro-btn wd ${filtro === 'wd' ? 'attivo' : ''}" data-action="log-filter" data-filter="wd">WD · ${agg.wdCount}</button>
+        </div>
+        <div class="detail-body">
+            ${eventiFiltrati.length === 0 ? '<div class="detail-empty" style="padding: 20px; text-align: center;">Nessun evento.</div>' :
+                eventiFiltrati.map(ev => {
+                    const dotCls = ev.type === 'ai' ? 'alert' : 'warn';
+                    const tipoLabel = ev.type === 'ai' ? 'AI' : 'WD';
+                    return `
+                        <div class="log-evento">
+                            <span class="dot ${dotCls}"></span>
+                            <span class="log-ts">${escapeHtml(fmtTs(ev.ts))}</span>
+                            <div class="log-evento-body">
+                                <div class="log-evento-head">
+                                    <span class="log-tipo ${ev.type}">${tipoLabel}</span>${escapeHtml(ev.who)}
+                                </div>
+                                <div class="log-evento-detail">${escapeHtml(ev.what)} &middot; ${escapeHtml(ev.detail)}</div>
+                                <div class="log-evento-actions">
+                                    <button class="log-action-btn" data-action="evento-apri-studente" data-ip="${attrEscape(ev.ip)}">Apri studente</button>
+                                    ${ev.type === 'ai' ? `<button class="log-action-btn danger" data-action="evento-blocca-dominio" data-ip="${attrEscape(ev.ip)}" data-dominio="${attrEscape(ev.what)}">Blocca dominio</button>` : ''}
+                                    <button class="log-action-btn ghost" data-action="evento-ignora" data-id="${attrEscape(ev.id)}">Ignora</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+        </div>
+    `;
+}
+
 export function renderWatchdogEventsPanel() {
     const panel = $('watchdog-events-panel');
     if (!panel) return;
@@ -1342,6 +1627,13 @@ function watchdogBadgeCount(ip) {
     return n;
 }
 
+/**
+ * Floating selection bar: pillola sovrapposta sulla griglia, centrata
+ * orizzontalmente, ancorata al bottom 24px. Visibile solo quando
+ * `state.selectedIps.size > 0`. Le azioni agiscono SOLO sul subset
+ * selezionato (gli endpoint Veyon usano `targetIps()` che ritorna
+ * `selectedIps` quando non vuota; la blocca-dominio fa per-IP).
+ */
 export function renderSelectionBar() {
     const bar = $('selection-bar');
     if (!bar) return;
@@ -1352,18 +1644,28 @@ export function renderSelectionBar() {
         return;
     }
     bar.classList.remove('hidden');
-    // Bottoni Veyon nella bar appaiono solo se Veyon e' configurato.
     const veyonOn = !!state.veyonConfigured;
+
+    // Icone SVG inline (Linear style, stroke 1.5, viewBox 12).
+    const icoLock   = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V3.5a2 2 0 1 1 4 0v2"/></svg>';
+    const icoUnlock = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V3.5a2 2 0 0 1 3.8-.9"/></svg>';
+    const icoMsg    = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M1.5 2.5h9v6h-5L3.5 10.5v-2H1.5v-6z"/></svg>';
+    const icoPlugOn = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 1v3M8 1v3M3 4h6v3a3 3 0 0 1-6 0V4zM6 10v1.5"/></svg>';
+    const icoPlugOff= '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 1v3M8 1v3M3 4h6v3a3 3 0 0 1-6 0V4zM6 10v1.5M1 1l10 10"/></svg>';
+
     bar.innerHTML =
-        '<span class="selection-count">' + n + ' selezionat' + (n === 1 ? 'o' : 'i') + '</span>'
+        '<span class="sel-count">' + n + ' selezionat' + (n === 1 ? 'o' : 'i') + '</span>'
+        + '<span class="sel-sep"></span>'
         + (veyonOn
-            ? '<button class="btn" data-action="veyon-classe-lock" title="Blocca schermo">🔒</button>'
-            + '<button class="btn" data-action="veyon-classe-unlock" title="Sblocca schermo">🔓</button>'
-            + '<button class="btn" data-action="veyon-classe-msg" title="Messaggio">💬</button>'
-            + '<button class="btn btn-warning" data-action="veyon-classe-reboot" title="Riavvia">🔄</button>'
-            + '<button class="btn btn-danger" data-action="veyon-classe-poweroff" title="Spegni">⏻</button>'
+            ? '<button class="sel-btn" data-action="veyon-classe-lock" title="Blocca schermo">' + icoLock + ' Blocca schermo</button>'
+            + '<button class="sel-btn" data-action="veyon-classe-unlock" title="Sblocca schermo">' + icoUnlock + ' Sblocca</button>'
+            + '<button class="sel-btn" data-action="veyon-classe-msg" title="Messaggia">' + icoMsg + ' Messaggia</button>'
+            + '<button class="sel-btn" data-action="veyon-distribuisci-proxy" title="Distribuisci proxy">' + icoPlugOn + ' Proxy on</button>'
+            + '<button class="sel-btn" data-action="veyon-disinstalla-proxy" title="Rimuovi proxy">' + icoPlugOff + ' Proxy off</button>'
             : '')
-        + '<button class="btn" data-action="clear-selection">Deseleziona tutti</button>';
+        + '<button class="sel-btn danger" data-action="multi-blocca-dominio" title="Blocca dominio per i selezionati">Blocca dominio</button>'
+        + '<span class="sel-sep"></span>'
+        + '<button class="sel-btn ghost" data-action="clear-selection" title="Pulisci selezione">&times;</button>';
 }
 
 /**
@@ -1382,7 +1684,10 @@ export function renderDetailPane() {
 
     if (!ip) {
         pane.classList.add('hidden');
-        pane.innerHTML = '';
+        if (pane.dataset.lastKey) {
+            pane.innerHTML = '';
+            delete pane.dataset.lastKey;
+        }
         if (stream) stream.classList.remove('hidden-by-detail');
         return;
     }
@@ -1393,14 +1698,26 @@ export function renderDetailPane() {
     const soglia = (state.cfg.inattivitaSogliaSec || 180) * 1000;
     const s = calcolaStatoIp(ip, ora, soglia);
     const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
-    const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
-    const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
-    let stato = 'active';
-    if (s.inattivo) stato = 'idle';
+    const hasAI = hasAIRecente(ip, ora);
+    const hasWD = hasWDRecente(ip, ora);
+    let stato = statoBase(ip, ora);
     if (hasWD) stato = 'watchdog';
     if (hasAI) stato = 'ai';
 
-    const dotCls = ({ active: 'ok', idle: 'muted', ai: 'alert', watchdog: 'warn' })[stato] || 'muted';
+    // Skip innerHTML rebuild se nulla di significativo e' cambiato. Senza
+    // questo, ogni renderAll (~ogni evento SSE + setInterval 5s) distrugge
+    // e ricostruisce il DOM del pane: i bottoni venivano rimpiazzati durante
+    // un click → click "perso" → flicker.
+    const perIpCnt = (state.blocchiPerIp.get(ip) || new Set()).size;
+    const key = [
+        ip, stato, s.listaAttive.length, s.dominiMap.size,
+        wdEvts.length, perIpCnt,
+        (state.watchdogPlugins || []).length,
+    ].join('|');
+    if (pane.dataset.lastKey === key) return;
+    pane.dataset.lastKey = key;
+
+    const dotCls = ({ active: 'ok', idle: 'muted', offline: 'muted', ai: 'alert', watchdog: 'warn' })[stato] || 'muted';
     const nome = s.nome || ('.' + ip.split('.').pop());
 
     // Domini aggregati per IP: count + ultima ora.
@@ -1441,9 +1758,12 @@ export function renderDetailPane() {
         network: { label: 'Network',  okDetail: 'instradato via proxy' },
     };
     const plugins = state.watchdogPlugins || [];
+    const wdRecentCutoff = ora - ALERT_WD_CUTOFF_MS;
     const pluginRows = plugins.map(p => {
         const meta = PLUGIN_META[p.id] || { label: p.name || p.id, okDetail: 'ok' };
-        const evtsP = wdEvts.filter(ev => ev.plugin === p.id);
+        // Solo eventi recenti (entro ALERT_WD_CUTOFF_MS): eventi vecchi
+        // del DB non devono colorare il plugin a "warn" forever.
+        const evtsP = wdEvts.filter(ev => ev.plugin === p.id && (ev.ts || 0) >= wdRecentCutoff);
         const last = evtsP.length > 0 ? evtsP[evtsP.length - 1] : null;
         let st = 'ok';
         let detail = meta.okDetail;
@@ -1483,9 +1803,10 @@ export function renderDetailPane() {
                 <div class="detail-section-label">Azioni rapide</div>
                 <div class="detail-actions">
                     <button class="btn" data-action="veyon-card-lock" data-ip="${attrEscape(ip)}" title="Blocca schermo">Blocca schermo</button>
+                    <button class="btn" data-action="veyon-card-unlock" data-ip="${attrEscape(ip)}" title="Sblocca schermo">Sblocca schermo</button>
                     <button class="btn" data-action="veyon-card-msg" data-ip="${attrEscape(ip)}" title="Messaggia">Messaggia</button>
                     <button class="btn" data-action="veyon-card-disinstalla-proxy" data-ip="${attrEscape(ip)}" title="Rimuovi proxy">Disconnetti proxy</button>
-                    <button class="btn danger" data-action="detail-blocca-dominio" title="Blocca un dominio">Blocca dominio</button>
+                    <button class="btn danger detail-action-wide" data-action="detail-blocca-dominio" title="Blocca un dominio">Blocca dominio</button>
                 </div>
             </div>
             <div class="detail-section">
@@ -1572,9 +1893,12 @@ function _renderAllSync() {
     safe('renderPausaEBottoni', renderPausaEBottoni);
     safe('renderTabellaIp', renderTabellaIp);
     safe('renderSelectionBar', renderSelectionBar);
-    safe('renderWatchdogEventsPanel', renderWatchdogEventsPanel);
+    // renderWatchdogEventsPanel rimosso: gli eventi watchdog appaiono nel
+    // banner alert + log eventi (a destra), non piu' duplicati in griglia.
     safe('renderUltimeRichieste', renderUltimeRichieste);
     safe('renderDetailPane', renderDetailPane);
+    safe('renderLogPanel', renderLogPanel);
+    safe('renderAlertBanner', renderAlertBanner);
     safe('renderFocus', renderFocus);
     safe('renderReport', renderReport);
     safe('renderImpostazioni', renderImpostazioni);

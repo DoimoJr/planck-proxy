@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	Versione = "2.9.0"
+	Versione = "2.9.5"
 	Fase     = "stable"
 )
 
@@ -134,6 +134,13 @@ func openBrowserAndWaitForClose(url, profileDir string) {
 }
 
 func main() {
+	// Nascondi subito la finestra cmd allocata da Windows. Il binario
+	// e' compilato come console subsystem (NO -H=windowsgui) per evitare
+	// false positive Defender, ma l'utente vede solo un flash di ~50ms
+	// prima dell'hide. Pareggio accettabile: console subsystem non
+	// triggera SmartScreen/Defender come la GUI subsystem.
+	sysutil.HideOwnConsole()
+
 	webPort := envOrDefault("PLANCK_WEB_PORT", "9999")
 	proxyPort := envOrDefault("PLANCK_PROXY_PORT", "9090")
 	dataDir := dataDirDefault()
@@ -235,14 +242,55 @@ func main() {
 		log.Printf("Veyon: master key '%s' importata da veyon-cli del laboratorio corrente", name)
 	}
 
-	// Mappa studenti: range fisso .1-.30 del /24 del docente. In-memory
-	// only, rigenerato ad ogni boot (binario portatile → ogni laboratorio
-	// ha il suo /24, niente residui dal lab precedente).
-	if ips := discover.DefaultRange(lanIP); len(ips) > 0 {
-		st.SetStudentiIPs(ips)
-		log.Printf("discover: mappa studenti col range .%d-.%d del /24 di %s (%d IP)",
-			discover.DefaultFirst, discover.DefaultLast, lanIP, len(ips))
+	// Mappa studenti: scan TCP dell'intera SUBNET del docente (con la mask
+	// vera dell'interfaccia di rete, non solo /24 hardcoded) per scoprire
+	// i PC vivi (Veyon :11100 / SMB :445 / RPC :135). Il binario e'
+	// portatile, quindi ad ogni boot lo scan rivaluta la LAN corrente.
+	// La grid Live mostra solo IP che hanno risposto.
+	//
+	// Subnet detection: legge la maschera dell'interfaccia che ha lanIP.
+	// Se la subnet e' enorme (> /22 = 1024 host), ricade su /24 attorno
+	// a lanIP per evitare scan massivi.
+	//
+	// Avvio: scan iniziale sincrono + loop periodico ogni 30s.
+	if sub := discover.LocalSubnet(lanIP); sub != nil {
+		ones, _ := sub.Mask.Size()
+		log.Printf("discover: subnet rilevata %s/%d (interfaccia col docente %s)", sub.IP, ones, lanIP)
+	} else {
+		log.Printf("discover: impossibile rilevare la subnet di %s, fallback /24", lanIP)
 	}
+	// Discover mode: setting persistito in state (toggle UI Impostazioni).
+	// Default true (lab scolastici); env PLANCK_DISCOVER_VEYON_ONLY=0/1
+	// override del valore persistito al boot.
+	if v := os.Getenv("PLANCK_DISCOVER_VEYON_ONLY"); v == "0" || v == "1" {
+		_, _, _ = st.UpdateSettings(map[string]any{"discoverVeyonOnly": v == "1"})
+	}
+	scanAndApply := func() {
+		veyonOnly := st.DiscoverVeyonOnly()
+		ips := discover.ScanSubnet(lanIP, 300*time.Millisecond, veyonOnly)
+		if len(ips) > 0 {
+			st.SetStudentiIPs(ips)
+			log.Printf("discover: scan subnet di %s → %d PC vivi", lanIP, len(ips))
+		} else {
+			// Nessun PC trovato dallo scan: fallback su range .1-.30 cosi' la
+			// grid mostra comunque le card placeholder (utile in setup nuovo
+			// dove i PC studente non sono ancora accesi).
+			fallback := discover.DefaultRange(lanIP)
+			if len(fallback) > 0 {
+				st.SetStudentiIPs(fallback)
+				log.Printf("discover: scan vuoto, fallback range .%d-.%d (%d IP)",
+					discover.DefaultFirst, discover.DefaultLast, len(fallback))
+			}
+		}
+	}
+	scanAndApply()
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			scanAndApply()
+		}
+	}()
 
 	// Watchdog plugins (Phase 5): registra i built-in.
 	wdReg := watchdog.NewRegistry()

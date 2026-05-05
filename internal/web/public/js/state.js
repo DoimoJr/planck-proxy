@@ -75,6 +75,32 @@ export const state = {
      * Click sulla X o sulla stessa card chiude (torna stream).
      */
     detailIp: null,
+
+    // ============================================================
+    // Banner alert + Log eventi (Phase 7)
+    // ============================================================
+    /** True se l'utente ha cliccato la X del banner. Auto-reset al prossimo evento. */
+    bannerDismissed: false,
+    /** Chiave evento corrente (aiCount-wdCount-lastTs): cambia → bannerDismissed = false. */
+    bannerLastEventKey: '',
+    /** 'pulse' (default) | 'sticky' | 'slide' — variante visiva del banner. */
+    bannerKind: 'pulse',
+    /** True quando il pannello "Log eventi" e' aperto a destra (mutex con stream/detail). */
+    logPanelOpen: false,
+    /** Filtro lista log: 'all' | 'ai' | 'wd'. */
+    logFilter: 'all',
+    /** @type {Set<string>} Eventi marcati come "ignora" dall'utente. */
+    eventiIgnoredIds: new Set(),
+    /**
+     * Set di IP per i quali abbiamo inviato un comando Veyon screenLock
+     * andato a buon fine (e nessun unlock successivo). Tracking lato
+     * client only — Veyon non espone uno "stato locked" consultabile,
+     * quindi se l'utente blocca/sblocca da un altro Veyon Master non
+     * lo vediamo. Per il use case "uso solo Planck" e' sufficiente.
+     * Resettato a ogni boot (Set in-memory).
+     * @type {Set<string>}
+     */
+    lockedIps: new Set(),
     /**
      * Multi-selezione (Phase 4 polish). Set di IP selezionati con Ctrl/
      * Shift+click sulle card. Quando non vuoto, le azioni Veyon "classe"

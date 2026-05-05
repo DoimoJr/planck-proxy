@@ -94,6 +94,8 @@ export async function resetTutto() {
     if (state.veyonConfigured) {
         const { ips } = targetIps();
         await Promise.all(ips.map(ip => veyonSendFeature(ip, 'screenUnlock').catch(() => false)));
+        for (const ip of ips) state.lockedIps.delete(ip);
+        renderAll();
     }
     toast.success('Reset completato');
 }
@@ -225,10 +227,12 @@ export function resetNascosti() { state.nascosti.clear(); salvaNascosti(); rende
 
 export function setFocus(ip) { state.focusIp = state.focusIp === ip ? null : ip; renderAll(); }
 
-/** Apre il detail pane su `ip`: filtra anche il traffico (focusIp). */
+/** Apre il detail pane su `ip`: filtra anche il traffico (focusIp).
+    Mutex: chiude eventuale log panel aperto. */
 export function apriDetail(ip) {
     state.detailIp = ip;
     state.focusIp = ip;
+    state.logPanelOpen = false;
     renderAll();
 }
 /** Chiude il detail pane (torna lo stream a destra) e libera il focus. */
@@ -278,6 +282,73 @@ export async function clearBlocchiPerIp(ip) {
     if (!ip) return;
     await apiPost('/api/clear-blocks-for-ip', { ip });
 }
+
+// ========================================================================
+// Banner alert + Log eventi (Phase 7)
+// ========================================================================
+
+/** Chiude il banner per la sessione UI corrente. Riappare al prossimo evento. */
+export function dismissBanner() {
+    state.bannerDismissed = true;
+    renderAll();
+}
+
+/** Apre il pannello "Log eventi" a destra, mutex con stream/detail. */
+export function apriLogEventi() {
+    state.logPanelOpen = true;
+    state.detailIp = null;
+    state.focusIp = null;
+    renderAll();
+}
+
+/** Chiude il pannello "Log eventi" → torna lo stream. */
+export function chiudiLogEventi() {
+    state.logPanelOpen = false;
+    renderAll();
+}
+
+/** Toggle "Log eventi": apre se chiuso, chiude se aperto. */
+export function toggleLogEventi() {
+    if (state.logPanelOpen) chiudiLogEventi();
+    else apriLogEventi();
+}
+
+/** Imposta il filtro lista log: 'all' | 'ai' | 'wd'. */
+export function setLogFilter(filtro) {
+    if (filtro === 'all' || filtro === 'ai' || filtro === 'wd') {
+        state.logFilter = filtro;
+        renderAll();
+    }
+}
+
+/** Marca un evento come ignorato (sparisce dal feed log + banner). */
+export function ignoraEvento(id) {
+    if (!id) return;
+    state.eventiIgnoredIds.add(id);
+    renderAll();
+}
+
+/** Apre lo studente dell'evento e chiude il log. */
+export function eventoApriStudente(ip) {
+    if (!ip) return;
+    state.logPanelOpen = false;
+    apriDetail(ip);
+}
+
+/**
+ * Blocca un dominio per ogni IP attualmente in selezione multipla
+ * (NON globale). Prompt() per chiedere il dominio una sola volta.
+ */
+export async function bloccaDominioSelezione() {
+    const ips = [...state.selectedIps];
+    if (ips.length === 0) return;
+    const d = prompt('Blocca dominio per ' + ips.length + ' studenti:', '');
+    if (d === null) return;
+    const dominio = d.trim().toLowerCase();
+    if (!dominio) return;
+    await Promise.all(ips.map(ip => apiPost('/api/block-per-ip', { ip, dominio })));
+    toast.success('Bloccato per ' + ips.length + ' studenti: ' + dominio);
+}
 export function clearFocus() { state.focusIp = null; renderAll(); }
 
 /** Lista IP nello stesso ordine usato dal render (sortati per IP numerico). */
@@ -291,10 +362,17 @@ function ipsInOrder() {
 }
 
 /**
- * Gestisce il click su una card studente con i modificatori della tastiera:
- *   - plain click       : focus singolo (toggle), clear selezione multipla
- *   - Ctrl/Cmd + click  : aggiunge/rimuove dalla selezione
- *   - Shift + click     : range da selectionAnchor (escluso) fino a `ip` (incluso)
+ * Gestisce il click su una card / riga studente. Tre comportamenti:
+ *   - plain click       : toggle detail pane sull'IP, azzera selezione multi
+ *   - Ctrl/Cmd + click  : toggle dell'IP nella selezione multi.
+ *                         Se c'era un detail aperto, l'IP del detail viene
+ *                         INCORPORATO nella selezione (non perso) prima del
+ *                         toggle. Il detail viene chiuso.
+ *   - Shift + click     : range da anchor a IP (estremi inclusi).
+ *                         Se c'era un detail aperto, il suo IP viene aggiunto
+ *                         al range. Il detail viene chiuso.
+ *
+ * Anchor viene aggiornato sempre all'IP cliccato.
  */
 export function handleCardClick(ip, ev) {
     if (ev && ev.shiftKey && state.selectionAnchor) {
@@ -303,19 +381,33 @@ export function handleCardClick(ip, ev) {
         const i2 = list.indexOf(ip);
         if (i1 >= 0 && i2 >= 0) {
             const [lo, hi] = i1 < i2 ? [i1, i2] : [i2, i1];
-            for (let k = lo; k <= hi; k++) state.selectedIps.add(list[k]);
+            const range = new Set();
+            for (let k = lo; k <= hi; k++) range.add(list[k]);
+            // Conserva l'IP del detail pane se aperto: entra nel range.
+            if (state.detailIp) range.add(state.detailIp);
+            state.selectedIps = range;
+            state.detailIp = null;
+            state.focusIp = null;
+            state.selectionAnchor = ip;
             renderAll();
             return;
         }
     }
     if (ev && (ev.ctrlKey || ev.metaKey)) {
+        // Se c'era un detail aperto e niente in selezione, includilo come
+        // primo elemento prima del toggle dell'IP cliccato.
+        if (state.detailIp && state.selectedIps.size === 0) {
+            state.selectedIps.add(state.detailIp);
+        }
         if (state.selectedIps.has(ip)) state.selectedIps.delete(ip);
         else state.selectedIps.add(ip);
+        state.detailIp = null;
+        state.focusIp = null;
         state.selectionAnchor = ip;
         renderAll();
         return;
     }
-    // plain click: apre/chiude il detail pane (con focusIp implicito).
+    // plain click: apre/chiude il detail pane, azzera selezione multi.
     state.selectedIps.clear();
     state.selectionAnchor = ip;
     toggleDetail(ip);
@@ -642,13 +734,21 @@ export async function veyonSendFeature(ip, feature, command, args) {
 /** ScreenLock su un singolo studente. */
 export async function veyonCardLock(ip) {
     if (!state.veyonConfigured) return;
-    await veyonSendFeature(ip, 'screenLock');
+    const ok = await veyonSendFeature(ip, 'screenLock');
+    if (ok) {
+        state.lockedIps.add(ip);
+        renderAll();
+    }
 }
 
 /** Sblocca lo schermo di un singolo studente. */
 export async function veyonCardUnlock(ip) {
     if (!state.veyonConfigured) return;
-    await veyonSendFeature(ip, 'screenUnlock');
+    const ok = await veyonSendFeature(ip, 'screenUnlock');
+    if (ok) {
+        state.lockedIps.delete(ip);
+        renderAll();
+    }
 }
 
 /** Disinstalla il proxy dal singolo studente (chiama proxy_off.vbs). */
@@ -730,13 +830,23 @@ async function veyonForEachTarget(label, fn) {
 /** ScreenLock su tutti i target (selezione/mappa studenti/attivi). */
 export async function veyonClasseLock() {
     if (!state.veyonConfigured) return;
-    await veyonForEachTarget('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
+    await veyonForEachTarget('ScreenLock', async (ip) => {
+        const ok = await veyonSendFeature(ip, 'screenLock');
+        if (ok) state.lockedIps.add(ip);
+        return ok;
+    });
+    renderAll();
 }
 
 /** ScreenUnlock su tutti i target. */
 export async function veyonClasseUnlock() {
     if (!state.veyonConfigured) return;
-    await veyonForEachTarget('ScreenUnlock', ip => veyonSendFeature(ip, 'screenUnlock'));
+    await veyonForEachTarget('ScreenUnlock', async (ip) => {
+        const ok = await veyonSendFeature(ip, 'screenUnlock');
+        if (ok) state.lockedIps.delete(ip);
+        return ok;
+    });
+    renderAll();
 }
 
 /** TextMessage su tutti i target. */

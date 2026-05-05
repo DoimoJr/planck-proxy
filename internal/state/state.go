@@ -115,6 +115,11 @@ type State struct {
 	pausato       bool
 	deadlineISO   string
 	deadlineTimer *time.Timer
+
+	// --- Discovery ---
+	// Se true, lo scan LAN considera vivi SOLO i PC con :11100 aperto
+	// (Veyon Service installato). Default true. Toggle dall'UI Impostazioni.
+	discoverVeyonOnly bool
 }
 
 // New costruisce uno State con default sensati e store NoOp (in-memory).
@@ -148,6 +153,7 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		blocchiPerIp:        map[string]map[string]struct{}{},
 		dominiIgnorati:      ignorati,
 		studenti:            map[string]string{},
+		discoverVeyonOnly:   true,
 		storia:              make([]Entry, 0, 256),
 		aliveMap:               map[string]int64{},
 		watchdogHeartbeats:     map[string]map[string]int64{},
@@ -184,6 +190,7 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		// boot (chiave via veyon-cli del PC corrente; mappa via range
 		// /24 del LAN IP corrente).
 		s.veyonPort = cfg.VeyonPort
+		s.discoverVeyonOnly = cfg.DiscoverVeyonOnly
 	} else if err != nil {
 		log.Printf("state: errore lettura config: %v", err)
 	}
@@ -232,6 +239,7 @@ func (s *State) saveConfigLocked() {
 		AuthPasswordHash:    s.authPasswordHash,
 		DominiIgnorati:      append([]string{}, s.dominiIgnorati...),
 		VeyonPort:           s.veyonPort,
+		DiscoverVeyonOnly:   s.discoverVeyonOnly,
 	}
 	if err := s.store.SaveConfig(cfg); err != nil {
 		log.Printf("state: errore save config: %v", err)
@@ -241,6 +249,14 @@ func (s *State) saveConfigLocked() {
 // Store esposto per i handler API che hanno bisogno di operare direttamente
 // sul DB (es. CRUD presets, listing sessioni).
 func (s *State) Store() *store.Store { return s.store }
+
+// DiscoverVeyonOnly ritorna lo stato corrente del flag (thread-safe).
+// Letto dal loop di discovery in main.go.
+func (s *State) DiscoverVeyonOnly() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discoverVeyonOnly
+}
 
 // SetLanIP imposta il LAN IP del docente, settato a boot da main.go (auto-
 // detected o env PLANCK_LAN_IP). Esposto via /api/config per la UI.

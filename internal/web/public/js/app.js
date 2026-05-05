@@ -155,8 +155,17 @@ document.body.addEventListener('click', (e) => {
         case 'reset-nascosti': actions.resetNascosti(); break;
         case 'focus-ip': actions.handleCardClick(ip, e); break;
         case 'clear-selection': actions.clearSelection(); break;
+        case 'multi-blocca-dominio': actions.bloccaDominioSelezione(); break;
         case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
         case 'detail-close': e.stopPropagation(); actions.chiudiDetail(); break;
+        case 'log-open': e.stopPropagation(); actions.apriLogEventi(); break;
+        case 'log-close': e.stopPropagation(); actions.chiudiLogEventi(); break;
+        case 'log-toggle': e.stopPropagation(); actions.toggleLogEventi(); break;
+        case 'log-filter': e.stopPropagation(); actions.setLogFilter(el.dataset.filter); break;
+        case 'banner-dismiss': e.stopPropagation(); actions.dismissBanner(); break;
+        case 'evento-apri-studente': e.stopPropagation(); actions.eventoApriStudente(el.dataset.ip); break;
+        case 'evento-ignora': e.stopPropagation(); actions.ignoraEvento(el.dataset.id); break;
+        case 'evento-blocca-dominio': e.stopPropagation(); actions.bloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
         case 'detail-blocca-dominio': e.stopPropagation(); actions.detailBloccaDominio(); break;
         case 'unblock-per-ip': e.stopPropagation(); actions.sbloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
         case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
@@ -227,10 +236,15 @@ function isInputFocused() {
     return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 document.addEventListener('keydown', (e) => {
-    // ESC: clear selezione + focus IP, sempre attivo.
+    // ESC chain (priorita' decrescente):
+    //   multi-sel > detail pane > log pane > focus IP > sidebar dx > sidebar sx.
     if (e.key === 'Escape') {
         if (state.selectedIps.size > 0) { actions.clearSelection(); e.preventDefault(); return; }
+        if (state.detailIp) { actions.chiudiDetail(); e.preventDefault(); return; }
+        if (state.logPanelOpen) { actions.chiudiLogEventi(); e.preventDefault(); return; }
         if (state.focusIp) { actions.clearFocus(); e.preventDefault(); return; }
+        if (!state.richiesteCollassate) { actions.toggleRichieste(); e.preventDefault(); return; }
+        if (!state.sidebarCollassata) { actions.toggleSidebar(); e.preventDefault(); return; }
     }
     // Shortcut con Ctrl/Cmd
     const mod = e.ctrlKey || e.metaKey;

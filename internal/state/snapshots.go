@@ -157,6 +157,7 @@ type SettingsSnapshot struct {
 	Classe              string        `json:"classe"`
 	InattivitaSogliaSec int           `json:"inattivitaSogliaSec"`
 	DominiIgnorati      []string      `json:"dominiIgnorati"`
+	DiscoverVeyonOnly   bool          `json:"discoverVeyonOnly"`
 }
 
 type ProxySettings struct {
@@ -204,6 +205,7 @@ func (s *State) settingsSnapshotLocked() SettingsSnapshot {
 		Classe:              s.classe,
 		InattivitaSogliaSec: s.inattivitaSogliaSec,
 		DominiIgnorati:      ignoratiCopy,
+		DiscoverVeyonOnly:   s.discoverVeyonOnly,
 	}
 }
 

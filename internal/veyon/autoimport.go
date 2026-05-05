@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/DoimoJr/planck-proxy/internal/sysutil"
 )
 
 // AuthKey rappresenta una entry del keystore Veyon: nome logico
@@ -84,7 +86,9 @@ func FindCLI() string {
 // riga ha il formato `<nome>/<tipo>` (es. `master/private`,
 // `master/public`).
 func ListAuthKeys(cliPath string) ([]AuthKey, error) {
-	out, err := exec.Command(cliPath, "authkeys", "list").CombinedOutput()
+	cmd := exec.Command(cliPath, "authkeys", "list")
+	sysutil.HideConsoleWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("veyon-cli authkeys list fallito: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
@@ -108,7 +112,9 @@ func ListAuthKeys(cliPath string) ([]AuthKey, error) {
 // Sovrascrive il file destinazione se esiste.
 func ExportPrivateKey(cliPath, keyName, destPath string) error {
 	_ = os.Remove(destPath) // veyon-cli rifiuta di sovrascrivere
-	out, err := exec.Command(cliPath, "authkeys", "export", keyName+"/private", destPath).CombinedOutput()
+	cmd := exec.Command(cliPath, "authkeys", "export", keyName+"/private", destPath)
+	sysutil.HideConsoleWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("veyon-cli authkeys export %s: %w (output: %s)", keyName, err, strings.TrimSpace(string(out)))
 	}

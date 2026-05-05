@@ -129,4 +129,22 @@ CREATE TABLE watchdog_config (
 );
 `,
 	},
+	{
+		Version: 3,
+		Name:    "bloccati_per_ip",
+		SQL: `
+-- ==========================================================
+-- Blocchi per-IP: domini bloccati solo per uno studente specifico.
+-- Additivi rispetto alla blocklist globale (proxy.DominioBloccato
+-- controlla entrambi: globale OR per-IP).
+-- ==========================================================
+CREATE TABLE bloccati_per_ip (
+    ip       TEXT NOT NULL,
+    dominio  TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (ip, dominio)
+);
+CREATE INDEX idx_bloccati_per_ip_ip ON bloccati_per_ip(ip);
+`,
+	},
 }

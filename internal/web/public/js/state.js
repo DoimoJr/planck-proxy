@@ -53,6 +53,14 @@ export const state = {
 
     /** @type {Set<string>} Domini in blocklist (rispecchia lo stato server). */
     bloccati: new Set(),
+    /**
+     * Blocchi per-IP (additivi rispetto a `bloccati`): un dominio bloccato
+     * SOLO per uno specifico studente. Mappa ip → Set<dominio>. Persistito
+     * lato server in tabella `bloccati_per_ip`. Aggiornato via SSE
+     * `blocchi-per-ip` o all'idratazione da /api/history.
+     * @type {Map<string, Set<string>>}
+     */
+    blocchiPerIp: new Map(),
     /** @type {Set<string>} Domini nascosti dall'UI (persistito in localStorage). */
     nascosti: new Set(JSON.parse(localStorage.getItem('nascosti') || '[]')),
 
@@ -60,6 +68,13 @@ export const state = {
     filtro: '',
     /** @type {string|null} IP su cui il traffico e' filtrato (click su riga/card). */
     focusIp: null,
+    /**
+     * @type {string|null} IP per cui il detail pane (a destra) e' aperto.
+     * Quando non null, il pannello stream si nasconde e a destra appare il
+     * detail pane 280px (azioni, watchdog, domini recenti, sessione).
+     * Click sulla X o sulla stessa card chiude (torna stream).
+     */
+    detailIp: null,
     /**
      * Multi-selezione (Phase 4 polish). Set di IP selezionati con Ctrl/
      * Shift+click sulle card. Quando non vuoto, le azioni Veyon "classe"
@@ -69,7 +84,10 @@ export const state = {
     selectedIps: new Set(),
     /** @type {string|null} Ultimo IP cliccato — anchor per Shift+click range selection. */
     selectionAnchor: null,
-    darkmode: localStorage.getItem('darkmode') === '1',
+    // Default dark mode (Claude Designer): se l'utente non ha mai espresso
+    // una preferenza, parte in dark. localStorage memorizza '0' per light
+    // esplicito o '1' per dark esplicito.
+    darkmode: localStorage.getItem('darkmode') !== '0',
     notifiche: localStorage.getItem('notifiche') === '1',
     /** @type {'live'|'report'|'impostazioni'} */
     tabAttivo: localStorage.getItem('tab') || 'live',

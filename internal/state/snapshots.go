@@ -59,14 +59,15 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 
 // HistorySnapshot e' il payload di /api/history per l'idratazione UI.
 type HistorySnapshot struct {
-	Entries         []Entry          `json:"entries"`
-	Bloccati        []string         `json:"bloccati"`
-	SessioneAttiva  bool             `json:"sessioneAttiva"`
-	SessioneInizio  string           `json:"sessioneInizio,omitempty"`
-	SessioneFineISO string           `json:"sessioneFineISO,omitempty"`
-	Pausato         bool             `json:"pausato"`
-	DeadlineISO     string           `json:"deadlineISO,omitempty"`
-	Alive           map[string]int64 `json:"alive"`
+	Entries         []Entry             `json:"entries"`
+	Bloccati        []string            `json:"bloccati"`
+	BlocchiPerIp    map[string][]string `json:"blocchiPerIp"`
+	SessioneAttiva  bool                `json:"sessioneAttiva"`
+	SessioneInizio  string              `json:"sessioneInizio,omitempty"`
+	SessioneFineISO string              `json:"sessioneFineISO,omitempty"`
+	Pausato         bool                `json:"pausato"`
+	DeadlineISO     string              `json:"deadlineISO,omitempty"`
+	Alive           map[string]int64    `json:"alive"`
 }
 
 // HistorySnapshotData ritorna il payload per /api/history.
@@ -82,6 +83,7 @@ func (s *State) HistorySnapshotData() HistorySnapshot {
 	return HistorySnapshot{
 		Entries:         storiaCopy,
 		Bloccati:        s.bloccatiSortedLocked(),
+		BlocchiPerIp:    s.blocchiPerIpSnapshotLocked(),
 		SessioneAttiva:  s.sessioneAttiva,
 		SessioneInizio:  s.sessioneInizio,
 		SessioneFineISO: s.sessioneFineISO,

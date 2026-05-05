@@ -101,10 +101,25 @@ function lampeggiaBannerDeadline() {
  */
 function setStato(connesso) {
     state.connesso = connesso;
-    const card = $('stat-status').parentElement;
-    card.classList.remove('connected', 'disconnected');
-    card.classList.add(connesso ? 'connected' : 'disconnected');
-    $('stat-status').textContent = connesso ? 'LIVE' : 'OFF';
+    // Stat card "Status" (Claude Designer redesign): contenitore con
+    // .live-pill > dot + label. Quando disconnessi cambiamo dot.ok→dot.alert
+    // e testo LIVE→OFF. Null-guard se la card e' assente in qualche layout.
+    const pill = document.querySelector('.stat-card.status .live-pill');
+    if (pill) {
+        const dot = pill.querySelector('.dot');
+        if (dot) {
+            dot.classList.toggle('ok', connesso);
+            dot.classList.toggle('alert', !connesso);
+        }
+        // Aggiorna solo il text node finale (l'ultimo nodo testuale),
+        // preserva il dot SVG/span.
+        const last = pill.lastChild;
+        if (last && last.nodeType === Node.TEXT_NODE) {
+            last.textContent = connesso ? ' LIVE' : ' OFF';
+        } else {
+            pill.appendChild(document.createTextNode(connesso ? ' LIVE' : ' OFF'));
+        }
+    }
 
     // Banner top "riconnessione..." quando perdiamo SSE.
     const banner = document.getElementById('connection-banner');
@@ -131,9 +146,11 @@ function setStato(connesso) {
  * | `alive`            | Aggiorna `aliveMap[ip] = ts` (dot watchdog).                   |
  */
 export function avviaSSE() {
+    console.log('[planck] avviaSSE() opening EventSource /api/stream');
     const es = new EventSource('/api/stream');
-    es.onopen = () => setStato(true);
-    es.onerror = () => {
+    es.onopen = () => { console.log('[planck] SSE onopen'); setStato(true); };
+    es.onerror = (e) => {
+        console.warn('[planck] SSE onerror', e, 'readyState=', es.readyState);
         setStato(false);
         es.close();
         setTimeout(avviaSSE, 2000);
@@ -147,7 +164,16 @@ export function avviaSSE() {
             }
             scheduleTrafficFlush();
         } else if (msg.type === 'blocklist') {
+            console.log('[planck] SSE blocklist update, list size=', (msg.list||[]).length);
             state.bloccati = new Set(msg.list);
+            renderAll();
+        } else if (msg.type === 'blocchi-per-ip') {
+            const perIp = msg.perIp || {};
+            console.log('[planck] SSE blocchi-per-ip update, ip count=', Object.keys(perIp).length);
+            state.blocchiPerIp = new Map();
+            for (const [ip, doms] of Object.entries(perIp)) {
+                state.blocchiPerIp.set(ip, new Set(doms));
+            }
             renderAll();
         } else if (msg.type === 'reset') {
             trafficBatch.length = 0;

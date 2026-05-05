@@ -41,7 +41,7 @@ func (s *stubRecorder) RegistraAlive(ip string) {
 	s.aliveLastIP = ip
 }
 
-func (s *stubRecorder) DominioBloccato(dominio string) bool {
+func (s *stubRecorder) DominioBloccato(dominio, _ string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, b := range s.blocca {

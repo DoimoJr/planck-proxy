@@ -26,12 +26,20 @@ async function apiGet(path) {
 
 /** Wrapper POST con body JSON. */
 async function apiPost(path, body) {
-    const r = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body !== undefined ? JSON.stringify(body) : '',
-    });
-    return r.json();
+    console.log('[planck] apiPost ->', path, body || '');
+    try {
+        const r = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body !== undefined ? JSON.stringify(body) : '',
+        });
+        const j = await r.json();
+        console.log('[planck] apiPost <-', path, 'status=', r.status, 'body=', j);
+        return j;
+    } catch (err) {
+        console.error('[planck] apiPost ERROR', path, err);
+        throw err;
+    }
 }
 
 // ========================================================================
@@ -42,15 +50,99 @@ export async function bloccaDominio(d) { await apiPost('/api/block', { dominio: 
 export async function sbloccaDominio(d) { await apiPost('/api/unblock', { dominio: d }); }
 export async function bloccaAI() { await apiPost('/api/block-all-ai'); }
 export async function sbloccaAI() { await apiPost('/api/unblock-all-ai'); }
+/**
+ * Toggle "Blocca AI": leggiamo lo stato DAL BOTTONE (.active = AI bloccate).
+ * Piu' robusto che ricalcolare da state.cfg.dominiAI vs state.bloccati,
+ * che possono divergere se la lista AI lato server include domini non
+ * presenti nel snapshot client. Feedback ottimistico immediato + il render
+ * normale via SSE conferma/corregge.
+ */
+export async function toggleBloccaAI() {
+    const btn = document.getElementById('btn-block-ai');
+    const isActive = btn && btn.classList.contains('active');
+    if (btn) {
+        if (isActive) {
+            btn.classList.remove('active');
+            btn.textContent = 'Blocca AI';
+        } else {
+            btn.classList.add('active');
+            btn.textContent = 'Sblocca AI';
+        }
+    }
+    if (isActive) await apiPost('/api/unblock-all-ai');
+    else await apiPost('/api/block-all-ai');
+}
 
 export async function svuotaBlocklist() {
     if (!confirm('Svuotare completamente la blocklist?')) return;
     await apiPost('/api/clear-blocklist');
 }
 
+/**
+ * Reset completo: rimuove tutti i blocchi domini (generali + per-IP, oggi
+ * tutti convergono nella stessa blocklist), disattiva la pausa globale se
+ * attiva, e sblocca tutti gli schermi via Veyon (se configurato). Una sola
+ * conferma utente, niente prompt nested.
+ */
+export async function resetTutto() {
+    if (!confirm('Reset: rimuovo tutti i blocchi domini e sblocco i PC. Continuare?')) return;
+    // 1. Svuota la blocklist (cattura sia "Blocca tutto AI" che blocchi puntuali).
+    await apiPost('/api/clear-blocklist');
+    // 2. Disattiva la pausa globale se attiva.
+    if (state.pausato) await apiPost('/api/pause/toggle');
+    // 3. Sblocca schermi su tutti i target Veyon (silenziosamente, no confirm).
+    if (state.veyonConfigured) {
+        const { ips } = targetIps();
+        await Promise.all(ips.map(ip => veyonSendFeature(ip, 'screenUnlock').catch(() => false)));
+    }
+    toast.success('Reset completato');
+}
+
 // ========================================================================
 // Sessione
 // ========================================================================
+
+/** Avvia una nuova sessione (no-op se gia' attiva). L'archiviazione
+    avviene SOLO premendo Stop, mai automaticamente in Start. */
+export async function startSessione() {
+    if (state.sessioneAttiva) {
+        toast.info('Una sessione e\' gia\' in corso. Premi Stop per archiviarla prima di avviarne un\'altra.');
+        return;
+    }
+    const hadData = state.entries.length > 0 && state.sessioneInizio;
+    const messaggio = hadData
+        ? 'Avviare una nuova sessione?\n\nIl buffer corrente verra\' azzerato (la sessione precedente NON e\' archiviata: era stata fermata senza salvare).'
+        : 'Avviare la sessione?\n\nIl monitor inizia a registrare il traffico.';
+    if (!confirm(messaggio)) return;
+    const r = await apiPost('/api/session/start');
+    state.sessioneInizio = r.sessioneInizio;
+    state.sessioneAttiva = true;
+    state.sessioneFineISO = null;
+}
+
+/** Ferma e archivia la sessione corrente (no-op se nessuna attiva). */
+export async function stopSessione() {
+    if (!state.sessioneAttiva) return;
+    // Confirm arricchito con durata HH:MM:SS + count eventi non-sistema —
+    // l'utente sa cosa sta archiviando prima di accettare.
+    let durTxt = '00:00:00';
+    if (state.sessioneInizio) {
+        const start = Date.parse(state.sessioneInizio);
+        if (!isNaN(start)) {
+            const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const s = String(sec % 60).padStart(2, '0');
+            durTxt = `${h}:${m}:${s}`;
+        }
+    }
+    let nEventi = 0;
+    for (const e of state.entries) if (e.tipo !== 'sistema') nEventi++;
+    const msg = `Chiudere e archiviare la sessione?\n\nDurata: ${durTxt}\nEventi: ${nEventi}\n\nLa registrazione si interrompe; i dati restano visibili finche\' non avvii una nuova sessione.`;
+    if (!confirm(msg)) return;
+    const r = await apiPost('/api/session/stop');
+    if (r.archiviata) await ricaricaSessioni();
+}
 
 export async function toggleSessione() {
     if (state.sessioneAttiva) {
@@ -132,6 +224,60 @@ export function mostraDominio(d) { state.nascosti.delete(d); salvaNascosti(); re
 export function resetNascosti() { state.nascosti.clear(); salvaNascosti(); renderAll(); }
 
 export function setFocus(ip) { state.focusIp = state.focusIp === ip ? null : ip; renderAll(); }
+
+/** Apre il detail pane su `ip`: filtra anche il traffico (focusIp). */
+export function apriDetail(ip) {
+    state.detailIp = ip;
+    state.focusIp = ip;
+    renderAll();
+}
+/** Chiude il detail pane (torna lo stream a destra) e libera il focus. */
+export function chiudiDetail() {
+    state.detailIp = null;
+    state.focusIp = null;
+    renderAll();
+}
+/** Toggle: stesso ip → chiudi, altrimenti → apri/sposta. */
+export function toggleDetail(ip) {
+    if (state.detailIp === ip) chiudiDetail();
+    else apriDetail(ip);
+}
+/**
+ * Blocca un dominio SOLO per lo studente del detail pane corrente
+ * (blocco per-IP, additivo rispetto alla blocklist globale). Prompt()
+ * pre-popolato con l'ultimo dominio AI rilevato per quell'IP se presente.
+ */
+export async function detailBloccaDominio() {
+    const ip = state.detailIp;
+    if (!ip) return;
+    let suggerito = '';
+    const lista = state.perIp.get(ip) || [];
+    const aiEntry = lista.slice().reverse().find(e => e.tipo === 'ai');
+    if (aiEntry) suggerito = aiEntry.dominio;
+    const d = prompt('Blocca per ' + ip + ':', suggerito);
+    if (d === null) return;
+    const dominio = d.trim().toLowerCase();
+    if (!dominio) return;
+    await apiPost('/api/block-per-ip', { ip, dominio });
+}
+
+/** Blocca un dominio per uno specifico IP (additivo). */
+export async function bloccaPerIp(ip, dominio) {
+    if (!ip || !dominio) return;
+    await apiPost('/api/block-per-ip', { ip, dominio });
+}
+
+/** Sblocca un dominio per uno specifico IP. */
+export async function sbloccaPerIp(ip, dominio) {
+    if (!ip || !dominio) return;
+    await apiPost('/api/unblock-per-ip', { ip, dominio });
+}
+
+/** Rimuove TUTTI i blocchi per-IP per uno specifico IP. */
+export async function clearBlocchiPerIp(ip) {
+    if (!ip) return;
+    await apiPost('/api/clear-blocks-for-ip', { ip });
+}
 export function clearFocus() { state.focusIp = null; renderAll(); }
 
 /** Lista IP nello stesso ordine usato dal render (sortati per IP numerico). */
@@ -169,10 +315,10 @@ export function handleCardClick(ip, ev) {
         renderAll();
         return;
     }
-    // plain click: comportamento legacy (toggle focus) + clear selezione
+    // plain click: apre/chiude il detail pane (con focusIp implicito).
     state.selectedIps.clear();
     state.selectionAnchor = ip;
-    setFocus(ip);
+    toggleDetail(ip);
 }
 
 /** Svuota la selezione multipla. */
@@ -185,8 +331,8 @@ export function clearSelection() {
 export function setFiltro(val) { state.filtro = val; renderAll(); }
 
 export function toggleSezione(nome) {
-    const lista = document.getElementById('domini-' + nome + '-list');
-    if (lista) lista.classList.toggle('hidden');
+    const sez = document.getElementById('sezione-' + nome);
+    if (sez) sez.classList.toggle('collapsed');
 }
 
 export function cambiaVistaIp(vista) {
@@ -201,12 +347,14 @@ export function toggleSidebar() {
     state.sidebarCollassata = !state.sidebarCollassata;
     salvaCollassi();
     applicaCollassi();
+    renderAll(); // sync frecce SVG dei toggle in toolbar
 }
 
 export function toggleRichieste() {
     state.richiesteCollassate = !state.richiesteCollassate;
     salvaCollassi();
     applicaCollassi();
+    renderAll();
 }
 
 export function applicaCollassi() {
@@ -501,6 +649,15 @@ export async function veyonCardLock(ip) {
 export async function veyonCardUnlock(ip) {
     if (!state.veyonConfigured) return;
     await veyonSendFeature(ip, 'screenUnlock');
+}
+
+/** Disinstalla il proxy dal singolo studente (chiama proxy_off.vbs). */
+export async function veyonCardDisinstallaProxy(ip) {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Rimuovere il proxy da ' + ip + '?')) return;
+    const r = await apiPost('/api/veyon/disinstalla-proxy', { ips: [ip] });
+    if (r.ok) toast.success('Proxy rimosso da ' + ip);
+    else toast.error('Disinstallazione fallita: ' + (r.error || ''));
 }
 
 /** Apre una prompt e invia un TextMessage modale. */

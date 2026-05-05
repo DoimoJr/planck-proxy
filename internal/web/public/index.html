@@ -27,11 +27,20 @@
             <button data-action="tab" data-tab="impostazioni" class="tab-btn">Impostazioni</button>
         </nav>
         <div class="topbar-right">
-            <span id="pausa-indicator" class="pausa-indicator hidden">PAUSA</span>
-            <span id="countdown-display" class="countdown"></span>
-            <button data-action="darkmode" id="btn-darkmode" class="btn btn-icon" title="Tema chiaro/scuro" aria-label="Tema"></button>
-            <button data-action="notifiche" id="btn-notifiche" class="btn btn-icon" title="Avvisi sonori + desktop su rilevamento AI" aria-label="Notifiche"></button>
-            <button data-action="spegni-server" class="btn btn-icon" title="Spegni Planck (server)" aria-label="Spegni server">⏻</button>
+            <span class="topbar-status">
+                <span class="dot ok"></span>
+                <span id="topbar-active-count">0</span> attivi
+            </span>
+            <span id="topbar-clock" class="topbar-clock">--:--</span>
+            <button data-action="darkmode" id="btn-darkmode" class="btn btn-icon" title="Tema chiaro/scuro" aria-label="Tema">
+                <svg id="icon-sun" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="display:none">
+                    <circle cx="6" cy="6" r="2.5"/>
+                    <path d="M6 1v1.5M6 9.5V11M1 6h1.5M9.5 6H11M2.5 2.5l1 1M8.5 8.5l1 1M2.5 9.5l1-1M8.5 3.5l1-1"/>
+                </svg>
+                <svg id="icon-moon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 7.5A4.5 4.5 0 0 1 4.5 2 4.5 4.5 0 1 0 10 7.5z"/>
+                </svg>
+            </button>
         </div>
     </div>
 
@@ -40,37 +49,50 @@
         <div class="layout">
             <!-- SIDEBAR -->
             <div class="sidebar" id="sidebar-domini">
-                <button class="rail-espandi" data-action="toggle-sidebar" title="Mostra domini" aria-label="Mostra pannello domini">&#xBB;</button>
                 <div class="card">
-                    <div class="sidebar-header">
-                        <h2>Domini (<span id="count-domini">0</span>)</h2>
-                        <button class="btn-collassa" data-action="toggle-sidebar" title="Nascondi domini" aria-label="Nascondi pannello domini">&#xAB;</button>
+                    <div class="side-search">
+                        <input class="filtro-input" type="text" placeholder="Filtra domini..." data-action="filtro">
                     </div>
-                    <input class="filtro-input" type="text" placeholder="Filtra domini/IP..." data-action="filtro">
                     <div class="dominio-list" id="lista-domini">
-                        <div class="sezione-domini" id="sezione-ai" style="display:none">
-                            <h3 class="ai-header">AI (<span id="count-ai">0</span>)</h3>
+                        <div class="sezione-domini" id="sezione-ai">
+                            <h3 class="ai-header" data-action="toggle-sezione" data-sezione="ai">
+                                <svg class="chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5L5 4L2 6.5"/></svg>
+                                <span class="label">AI</span>
+                                <span class="count" id="count-ai">0</span>
+                            </h3>
                             <div id="domini-ai-list"></div>
                         </div>
-                        <div class="sezione-domini">
-                            <h3>Siti (<span id="count-siti">0</span>)</h3>
+                        <div class="sezione-domini" id="sezione-siti">
+                            <h3 data-action="toggle-sezione" data-sezione="siti">
+                                <svg class="chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5L5 4L2 6.5"/></svg>
+                                <span class="label">Siti</span>
+                                <span class="count" id="count-siti">0</span>
+                            </h3>
                             <div id="domini-siti-list"></div>
                         </div>
-                        <div class="sezione-domini" id="sezione-sistema" style="display:none">
-                            <h3>Sistema (<span id="count-sistema">0</span>)
-                                <button class="btn-toggle" data-action="toggle-sezione" data-sezione="sistema">+</button>
+                        <div class="sezione-domini collapsed" id="sezione-sistema">
+                            <h3 data-action="toggle-sezione" data-sezione="sistema">
+                                <svg class="chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5L5 4L2 6.5"/></svg>
+                                <span class="label">Sistema</span>
+                                <span class="count" id="count-sistema">0</span>
                             </h3>
-                            <div id="domini-sistema-list" class="hidden"></div>
+                            <div id="domini-sistema-list"></div>
                         </div>
-                        <div class="sezione-domini" id="sezione-bloccati" style="display:none">
-                            <h3 class="bloccati-header">Bloccati (<span id="count-bloccati">0</span>)</h3>
+                        <div class="sezione-domini" id="sezione-bloccati">
+                            <h3 class="bloccati-header" data-action="toggle-sezione" data-sezione="bloccati">
+                                <svg class="chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5L5 4L2 6.5"/></svg>
+                                <span class="label">Bloccati</span>
+                                <span class="count" id="count-bloccati">0</span>
+                            </h3>
                             <div id="domini-bloccati-list"></div>
                         </div>
-                        <div class="sezione-domini" id="sezione-nascosti" style="display:none">
-                            <h3 class="nascosti-header">Nascosti (<span id="count-nascosti">0</span>)
-                                <button class="btn-toggle" data-action="toggle-sezione" data-sezione="nascosti">+</button>
+                        <div class="sezione-domini collapsed" id="sezione-nascosti">
+                            <h3 class="nascosti-header" data-action="toggle-sezione" data-sezione="nascosti">
+                                <svg class="chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5L5 4L2 6.5"/></svg>
+                                <span class="label">Nascosti</span>
+                                <span class="count" id="count-nascosti">0</span>
                             </h3>
-                            <div id="domini-nascosti-list" class="hidden"></div>
+                            <div id="domini-nascosti-list"></div>
                         </div>
                     </div>
                 </div>
@@ -79,92 +101,145 @@
             <!-- MAIN -->
             <div class="main">
                 <div class="toolbar">
-                    <div class="toolbar-group">
-                        <button data-action="session-toggle" id="btn-sessione" class="btn btn-primary">Rec sessione</button>
-                        <span class="sep big"></span>
-                        <button data-action="pausa-toggle" id="btn-pausa" class="btn block" title="Blocca tutti i domini">Blocca tutto</button>
-                        <button data-action="block-all-ai" class="btn block">Blocca AI</button>
-                        <button data-action="unblock-all-ai" class="btn">Sblocca AI</button>
-                        <details class="menu-overflow">
-                            <summary class="btn btn-icon" title="Altre azioni" aria-label="Altre azioni">&#x22EE;</summary>
-                            <div class="menu-overflow-panel">
-                                <div class="menu-sezione">
-                                    <div class="menu-sezione-titolo">Blocklist</div>
-                                    <button data-action="clear-blocklist" class="menu-item danger">Svuota blocklist</button>
-                                </div>
-                                <div class="menu-sezione">
-                                    <div class="menu-sezione-titolo">Preset blocklist</div>
-                                    <select id="preset-select" data-action="preset-load" class="menu-select">
-                                        <option value="">-- Carica preset --</option>
-                                    </select>
-                                    <button data-action="preset-save" class="menu-item">Salva preset corrente</button>
-                                </div>
-                                <div class="menu-sezione">
-                                    <button data-action="export" class="menu-item">Esporta JSON sessione</button>
-                                </div>
-                            </div>
-                        </details>
-                    </div>
-                    <div class="toolbar-group toolbar-right">
-                        <label class="deadline-label">Fine:
-                            <input type="time" id="input-deadline" data-action="set-deadline">
-                        </label>
-                        <button data-action="clear-deadline" class="btn btn-icon" title="Annulla countdown">X</button>
+                    <!-- Sidebar toggle (sinistra). -->
+                    <button data-action="toggle-sidebar" id="btn-toggle-sidebar" class="btn btn-icon" title="Mostra/nascondi sidebar domini" aria-label="Sidebar">
+                        <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="1.5" y="2" width="9" height="8" rx="1"/>
+                            <path d="M4.5 2v8"/>
+                            <path id="sidebar-arrow" d="M7 4.5L8.5 6L7 7.5"/>
+                        </svg>
+                    </button>
+                    <span class="sep"></span>
+                    <button data-action="session-start" id="btn-rec" class="btn btn-primary" title="Avvia registrazione sessione">
+                        <span class="rec-dot"></span>
+                        Rec sessione
+                    </button>
+                    <button data-action="session-stop" id="btn-stop" class="btn" title="Ferma e archivia la sessione">
+                        <span class="stop-square"></span>
+                        Stop
+                    </button>
+                    <span class="sep big"></span>
+                    <button data-action="pausa-toggle" id="btn-pausa" class="btn block" title="Blocca tutti i domini">
+                        Blocca tutto
+                    </button>
+                    <button data-action="block-ai-toggle" id="btn-block-ai" class="btn block" title="Blocca solo i domini AI">
+                        Blocca AI
+                    </button>
+                    <button data-action="reset-tutto" id="btn-reset-tutto" class="btn reset" title="Sblocca tutti i domini e gli schermi">
+                        Reset
+                    </button>
+                    <div class="toolbar-right">
+                        <span id="rec-timer" class="rec-timer hidden">&#x25CF; rec 00:00:00</span>
+                        <input id="filtro-toolbar" class="search-input" type="text" placeholder="Studente o IP..." data-action="filtro">
+                        <button data-action="toggle-stream" id="btn-toggle-stream" class="btn btn-icon" title="Mostra/nascondi stream live" aria-label="Stream">
+                            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="1.5" y="2" width="9" height="8" rx="1"/>
+                                <path d="M7.5 2v8"/>
+                                <path id="stream-arrow" d="M3.5 4.5L5 6L3.5 7.5"/>
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
-                <!-- Toolbar Veyon: visibile solo se Veyon e' configurato (CSS body.veyon-on). -->
-                <div class="toolbar toolbar-veyon">
-                    <div class="toolbar-group">
-                        <span class="hint-inline">Azioni classe:</span>
-                        <button data-action="veyon-classe-lock" class="btn" title="Blocca schermo">🔒 Lock</button>
-                        <button data-action="veyon-classe-unlock" class="btn" title="Sblocca schermo">🔓 Unlock</button>
-                        <button data-action="veyon-classe-msg" class="btn" title="Mostra un messaggio">💬 Messaggio</button>
-                        <button data-action="veyon-distribuisci-proxy" class="btn btn-primary" title="Distribuisce proxy_on.vbs su tutti gli studenti (esecuzione silenziosa)">📁 Distribuisci proxy</button>
-                        <button data-action="veyon-disinstalla-proxy" class="btn" title="Distribuisce proxy_off.vbs (rimuove il proxy)">🚫 Rimuovi proxy</button>
-                        <span class="hint-inline" style="margin-left:auto">Power:</span>
-                        <button data-action="veyon-classe-reboot" class="btn btn-warning" title="Riavvia">🔄 Reboot</button>
-                        <button data-action="veyon-classe-poweroff" class="btn btn-danger" title="Spegni">⏻ Off</button>
+                <!-- Action toolbar (Claude Designer): sempre visibile, sfondo surface-2. -->
+                <div class="toolbar action-toolbar">
+                    <button data-action="veyon-distribuisci-proxy" class="btn" title="Distribute proxy to all students (silent)">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 1v3M8 1v3M3 4h6v3a3 3 0 0 1-6 0V4zM6 10v1.5"/></svg>
+                        Send proxy
+                    </button>
+                    <button data-action="veyon-disinstalla-proxy" class="btn" title="Remove proxy from students">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 1v3M8 1v3M3 4h6v3a3 3 0 0 1-6 0V4zM6 10v1.5M1 1l10 10"/></svg>
+                        Remove proxy
+                    </button>
+                    <span class="sep"></span>
+                    <button data-action="veyon-classe-msg" class="btn" title="Send a broadcast message">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.5 2.5h9v6h-5L3.5 10.5v-2H1.5v-6z"/></svg>
+                        Send message
+                    </button>
+                    <span class="sep"></span>
+                    <button data-action="veyon-classe-lock" class="btn" title="Lock student screens">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V3.5a2 2 0 1 1 4 0v2"/></svg>
+                        Lock screens
+                    </button>
+                    <button data-action="veyon-classe-unlock" class="btn" title="Unlock student screens">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V3.5a2 2 0 0 1 3.8-.9"/></svg>
+                        Unlock screens
+                    </button>
+                    <div class="toolbar-right">
+                        <div class="view-seg" role="radiogroup" aria-label="View">
+                            <button class="view-seg-btn" data-action="vista-griglia" id="btn-vseg-griglia" title="Grid view">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4">
+                                    <rect x="1.5" y="1.5" width="3.5" height="3.5"/><rect x="7" y="1.5" width="3.5" height="3.5"/>
+                                    <rect x="1.5" y="7" width="3.5" height="3.5"/><rect x="7" y="7" width="3.5" height="3.5"/>
+                                </svg>
+                                Grid
+                            </button>
+                            <button class="view-seg-btn" data-action="vista-lista" id="btn-vseg-lista" title="List view">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                                    <path d="M2 3h8M2 6h8M2 9h8"/>
+                                </svg>
+                                List
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 <div class="stat-row">
-                    <div class="stat-card"><div class="numero" id="stat-richieste">0</div><div class="etichetta">Richieste</div></div>
-                    <div class="stat-card"><div class="numero" id="stat-domini">0</div><div class="etichetta">Domini</div></div>
-                    <div class="stat-card"><div class="numero" id="stat-ip">0</div><div class="etichetta">IP attivi</div></div>
-                    <div class="stat-card"><div class="numero" id="stat-durata">0:00</div><div class="etichetta">Durata</div></div>
-                    <div class="stat-card status"><div class="numero" id="stat-status">-</div><div class="etichetta" id="stat-modo">Stato</div></div>
+                    <div class="stat-card">
+                        <div class="etichetta">Richieste totali</div>
+                        <div class="numero" id="stat-richieste">0</div>
+                        <div class="stat-sub" id="stat-richieste-sub">+0 ultimi 60s</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="etichetta">AI rilevate</div>
+                        <div class="numero" id="stat-ai">0</div>
+                        <div class="stat-sub" id="stat-ai-sub">nessuna</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="etichetta">Bloccate</div>
+                        <div class="numero" id="stat-bloccate">0</div>
+                        <div class="stat-sub">policy &middot; ultimi 5m</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="etichetta">Studenti attivi</div>
+                        <div class="numero">
+                            <span id="stat-attivi">0</span><span class="num-sub">/30</span>
+                        </div>
+                        <div class="stat-sub ok" id="stat-attivi-sub">0 idle</div>
+                    </div>
+                    <div class="stat-card status">
+                        <div class="etichetta">Status</div>
+                        <div class="numero">
+                            <span class="live-pill"><span class="dot ok"></span> LIVE</span>
+                        </div>
+                        <div class="stat-sub" id="stat-modo">proxy :9090 &middot; web :9999</div>
+                    </div>
                 </div>
 
                 <div class="main-panels">
                     <div class="panel">
-                        <div class="card">
-                            <div class="card-header">
-                                <h2 id="panel-ip-titolo">Traffico per IP</h2>
-                                <div class="view-toggle">
-                                    <button data-action="vista-griglia" id="btn-vista-griglia" class="btn-view" title="Vista a griglia">&#x25A6;</button>
-                                    <button data-action="vista-lista" id="btn-vista-lista" class="btn-view" title="Vista a lista">&#x2630;</button>
-                                </div>
-                            </div>
-                            <!-- Selection bar: appare solo quando selectedIps.size > 0. Renderizzata da renderSelectionBar(). -->
-                            <div id="selection-bar" class="selection-bar hidden"></div>
-                            <!-- Pannello eventi watchdog: appare solo se ci sono eventi recenti. -->
-                            <div id="watchdog-events-panel" class="watchdog-events-panel hidden"></div>
-                            <div class="card-scroll" id="ip-container"></div>
-                        </div>
-                    </div>
-                    <div class="panel narrow" id="panel-richieste">
-                        <button class="rail-espandi" data-action="toggle-richieste" title="Mostra ultime richieste" aria-label="Mostra ultime richieste">&#xAB;</button>
-                        <div class="card">
-                            <div class="card-header">
-                                <h2>Ultime richieste</h2>
-                                <button class="btn-collassa" data-action="toggle-richieste" title="Nascondi ultime richieste" aria-label="Nascondi ultime richieste">&#xBB;</button>
-                            </div>
-                            <div class="card-scroll" id="lista-richieste"></div>
-                        </div>
+                        <!-- Selection bar: appare solo quando selectedIps.size > 0. -->
+                        <div id="selection-bar" class="selection-bar hidden"></div>
+                        <!-- Pannello eventi watchdog: appare solo se ci sono eventi recenti. -->
+                        <div id="watchdog-events-panel" class="watchdog-events-panel hidden"></div>
+                        <!-- Grid IP: niente header, niente wrapper card (Claude Designer). -->
+                        <div class="card-scroll" id="ip-container"></div>
                     </div>
                 </div>
             </div>
+            <!-- Stream live + detail pane: SIBLING di .main, full-height come la sidebar sx.
+                 Cosi' si estendono dall'altezza topbar al fondo, accanto alle toolbar. -->
+            <div class="panel narrow" id="panel-richieste">
+                <div class="card">
+                    <div class="stream-head">
+                        <span class="dot ok"></span>
+                        <span class="stream-title">Stream live</span>
+                        <span class="stream-rate" id="stream-rate">~0.0/s</span>
+                    </div>
+                    <div class="stream-list" id="lista-richieste"></div>
+                </div>
+            </div>
+            <div class="detail-pane hidden" id="detail-pane"></div>
         </div>
     </div>
 
@@ -242,6 +317,14 @@
 
                     <label>Soglia inattivita' (sec)</label>
                     <input type="number" data-action="settings-field" data-key="inattivitaSogliaSec" min="10" max="3600">
+
+                    <label>Notifiche AI</label>
+                    <div>
+                        <button id="btn-notifiche-settings" data-action="notifiche" class="btn" title="Beep + notifica desktop quando viene rilevato un dominio AI">
+                            <span class="notif-on">🔔 Attive</span>
+                            <span class="notif-off">🔕 Disattivate</span>
+                        </button>
+                    </div>
                 </div>
 
                 <h4 style="margin-top:16px">Porte <span class="hint-inline">(richiede riavvio)</span></h4>

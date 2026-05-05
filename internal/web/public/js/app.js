@@ -22,7 +22,7 @@
  */
 
 import { state, assorbiEntry } from './state.js';
-import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown } from './render.js';
+import { renderAll, renderAllSync, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown, avviaTopbarClock, avviaRecTimer } from './render.js';
 import { avviaSSE } from './sse.js';
 import * as actions from './actions.js';
 
@@ -34,17 +34,28 @@ import * as actions from './actions.js';
  *   relativi che dipendono da `Date.now()`).
  */
 async function init() {
+    console.log('[planck] init() start');
     const [cfgRes, histRes, sesRes, setRes] = await Promise.all([
         fetch('/api/config').then(r => r.json()),
         fetch('/api/history').then(r => r.json()),
         fetch('/api/sessioni').then(r => r.json()).catch(() => ({ sessioni: [] })),
         fetch('/api/settings').then(r => r.json()).catch(() => null),
     ]);
+    console.log('[planck] init fetch done. studenti=', Object.keys(cfgRes.studenti||{}).length,
+        'entries=', (histRes.entries||[]).length,
+        'bloccati=', (histRes.bloccati||[]).length,
+        'dominiAI=', (cfgRes.dominiAI||[]).length);
 
     state.cfg = cfgRes;
     document.title = cfgRes.titolo + (cfgRes.classe ? ' - ' + cfgRes.classe : '');
 
     state.bloccati = new Set(histRes.bloccati);
+    state.blocchiPerIp = new Map();
+    if (histRes.blocchiPerIp) {
+        for (const [ip, doms] of Object.entries(histRes.blocchiPerIp)) {
+            state.blocchiPerIp.set(ip, new Set(doms));
+        }
+    }
     state.sessioneAttiva = !!histRes.sessioneAttiva;
     state.sessioneInizio = histRes.sessioneInizio || null;
     state.sessioneFineISO = histRes.sessioneFineISO || null;
@@ -66,7 +77,28 @@ async function init() {
     aggiornaInputDeadline();
     renderTabs();
     actions.applicaCollassi();
-    renderAll();
+    avviaTopbarClock();
+    avviaRecTimer();
+    // Primo render SINCRONO (no RAF): garantisce che la grid IP sia
+    // popolata immediatamente al boot. Lo eseguiamo TRE volte:
+    //   1. subito (popola DOM)
+    //   2. setTimeout(0) — dopo che il browser ha finalizzato il layout
+    //   3. RAF — dopo il prossimo paint
+    // Brutale ma elimina race con DOMContentLoaded/layout/paint che
+    // lasciava la Live tab vuota fino al primo toggle/cambio tab.
+    renderAllSync();
+    const grid = document.getElementById('ip-container');
+    console.log('[planck] post-renderAllSync grid children=', grid ? grid.querySelectorAll('.ip-card').length : 'no-container');
+    setTimeout(() => {
+        renderAllSync();
+        const g = document.getElementById('ip-container');
+        console.log('[planck] post-setTimeout(0) grid children=', g ? g.querySelectorAll('.ip-card').length : 'no-container');
+    }, 0);
+    requestAnimationFrame(() => {
+        renderAllSync();
+        const g = document.getElementById('ip-container');
+        console.log('[planck] post-RAF grid children=', g ? g.querySelectorAll('.ip-card').length : 'no-container');
+    });
     avviaSSE();
 
     // Veyon: status (sapere se mostrare i bottoni inline + classe).
@@ -106,6 +138,7 @@ document.body.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (!el) return;
     const action = el.dataset.action;
+    console.log('[planck] click action=', action, 'target=', el.id || el.className);
     const d = el.dataset.dominio;
     const ip = el.dataset.ip;
     const nome = el.dataset.nome;
@@ -123,15 +156,23 @@ document.body.addEventListener('click', (e) => {
         case 'focus-ip': actions.handleCardClick(ip, e); break;
         case 'clear-selection': actions.clearSelection(); break;
         case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
+        case 'detail-close': e.stopPropagation(); actions.chiudiDetail(); break;
+        case 'detail-blocca-dominio': e.stopPropagation(); actions.detailBloccaDominio(); break;
+        case 'unblock-per-ip': e.stopPropagation(); actions.sbloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
         case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
         case 'vista-griglia': actions.cambiaVistaIp('griglia'); break;
         case 'vista-lista': actions.cambiaVistaIp('lista'); break;
         case 'toggle-sidebar': actions.toggleSidebar(); break;
         case 'toggle-richieste': actions.toggleRichieste(); break;
+        case 'toggle-stream': actions.toggleRichieste(); break;
         case 'session-toggle': actions.toggleSessione(); break;
+        case 'session-start': actions.startSessione(); break;
+        case 'session-stop': actions.stopSessione(); break;
         case 'export': actions.esportaSessione(); break;
         case 'block-all-ai': actions.bloccaAI(); break;
         case 'unblock-all-ai': actions.sbloccaAI(); break;
+        case 'block-ai-toggle': actions.toggleBloccaAI(); break;
+        case 'reset-tutto': actions.resetTutto(); break;
         case 'clear-blocklist': actions.svuotaBlocklist(); break;
         case 'preset-save': actions.salvaPreset(); break;
         case 'darkmode': actions.toggleDarkmode(); break;
@@ -148,6 +189,7 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-card-lock': e.stopPropagation(); actions.veyonCardLock(el.dataset.ip); break;
         case 'veyon-card-unlock': e.stopPropagation(); actions.veyonCardUnlock(el.dataset.ip); break;
         case 'veyon-card-msg': e.stopPropagation(); actions.veyonCardMsg(el.dataset.ip); break;
+        case 'veyon-card-disinstalla-proxy': e.stopPropagation(); actions.veyonCardDisinstallaProxy(el.dataset.ip); break;
         case 'veyon-classe-lock': actions.veyonClasseLock(); break;
         case 'veyon-classe-unlock': actions.veyonClasseUnlock(); break;
         case 'veyon-classe-msg': actions.veyonClasseMsg(); break;

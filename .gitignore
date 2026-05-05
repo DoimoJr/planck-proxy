@@ -29,6 +29,9 @@ ai-domains-cache.txt
 # Log file (rigenerato ad ogni boot, file di sessione corrente).
 planck.log
 
+# PID file usato per single-instance lock (rigenerato ad ogni boot).
+planck.pid
+
 # Profile dir Edge/Chrome usata per la finestra app-mode (cookies,
 # cache, ecc., dedicata e isolata da quella personale dell'utente).
 .planck-browser-profile/

@@ -120,7 +120,7 @@ func TestBlockUnblockFlow(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("block status = %d", rec.Code)
 	}
-	if !s.DominioBloccato("www.instagram.com") {
+	if !s.DominioBloccato("www.instagram.com", "") {
 		t.Errorf("dopo block, www.instagram.com dovrebbe essere bloccato")
 	}
 
@@ -129,7 +129,7 @@ func TestBlockUnblockFlow(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unblock status = %d", rec.Code)
 	}
-	if s.DominioBloccato("www.instagram.com") {
+	if s.DominioBloccato("www.instagram.com", "") {
 		t.Errorf("dopo unblock, non dovrebbe essere bloccato")
 	}
 }

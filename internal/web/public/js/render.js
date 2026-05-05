@@ -67,12 +67,7 @@ export function renderSidebar() {
     $('count-sistema').textContent = sistema.length;
     $('count-bloccati').textContent = state.bloccati.size;
     $('count-nascosti').textContent = nascostiList.length;
-    $('count-domini').textContent = state.perDominio.size;
-
-    $('sezione-ai').style.display = ai.length > 0 ? '' : 'none';
-    $('sezione-sistema').style.display = sistema.length > 0 ? '' : 'none';
-    $('sezione-bloccati').style.display = state.bloccati.size > 0 ? '' : 'none';
-    $('sezione-nascosti').style.display = nascostiList.length > 0 ? '' : 'none';
+    const cntDom = $('count-domini'); if (cntDom) cntDom.textContent = state.perDominio.size;
 }
 
 /**
@@ -105,7 +100,7 @@ function renderListaDomini(elId, items, tipoClass, isNascosto) {
             btn.dataset.action = 'blocca';
             btn.dataset.dominio = dominio;
             btn.title = 'Blocca';
-            btn.textContent = 'X';
+            btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 2L8 8M8 2L2 8"/></svg>';
             div.append(nome, count, btn);
             return div;
         },
@@ -148,7 +143,7 @@ function renderListaBloccati(elId, items) {
             btn.dataset.action = 'sblocca';
             btn.dataset.dominio = r.dominio;
             btn.title = 'Sblocca';
-            btn.textContent = 'OK';
+            btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5L4.2 7.2L8 3"/></svg>';
             div.append(nome, count, btn);
             return div;
         },
@@ -185,27 +180,72 @@ function contaAttive(entries) {
  * congela quando la sessione e' ferma (usa `sessioneFineISO` al posto di now).
  */
 export function renderStats() {
-    const ips = state.focusIp ? 1 : state.perIp.size;
     const fonte = state.focusIp ? (state.perIp.get(state.focusIp) || []) : state.entries;
-    $('stat-richieste').textContent = contaAttive(fonte);
-    $('stat-domini').textContent = state.perDominio.size;
-    $('stat-ip').textContent = ips;
 
-    if (state.sessioneInizio) {
-        const fine = state.sessioneAttiva
-            ? Date.now()
-            : (state.sessioneFineISO ? new Date(state.sessioneFineISO).getTime() : Date.now());
-        const sec = Math.max(0, Math.floor((fine - new Date(state.sessioneInizio).getTime()) / 1000));
-        $('stat-durata').textContent = formatDurata(sec);
-    } else {
-        $('stat-durata').textContent = '0:00';
+    // 1) Richieste totali (escluse "sistema") + sub "+N ultimi 60s".
+    const tot = contaAttive(fonte);
+    $('stat-richieste').textContent = tot.toLocaleString('it');
+    const ora = Date.now();
+    let last60 = 0;
+    for (const e of state.entries) {
+        if (e.tipo === 'sistema') continue;
+        if (e.ts && (ora - e.ts) < 60000) last60++;
+    }
+    const subRich = $('stat-richieste-sub');
+    if (subRich) subRich.textContent = `+${last60} ultimi 60s`;
+    const rateEl = $('stream-rate');
+    if (rateEl) rateEl.textContent = `~${(last60 / 60).toFixed(1)}/s`;
+
+    // 2) AI rilevate: count IP unici con almeno una richiesta tipo='ai'.
+    //    Numero rosso (.alert) e sub colorata se >0.
+    const aiIps = new Set();
+    for (const e of state.entries) if (e.tipo === 'ai') aiIps.add(e.ip);
+    const aiCount = aiIps.size;
+    const aiEl = $('stat-ai');
+    if (aiEl) {
+        aiEl.textContent = aiCount;
+        // applica .alert sulla CARD (toggle), così .stat-card.alert .numero { color: alert }
+        const aiCard = aiEl.closest('.stat-card');
+        if (aiCard) aiCard.classList.toggle('alert', aiCount > 0);
+    }
+    const aiSub = $('stat-ai-sub');
+    if (aiSub) {
+        aiSub.textContent = aiCount === 0 ? 'nessuna' :
+            (aiCount === 1 ? '1 studente' : `${aiCount} studenti`);
+        aiSub.classList.toggle('alert', aiCount > 0);
     }
 
+    // 3) Bloccate: count entries con blocked=true.
+    const blkEl = $('stat-bloccate');
+    if (blkEl) {
+        let blk = 0;
+        for (const e of state.entries) if (e.blocked) blk++;
+        blkEl.textContent = blk;
+    }
+
+    // 4) Studenti attivi: IP che hanno avuto traffico negli ultimi
+    //    `inattivitaSogliaSec` secondi. Sub "X idle" (totale - attivi).
+    const sogliaMs = (state.cfg.inattivitaSogliaSec || 180) * 1000;
+    let attivi = 0;
+    for (const [, oraStr] of state.ultimaPerIp) {
+        const t = Date.parse(oraStr.replace(' ', 'T') + 'Z');
+        if (!isNaN(t) && (ora - t) < sogliaMs) attivi++;
+    }
+    const tot30 = Object.keys(state.cfg.studenti || {}).length || 30;
+    const attEl = $('stat-attivi');
+    if (attEl) attEl.textContent = attivi;
+    const attSub = $('stat-attivi-sub');
+    if (attSub) attSub.textContent = `${Math.max(0, tot30 - attivi)} idle`;
+
+    // 5) Status: sub line proxy/web ports (la pill LIVE e' statica nell'HTML).
     const modoEl = $('stat-modo');
-    let label = state.cfg.modo === 'allowlist' ? 'MODO: ALLOW' : 'MODO: BLOCK';
-    if (state.pausato) label = 'IN PAUSA';
-    if (!state.sessioneAttiva) label = 'SESSIONE FERMA';
-    modoEl.textContent = label;
+    if (modoEl) {
+        const proxyPort = state.cfg?.proxy?.port || state.settings?.proxy?.port || 9090;
+        const webPort = state.cfg?.web?.port || state.settings?.web?.port || 9999;
+        if (state.pausato) modoEl.textContent = 'IN PAUSA';
+        else if (!state.sessioneAttiva) modoEl.textContent = 'sessione ferma';
+        else modoEl.textContent = `proxy :${proxyPort} · web :${webPort}`;
+    }
 }
 
 /**
@@ -213,32 +253,113 @@ export function renderStats() {
  * allo stato, e mostra l'indicatore PAUSA in topbar se attivo.
  */
 export function renderPausaEBottoni() {
+    // "Blocca tutto" toggle (era "Pausa"): off = tinted (.btn.block),
+    // on = filled rosso + dot bianco pulsante (.btn.block.active).
     const btn = $('btn-pausa');
-    const ind = $('pausa-indicator');
-    if (state.pausato) {
-        btn.textContent = 'Sblocca tutto';
-        btn.classList.add('active');
-        btn.classList.add('attivo');
-        ind.classList.remove('hidden');
-    } else {
-        btn.textContent = 'Blocca tutto';
-        btn.classList.remove('active');
-        btn.classList.remove('attivo');
-        ind.classList.add('hidden');
-    }
-
-    const btnSes = $('btn-sessione');
-    if (btnSes) {
-        if (state.sessioneAttiva) {
-            btnSes.textContent = 'Stop sessione';
-            btnSes.classList.remove('btn-primary');
-            btnSes.classList.add('btn-danger');
+    if (btn) {
+        if (state.pausato) {
+            btn.textContent = 'Sblocca tutto';
+            btn.classList.add('active');
+            btn.title = 'Tutti i domini bloccati — click per riattivare';
         } else {
-            btnSes.textContent = 'Rec sessione';
-            btnSes.classList.remove('btn-danger');
-            btnSes.classList.add('btn-primary');
+            btn.textContent = 'Blocca tutto';
+            btn.classList.remove('active');
+            btn.title = 'Blocca tutti i domini';
         }
     }
+
+    // "Blocca AI" toggle: stesso pattern. Active quando TUTTI i domini AI
+    // noti (state.cfg.dominiAI) sono nel set bloccati.
+    const btnAi = $('btn-block-ai');
+    if (btnAi) {
+        const dominiAi = state.cfg.dominiAI || [];
+        const tuttiBloccati = dominiAi.length > 0 && dominiAi.every(d => state.bloccati.has(d));
+        if (tuttiBloccati) {
+            btnAi.textContent = 'Sblocca AI';
+            btnAi.classList.add('active');
+            btnAi.title = 'Tutti i domini AI bloccati — click per sbloccare';
+        } else {
+            btnAi.textContent = 'Blocca AI';
+            btnAi.classList.remove('active');
+            btnAi.title = 'Blocca tutti i domini AI noti';
+        }
+    }
+
+    // Rec/Stop: 2 bottoni distinti con stato visivo coerente.
+    //   idle      → Rec primary rosso pieno + Stop disabled neutro, timer hidden
+    //   recording → Rec con classe .recording + dot pulse, disabled (no double-start)
+    //               Stop enabled neutro, timer visibile e in scorrimento.
+    const btnRec = $('btn-rec');
+    const btnStop = $('btn-stop');
+    if (btnRec) {
+        btnRec.disabled = state.sessioneAttiva;
+        btnRec.classList.toggle('recording', state.sessioneAttiva);
+        // Sostituisce solo il TEXT NODE finale, preservando il <span class="rec-dot">.
+        const last = btnRec.lastChild;
+        const label = state.sessioneAttiva ? ' Sta registrando' : ' Rec sessione';
+        if (last && last.nodeType === Node.TEXT_NODE) {
+            if (last.textContent !== label) last.textContent = label;
+        } else {
+            btnRec.appendChild(document.createTextNode(label));
+        }
+        btnRec.title = state.sessioneAttiva
+            ? 'Registrazione in corso — clicca Stop per archiviare'
+            : 'Avvia registrazione sessione';
+    }
+    if (btnStop) {
+        btnStop.disabled = !state.sessioneAttiva;
+        btnStop.title = state.sessioneAttiva
+            ? 'Ferma e archivia la sessione'
+            : 'Nessuna sessione attiva';
+    }
+}
+
+/**
+ * Sincronizza le frecce SVG dei toggle sidebar/stream con lo stato.
+ * Aperto: freccia che "spinge via" il pannello (chiude). Chiuso:
+ * freccia che "tira fuori" il pannello (apre). Direzioni opposte
+ * per il pulsante sx vs dx.
+ */
+export function aggiornaToggleArrows() {
+    const sidebarArrow = document.getElementById('sidebar-arrow');
+    if (sidebarArrow) {
+        // Sidebar SX: aperta=>comprimi (freccia `>`), chiusa=>espandi (freccia `<`)
+        sidebarArrow.setAttribute('d', state.sidebarCollassata
+            ? 'M8.5 4.5L7 6l1.5 1.5'
+            : 'M7 4.5L8.5 6L7 7.5');
+    }
+    const streamArrow = document.getElementById('stream-arrow');
+    if (streamArrow) {
+        // Stream DX: aperto=>comprimi (freccia `<`), chiuso=>espandi (freccia `>`)
+        streamArrow.setAttribute('d', state.richiesteCollassate
+            ? 'M3.5 4.5L5 6L3.5 7.5'
+            : 'M5 4.5L3.5 6l1.5 1.5');
+    }
+}
+
+/**
+ * Avvia il rec timer mono in toolbar (HH:MM:SS, refresh ogni 1s).
+ * Visibile solo a sessione attiva.
+ */
+export function avviaRecTimer() {
+    const tick = () => {
+        const el = document.getElementById('rec-timer');
+        if (!el) return;
+        if (!state.sessioneAttiva || !state.sessioneInizio) {
+            el.classList.add('hidden');
+            return;
+        }
+        el.classList.remove('hidden');
+        const start = Date.parse(state.sessioneInizio);
+        if (isNaN(start)) return;
+        const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+        const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+        const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+        const s = String(sec % 60).padStart(2, '0');
+        el.textContent = `● rec ${h}:${m}:${s}`;
+    };
+    tick();
+    setInterval(tick, 1000);
 }
 
 // ========================================================================
@@ -255,6 +376,7 @@ export function renderPausaEBottoni() {
  */
 export function renderCountdown() {
     const el = $('countdown-display');
+    if (!el) return; // countdown rimosso dalla topbar nel redesign Claude Designer
     if (!state.deadlineISO) {
         el.textContent = '';
         el.className = 'countdown';
@@ -351,10 +473,11 @@ export function renderTabellaIp() {
     const ora = Date.now();
     const soglia = state.cfg.inattivitaSogliaSec * 1000;
 
-    const btnG = $('btn-vista-griglia');
-    const btnL = $('btn-vista-lista');
-    if (btnG) btnG.classList.toggle('attivo', state.vistaIp === 'griglia');
-    if (btnL) btnL.classList.toggle('attivo', state.vistaIp === 'lista');
+    // View segmented control nella action toolbar (Claude Designer).
+    const segG = document.getElementById('btn-vseg-griglia');
+    const segL = document.getElementById('btn-vseg-lista');
+    if (segG) segG.classList.toggle('active', state.vistaIp === 'griglia');
+    if (segL) segL.classList.toggle('active', state.vistaIp === 'lista');
 
     if (state.vistaIp === 'lista') {
         renderListaIp(container, ips, ora, soglia);
@@ -381,8 +504,20 @@ function scheletroVistaIp(container, vista) {
     container.textContent = '';
     container.dataset.vista = vista;
     if (vista === 'lista') {
+        // 8 colonne come da Claude Designer: status dot | studente | IP |
+        // REQ | ULTIMA | DOMINI RECENTI | WATCHDOG | STATO.
         const table = document.createElement('table');
-        table.innerHTML = '<thead><tr><th title="Watchdog">WD</th><th>Studente / IP</th><th>N</th><th>Ultima</th><th>Domini</th></tr></thead><tbody></tbody>';
+        table.className = 'ip-list-table';
+        table.innerHTML = '<thead><tr>'
+            + '<th class="col-status"></th>'
+            + '<th class="col-studente">STUDENTE</th>'
+            + '<th class="col-ip">IP</th>'
+            + '<th class="col-req">REQ</th>'
+            + '<th class="col-ultima">ULTIMA</th>'
+            + '<th class="col-domini">DOMINI RECENTI</th>'
+            + '<th class="col-wd">WATCHDOG</th>'
+            + '<th class="col-stato">STATO</th>'
+            + '</tr></thead><tbody></tbody>';
         container.appendChild(table);
         return table.querySelector('tbody');
     }
@@ -440,6 +575,9 @@ function syncTagsDominio(container, domini, extra) {
  * Costruisce/aggiorna la vista a tabella nel tbody: una riga per IP,
  * riusa le `<tr>` esistenti tramite syncChildren.
  */
+/** Numero massimo di chip dominio mostrati nella riga lista (overflow → +N). */
+const DOMINI_LISTA_MAX = 4;
+
 function renderListaIp(container, ips, ora, soglia) {
     const body = scheletroVistaIp(container, 'lista');
     syncChildren(body, ips,
@@ -448,54 +586,100 @@ function renderListaIp(container, ips, ora, soglia) {
             const tr = document.createElement('tr');
             tr.dataset.action = 'focus-ip';
             tr.dataset.ip = ip;
-            tr.innerHTML = '<td><span class="watchdog-dot"></span></td>'
-                + '<td></td>'
-                + '<td class="col-n"></td>'
-                + '<td><span class="ultima-attivita"></span></td>'
-                + '<td class="col-tags"></td>';
+            tr.innerHTML = '<td class="col-status"><span class="dot"></span></td>'
+                + '<td class="col-studente"></td>'
+                + '<td class="col-ip"><span class="ip-text"></span><span class="ip-row-blocks hidden"></span></td>'
+                + '<td class="col-req"></td>'
+                + '<td class="col-ultima"></td>'
+                + '<td class="col-domini"><span class="chips"></span></td>'
+                + '<td class="col-wd"><span class="dot"></span></td>'
+                + '<td class="col-stato"></td>';
             return tr;
         },
         (tr, ip) => {
             const s = calcolaStatoIp(ip, ora, soglia);
+            const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
+            const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
+            const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
+
+            // Stato uniforme alle card (Claude Designer):
+            // active(default) → idle se inattivo → watchdog → ai → selected
+            let stato = 'active';
+            if (s.inattivo) stato = 'idle';
+            if (hasWD) stato = 'watchdog';
+            if (hasAI) stato = 'ai';
+            if (state.focusIp === ip) stato = 'selected';
+            if (tr.dataset.state !== stato) tr.dataset.state = stato;
+
             const rowClass = [];
-            if (s.inattivo) rowClass.push('inattivo');
-            if (state.focusIp === ip) rowClass.push('focus');
-            if (state.selectedIps.has(ip)) rowClass.push('selected');
+            if (state.selectedIps.has(ip)) rowClass.push('multi');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) rowClass.push('filtro-hidden');
             const nuova = rowClass.join(' ');
             if (tr.className !== nuova) tr.className = nuova;
 
             const tds = tr.children;
-            const wd = tds[0].firstElementChild;
-            const wdClass = `watchdog-dot ${s.wd.classe}`;
-            if (wd.className !== wdClass) wd.className = wdClass;
-            if (wd.title !== s.wd.titolo) wd.title = s.wd.titolo;
 
-            const labelTd = tds[1];
-            // Ricostruisci solo se cambia la presenza del nome (cambio raro).
-            const hasNome = labelTd.firstElementChild?.classList?.contains('nome-studente');
-            if (!!s.nome !== !!hasNome || (s.nome && labelTd.firstElementChild.textContent !== s.nome)) {
-                labelTd.textContent = '';
-                if (s.nome) {
-                    const a = document.createElement('span'); a.className = 'nome-studente'; a.textContent = s.nome;
-                    const b = document.createElement('span'); b.className = 'ip-sub'; b.textContent = ip;
-                    labelTd.append(a, ' ', b);
+            // Col 0: status dot (verde/grigio/rosso/arancione in base a stato)
+            const statusDot = tds[0].firstElementChild;
+            const dotClass = ({
+                active: 'dot ok',
+                idle: 'dot muted',
+                ai: 'dot alert',
+                watchdog: 'dot warn',
+                selected: 'dot info',
+            })[stato] || 'dot';
+            if (statusDot.className !== dotClass) statusDot.className = dotClass;
+
+            // Col 1: nome studente (fallback IP last octet se senza nome).
+            const nomeTxt = s.nome || ('.' + ip.split('.').pop());
+            if (tds[1].textContent !== nomeTxt) tds[1].textContent = nomeTxt;
+
+            // Col 2: IP completo mono + badge blocchi per-IP (⊘N) se >0.
+            const ipTextEl = tds[2].querySelector('.ip-text');
+            if (ipTextEl && ipTextEl.textContent !== ip) ipTextEl.textContent = ip;
+            const rowBlocksEl = tds[2].querySelector('.ip-row-blocks');
+            const perIpSet = state.blocchiPerIp.get(ip);
+            if (rowBlocksEl) {
+                if (perIpSet && perIpSet.size > 0) {
+                    const txt = '⊘' + perIpSet.size;
+                    if (rowBlocksEl.textContent !== txt) rowBlocksEl.textContent = txt;
+                    rowBlocksEl.classList.remove('hidden');
                 } else {
-                    const a = document.createElement('span'); a.className = 'ip-label'; a.textContent = ip;
-                    labelTd.append(a);
+                    rowBlocksEl.classList.add('hidden');
                 }
             }
 
+            // Col 3: REQ (numero richieste utente+ai, no sistema).
             const nStr = String(s.listaAttive.length);
-            if (tds[2].textContent !== nStr) tds[2].textContent = nStr;
+            if (tds[3].textContent !== nStr) tds[3].textContent = nStr;
 
-            const ultimaSpan = tds[3].firstElementChild;
+            // Col 4: Ultima attività relativa.
             const ultimaTxt = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '-';
-            if (ultimaSpan.textContent !== ultimaTxt) ultimaSpan.textContent = ultimaTxt;
-            const ultimaCls = `ultima-attivita${s.inattivo ? ' inattivo' : ''}`;
-            if (ultimaSpan.className !== ultimaCls) ultimaSpan.className = ultimaCls;
+            if (tds[4].textContent !== ultimaTxt) tds[4].textContent = ultimaTxt;
 
-            syncTagsDominio(tds[4], [...s.dominiMap.entries()], 0);
+            // Col 5: chips dei domini recenti, max DOMINI_LISTA_MAX, +N overflow.
+            const tuttiDom = [...s.dominiMap.entries()];
+            const visibili = tuttiDom.slice(-DOMINI_LISTA_MAX);
+            const extra = Math.max(0, tuttiDom.length - visibili.length);
+            syncTagsDominio(tds[5].firstElementChild, visibili, extra);
+
+            // Col 6: watchdog dot (s.wd.classe = ok/warn/muted).
+            const wdDot = tds[6].firstElementChild;
+            const wdClass = `dot ${s.wd.classe || 'muted'}`;
+            if (wdDot.className !== wdClass) wdDot.className = wdClass;
+            if (wdDot.title !== s.wd.titolo) wdDot.title = s.wd.titolo;
+
+            // Col 7: stato testuale (attivo/idle/ai/watchdog).
+            const statoTxt = ({
+                active: 'attivo',
+                idle: 'idle',
+                ai: 'ai',
+                watchdog: 'watchdog',
+                selected: 'attivo',
+            })[stato] || 'attivo';
+            if (tds[7].textContent !== statoTxt) tds[7].textContent = statoTxt;
+            const statoCls = 'col-stato ' + stato;
+            if (tds[7].className !== statoCls) tds[7].className = statoCls;
         }
     );
 }
@@ -552,85 +736,118 @@ function renderGrigliaIp(container, ips, ora, soglia) {
             const card = document.createElement('div');
             card.dataset.action = 'focus-ip';
             card.dataset.ip = ip;
-            card.innerHTML = '<div class="ip-card-head">'
-                + '<span class="watchdog-dot"></span>'
-                + '<div class="nome-wrap"></div>'
-                + '<span class="watchdog-event-badge" hidden></span>'
+            // Template design Claude: status dot esterno + head (nome+ip)
+            // + meta inline + chips + foot watchdog. Niente bottoni Veyon
+            // visibili (le azioni vivono nel detail pane al click).
+            card.innerHTML = '<span class="status"></span>'
+                + '<div class="ip-card-head">'
+                + '<span class="ip-card-nome"></span>'
+                + '<span class="ip-card-blocks hidden"></span>'
+                + '<span class="ip-card-ip"></span>'
                 + '</div>'
                 + '<div class="ip-card-metriche">'
-                + '<div class="ip-card-num"></div>'
-                + '<div class="ip-card-ultima"></div>'
+                + '<span><span class="ip-card-num">0</span> req</span>'
+                + '<span class="card-meta-sep">·</span>'
+                + '<span class="ip-card-ultima">-</span>'
                 + '</div>'
                 + '<div class="ip-card-tags"></div>'
-                + '<div class="ip-card-veyon">'
-                + '<button type="button" data-action="veyon-card-lock" data-ip="' + ip + '" title="Blocca schermo">🔒</button>'
-                + '<button type="button" data-action="veyon-card-unlock" data-ip="' + ip + '" title="Sblocca schermo">🔓</button>'
-                + '<button type="button" data-action="veyon-card-msg" data-ip="' + ip + '" title="Messaggio">💬</button>'
+                + '<div class="ip-card-foot">'
+                + '<span class="watchdog-dot"></span>'
+                + '<span class="wd-label">watchdog</span>'
+                + '<span class="wd-octet"></span>'
                 + '</div>';
             return card;
         },
         (card, ip) => {
             const s = calcolaStatoIp(ip, ora, soglia);
+
+            // Stato derivato (Claude Designer):
+            //   - ai: l'IP ha aperto un dominio AI (border + box-shadow rosso)
+            //   - watchdog: ci sono eventi watchdog warning/critical recenti
+            //   - selected: detail pane aperto su questo IP
+            //   - active: ha avuto traffico recente
+            //   - idle: opacity .55
+            const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
+            const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
+            const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
+            let stato = 'active';
+            if (s.inattivo) stato = 'idle';
+            if (hasWD) stato = 'watchdog';
+            if (hasAI) stato = 'ai';
+            if (state.focusIp === ip) stato = 'selected';
+            card.dataset.state = stato;
+
             const classi = ['ip-card'];
-            if (s.inattivo) classi.push('inattivo');
-            if (state.focusIp === ip) classi.push('focus');
-            if (state.selectedIps.has(ip)) classi.push('selected');
+            if (state.selectedIps.has(ip)) classi.push('multi');
             if (state.filtro && !matchFiltro(`${s.nome || ''} ${ip}`)) classi.push('filtro-hidden');
             const nuova = classi.join(' ');
             if (card.className !== nuova) card.className = nuova;
 
-            const head = card.firstElementChild;
-            const wd = head.firstElementChild;
-            const wdClass = `watchdog-dot ${s.wd.classe}`;
-            if (wd.className !== wdClass) wd.className = wdClass;
-            if (wd.title !== s.wd.titolo) wd.title = s.wd.titolo;
-
-            const nomeWrap = head.children[1];
-            const hasNome = nomeWrap.firstElementChild?.classList?.contains('ip-card-nome')
-                && !nomeWrap.firstElementChild.classList.contains('ip-card-nome-solo');
-            const needNome = !!s.nome;
-            if (needNome !== hasNome || (needNome && nomeWrap.firstElementChild.textContent !== s.nome)) {
-                nomeWrap.textContent = '';
-                if (s.nome) {
-                    const a = document.createElement('div'); a.className = 'ip-card-nome'; a.textContent = s.nome;
-                    const b = document.createElement('div'); b.className = 'ip-card-ip'; b.textContent = ip;
-                    nomeWrap.append(a, b);
-                } else {
-                    const a = document.createElement('div'); a.className = 'ip-card-nome ip-card-nome-solo'; a.textContent = ip;
-                    nomeWrap.append(a);
-                }
+            // Head: nome (o IP se nome vuoto) + badge blocchi per-IP + IP mono.
+            const head = card.children[1];
+            const nomeEl = head.children[0];
+            const blocksEl = head.children[1];
+            const ipEl = head.children[2];
+            const nomeText = s.nome || ip;
+            if (nomeEl.textContent !== nomeText) nomeEl.textContent = nomeText;
+            // Badge blocchi per-IP: visibile solo se >0.
+            const perIpSet = state.blocchiPerIp.get(ip);
+            const blocksCount = perIpSet ? perIpSet.size : 0;
+            if (blocksCount > 0) {
+                const txt = '⊘' + blocksCount;
+                if (blocksEl.textContent !== txt) blocksEl.textContent = txt;
+                blocksEl.classList.remove('hidden');
+            } else {
+                blocksEl.classList.add('hidden');
             }
+            // Mostra IP mono solo se c'e' nome (sennò sarebbe duplicato).
+            const ipText = s.nome ? ip : '';
+            if (ipEl.textContent !== ipText) ipEl.textContent = ipText;
 
-            const metriche = card.children[1];
-            const numEl = metriche.firstElementChild;
+            // Meta inline: <num> req · ora|Xm fa
+            const metriche = card.children[2];
+            const numEl = metriche.querySelector('.ip-card-num');
             const numStr = String(s.listaAttive.length);
-            if (numEl.textContent !== numStr) numEl.textContent = numStr;
-            const ultimaEl = metriche.children[1];
+            if (numEl && numEl.textContent !== numStr) numEl.textContent = numStr;
+            const ultimaEl = metriche.querySelector('.ip-card-ultima');
             const ultimaTxt = s.listaAttive.length > 0 ? formatRelativo(s.diffSec) : '-';
-            if (ultimaEl.textContent !== ultimaTxt) ultimaEl.textContent = ultimaTxt;
-            const ultimaCls = `ip-card-ultima${s.inattivo ? ' inattivo' : ''}`;
-            if (ultimaEl.className !== ultimaCls) ultimaEl.className = ultimaCls;
+            if (ultimaEl && ultimaEl.textContent !== ultimaTxt) ultimaEl.textContent = ultimaTxt;
 
-            const tags = card.children[2];
+            // Chips dominio (max DOMINI_CARD_MAX).
+            const tags = card.children[3];
             const dominiOrd = [...s.dominiMap.entries()].reverse();
             const visibili = dominiOrd.slice(0, DOMINI_CARD_MAX);
             const extra = dominiOrd.length - visibili.length;
             syncTagsDominio(tags, visibili, extra);
 
-            // Badge eventi watchdog (Phase 5).
-            const badge = head.querySelector('.watchdog-event-badge');
-            if (badge) {
-                const n = watchdogBadgeCount(ip);
-                if (n > 0) {
-                    badge.hidden = false;
-                    badge.textContent = '⚠️ ' + n;
-                    badge.title = n + ' eventi watchdog negli ultimi 5 min';
-                } else {
-                    badge.hidden = true;
+            // Foot: watchdog dot + label + .NN ottetto IP.
+            const foot = card.children[4];
+            if (foot) {
+                const wd = foot.firstElementChild;
+                const wdClass = `watchdog-dot ${s.wd.classe}`;
+                if (wd.className !== wdClass) wd.className = wdClass;
+                if (wd.title !== s.wd.titolo) wd.title = s.wd.titolo;
+                const oct = foot.querySelector('.wd-octet');
+                if (oct) {
+                    const lastOct = '.' + ip.split('.').pop();
+                    if (oct.textContent !== lastOct) oct.textContent = lastOct;
                 }
             }
         }
     );
+}
+
+/**
+ * Helper: true se `d` matcha uno dei pattern AI in `state.cfg.dominiAI`.
+ */
+function isAIDomainNome(d) {
+    if (!d) return false;
+    const list = (state.cfg && state.cfg.dominiAI) || [];
+    const lower = d.toLowerCase();
+    for (const ai of list) {
+        if (lower.includes(ai.toLowerCase())) return true;
+    }
+    return false;
 }
 
 /**
@@ -650,26 +867,26 @@ export function renderUltimeRichieste() {
         e => `${e.ora}|${e.ip}|${e.dominio}|${e.metodo}`,
         e => {
             const div = document.createElement('div');
-            const nome = nomeStudente(e.ip);
-            const ipLabel = nome ? `${nome} .${e.ip.split('.').pop()}` : e.ip;
-            const aiClass = e.tipo === 'ai' ? ' ai-alert' : '';
-            const oraSpan = document.createElement('span');
-            oraSpan.className = 'orario';
-            oraSpan.textContent = e.ora.substring(11);
+            const tSpan = document.createElement('span');
+            tSpan.className = 't';
+            tSpan.textContent = e.ora.substring(11);
+            const bodySpan = document.createElement('span');
+            bodySpan.className = 'body';
             const ipSpan = document.createElement('span');
-            ipSpan.className = 'ip-label';
-            ipSpan.textContent = `[${ipLabel}]`;
-            const domSpan = document.createElement('span');
-            domSpan.className = `dominio-txt${aiClass}`;
-            domSpan.textContent = e.dominio;
-            div.append(oraSpan, ipSpan, domSpan);
+            ipSpan.className = 'ip';
+            ipSpan.textContent = e.ip + ' →';
+            const hostSpan = document.createElement('span');
+            hostSpan.className = 'host';
+            hostSpan.textContent = ' ' + e.dominio;
+            bodySpan.append(ipSpan, hostSpan);
+            div.append(tSpan, bodySpan);
             return div;
         },
         (div, e) => {
-            const nome = nomeStudente(e.ip);
-            const match = matchFiltro(e.dominio) || matchFiltro(e.ip) || (nome && matchFiltro(nome));
+            const match = matchFiltro(e.dominio) || matchFiltro(e.ip);
+            const aiCls = e.tipo === 'ai' ? ' ai' : '';
             const hidden = match ? '' : ' filtro-hidden';
-            const nuova = `traffico-entry${hidden}`;
+            const nuova = `stream-row${aiCls}${hidden}`;
             if (div.className !== nuova) div.className = nuova;
         }
     );
@@ -681,6 +898,7 @@ export function renderUltimeRichieste() {
  */
 export function renderFocus() {
     const titolo = $('panel-ip-titolo');
+    if (!titolo) return; // header rimosso nel redesign Claude Designer
     if (state.focusIp) {
         const nome = nomeStudente(state.focusIp);
         const label = nome ? `${nome} (${state.focusIp})` : state.focusIp;
@@ -711,6 +929,7 @@ export function renderTabs() {
  */
 export function aggiornaSelectPresets() {
     const sel = $('preset-select');
+    if (!sel) return; // select rimosso nel redesign Claude Designer
     const val = sel.value;
     sel.innerHTML = '<option value="">-- Preset --</option>'
         + state.cfg.presets.map(p => `<option value="${attrEscape(p)}">${escapeHtml(p)}</option>`).join('');
@@ -725,17 +944,57 @@ export function aggiornaSelectPresets() {
  * - Classe `dark` applicata/rimossa da `<body>`.
  */
 export function aggiornaToggleButtons() {
-    const btnT = $('btn-darkmode');
-    const btnN = $('btn-notifiche');
-    btnT.textContent = state.darkmode ? '☀️' : '🌙';
-    btnN.textContent = state.notifiche ? '🔔' : '🔕';
-    btnN.classList.toggle('attivo', state.notifiche);
+    // Theme toggle: swap icone SVG sole/luna (entrambe in DOM, mostriamo
+    // quella che corrisponde al tema OPPOSTO — click la commuta).
+    const sun = document.getElementById('icon-sun');
+    const moon = document.getElementById('icon-moon');
+    if (sun && moon) {
+        sun.style.display = state.darkmode ? '' : 'none';
+        moon.style.display = state.darkmode ? 'none' : '';
+    }
+    // Notifiche: il toggle vive in Impostazioni in v2.7.x+.
+    const btnNotifSet = document.getElementById('btn-notifiche-settings');
+    if (btnNotifSet) btnNotifSet.classList.toggle('attivo', state.notifiche);
     document.body.classList.toggle('dark', state.darkmode);
+}
+
+/**
+ * Avvia clock topbar (HH:MM, refresh ogni 30s). Chiamato una volta a init.
+ */
+export function avviaTopbarClock() {
+    const tick = () => {
+        const el = document.getElementById('topbar-clock');
+        if (!el) return;
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        el.textContent = `${hh}:${mm}`;
+    };
+    tick();
+    setInterval(tick, 30 * 1000);
+}
+
+/**
+ * Aggiorna il contatore "N attivi" in topbar — IP che hanno avuto traffico
+ * negli ultimi `inattivitaSogliaSec` secondi.
+ */
+export function aggiornaTopbarCount() {
+    const el = document.getElementById('topbar-active-count');
+    if (!el) return;
+    const ora = Date.now();
+    const sogliaMs = (state.cfg.inattivitaSogliaSec || 180) * 1000;
+    let attivi = 0;
+    for (const [, oraStr] of state.ultimaPerIp) {
+        const t = Date.parse(oraStr.replace(' ', 'T') + 'Z');
+        if (!isNaN(t) && (ora - t) < sogliaMs) attivi++;
+    }
+    el.textContent = attivi;
 }
 
 /** Sincronizza il valore dell'input time con `state.deadlineISO`. */
 export function aggiornaInputDeadline() {
     const input = $('input-deadline');
+    if (!input) return; // input rimosso nel redesign Claude Designer
     if (!state.deadlineISO) { input.value = ''; return; }
     const d = new Date(state.deadlineISO);
     const hh = String(d.getHours()).padStart(2, '0');
@@ -1107,21 +1366,223 @@ export function renderSelectionBar() {
         + '<button class="btn" data-action="clear-selection">Deseleziona tutti</button>';
 }
 
+/**
+ * Renderizza il detail pane laterale destro per state.detailIp.
+ * Quando detailIp e' null, nasconde il pannello e ripristina lo stream;
+ * altrimenti popola header (status dot + nome + ip + X), banner AI
+ * condizionale, e 4 sezioni: azioni rapide / watchdog / domini recenti
+ * / sessione. Mutex con stream: .panel.narrow viene nascosto via classe
+ * .layout-with-detail su .main-panels.
+ */
+export function renderDetailPane() {
+    const pane = document.getElementById('detail-pane');
+    if (!pane) return;
+    const stream = document.getElementById('panel-richieste');
+    const ip = state.detailIp;
+
+    if (!ip) {
+        pane.classList.add('hidden');
+        pane.innerHTML = '';
+        if (stream) stream.classList.remove('hidden-by-detail');
+        return;
+    }
+    pane.classList.remove('hidden');
+    if (stream) stream.classList.add('hidden-by-detail');
+
+    const ora = Date.now();
+    const soglia = (state.cfg.inattivitaSogliaSec || 180) * 1000;
+    const s = calcolaStatoIp(ip, ora, soglia);
+    const wdEvts = (state.watchdogEventsPerIp && state.watchdogEventsPerIp.get(ip)) || [];
+    const hasAI = [...(s.dominiMap || new Map()).keys()].some(d => isAIDomainNome(d));
+    const hasWD = wdEvts.some(ev => ev.severity === 'warning' || ev.severity === 'critical');
+    let stato = 'active';
+    if (s.inattivo) stato = 'idle';
+    if (hasWD) stato = 'watchdog';
+    if (hasAI) stato = 'ai';
+
+    const dotCls = ({ active: 'ok', idle: 'muted', ai: 'alert', watchdog: 'warn' })[stato] || 'muted';
+    const nome = s.nome || ('.' + ip.split('.').pop());
+
+    // Domini aggregati per IP: count + ultima ora.
+    const lista = state.perIp.get(ip) || [];
+    const dominiAgg = new Map(); // dominio -> {count, ultimaTs, tipo}
+    for (const e of lista) {
+        if (e.tipo === 'sistema') continue;
+        const r = dominiAgg.get(e.dominio) || { count: 0, ultimaTs: 0, tipo: e.tipo };
+        r.count++;
+        const t = parseOra(e.ora)?.getTime() || 0;
+        if (t > r.ultimaTs) r.ultimaTs = t;
+        dominiAgg.set(e.dominio, r);
+    }
+    const dominiOrdered = [...dominiAgg.entries()]
+        .sort(([, a], [, b]) => b.ultimaTs - a.ultimaTs)
+        .slice(0, 12);
+
+    // Sessione: connesso = primo evento, durata = now - connesso, ultima.
+    const primoTs = lista.length > 0 ? (parseOra(lista[0].ora)?.getTime() || 0) : 0;
+    const ultimaTs = lista.length > 0 ? (parseOra(lista[lista.length - 1].ora)?.getTime() || 0) : 0;
+    const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+    const fmtDur = (msFrom) => {
+        if (!msFrom) return '—';
+        const sec = Math.floor((ora - msFrom) / 1000);
+        const m = Math.floor(sec / 60), s2 = sec % 60;
+        const h = Math.floor(m / 60);
+        if (h > 0) return `${h}h ${m % 60}m`;
+        if (m > 0) return `${m}m ${String(s2).padStart(2, '0')}s`;
+        return `${s2}s`;
+    };
+
+    // Watchdog plugin status: label corte e messaggio "ok" specifico per
+    // plugin (Claude Designer). Quando arriva un evento warning/critical,
+    // mostro il testo formattato del payload, troncato.
+    const PLUGIN_META = {
+        usb:     { label: 'USB',      okDetail: 'nessun dispositivo' },
+        process: { label: 'Processi', okDetail: 'nessun processo sospetto' },
+        network: { label: 'Network',  okDetail: 'instradato via proxy' },
+    };
+    const plugins = state.watchdogPlugins || [];
+    const pluginRows = plugins.map(p => {
+        const meta = PLUGIN_META[p.id] || { label: p.name || p.id, okDetail: 'ok' };
+        const evtsP = wdEvts.filter(ev => ev.plugin === p.id);
+        const last = evtsP.length > 0 ? evtsP[evtsP.length - 1] : null;
+        let st = 'ok';
+        let detail = meta.okDetail;
+        if (last) {
+            if (last.severity === 'critical') st = 'alert';
+            else if (last.severity === 'warning') st = 'warn';
+            const formatted = last.format || JSON.stringify(last.payload || {});
+            detail = formatted;
+            if (typeof detail === 'string' && detail.length > 60) detail = detail.slice(0, 57) + '…';
+        }
+        return { name: meta.label, state: st, detail };
+    });
+
+    const aiDom = dominiOrdered.find(([d]) => isAIDomainNome(d))?.[0];
+    const aiUltima = aiDom ? fmtTime(dominiAgg.get(aiDom)?.ultimaTs || 0) : '';
+
+    // Render via innerHTML (rebuild ad ogni renderAll: il detail pane e'
+    // statico e poco costoso, no need per syncChildren qui).
+    pane.innerHTML = `
+        <div class="detail-head">
+            <div class="detail-title">
+                <span class="dot ${dotCls}"></span>
+                <div class="detail-title-text">
+                    <div class="detail-nome">${escapeHtml(nome)}</div>
+                    <div class="detail-ip">${escapeHtml(ip)}</div>
+                </div>
+            </div>
+            <button class="detail-x" data-action="detail-close" title="Chiudi">&times;</button>
+        </div>
+        ${stato === 'ai' && aiDom ? `
+            <div class="detail-banner alert">
+                <strong>&#9888; AI rilevata</strong>
+                <div class="detail-banner-sub">${escapeHtml(aiDom)} &middot; ultima richiesta ${escapeHtml(aiUltima)}</div>
+            </div>` : ''}
+        <div class="detail-body">
+            <div class="detail-section">
+                <div class="detail-section-label">Azioni rapide</div>
+                <div class="detail-actions">
+                    <button class="btn" data-action="veyon-card-lock" data-ip="${attrEscape(ip)}" title="Blocca schermo">Blocca schermo</button>
+                    <button class="btn" data-action="veyon-card-msg" data-ip="${attrEscape(ip)}" title="Messaggia">Messaggia</button>
+                    <button class="btn" data-action="veyon-card-disinstalla-proxy" data-ip="${attrEscape(ip)}" title="Rimuovi proxy">Disconnetti proxy</button>
+                    <button class="btn danger" data-action="detail-blocca-dominio" title="Blocca un dominio">Blocca dominio</button>
+                </div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-label">Blocchi attivi${(() => {
+                    const set = state.blocchiPerIp.get(ip);
+                    return set && set.size > 0 ? ` &middot; ${set.size}` : '';
+                })()}</div>
+                <div class="detail-blocchi">
+                    ${(() => {
+                        const set = state.blocchiPerIp.get(ip);
+                        if (!set || set.size === 0) {
+                            return '<div class="detail-empty">nessun blocco specifico</div>';
+                        }
+                        return [...set].sort().map(d => `
+                            <div class="detail-blocco-row">
+                                <span class="detail-blocco-name">${escapeHtml(d)}</span>
+                                <button class="detail-blocco-x" data-action="unblock-per-ip" data-ip="${attrEscape(ip)}" data-dominio="${attrEscape(d)}" title="Rimuovi blocco">&times;</button>
+                            </div>
+                        `).join('');
+                    })()}
+                </div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-label">Watchdog</div>
+                <div class="detail-watchdog">
+                    ${pluginRows.length === 0 ? '<div class="detail-empty">nessun plugin watchdog</div>' :
+                        pluginRows.map(w => `
+                            <div class="detail-wd-row">
+                                <span class="dot ${w.state}"></span>
+                                <span class="detail-wd-name">${escapeHtml(w.name)}</span>
+                                <span class="detail-wd-detail">${escapeHtml(w.detail)}</span>
+                            </div>
+                        `).join('')}
+                </div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-label">Domini recenti &middot; ${s.listaAttive.length} richieste</div>
+                <div class="detail-domini">
+                    ${dominiOrdered.length === 0 ? '<div class="detail-empty">nessun dominio</div>' :
+                        dominiOrdered.map(([d, r]) => {
+                            const isAI = r.tipo === 'ai';
+                            const cnt = r.count;
+                            const diff = ora - r.ultimaTs;
+                            const ago = formatRelativo(Math.floor(diff / 1000));
+                            return `
+                                <div class="detail-dom-row${isAI ? ' ai' : ''}">
+                                    <span class="detail-dom-name">${escapeHtml(d)}</span>
+                                    <span class="detail-dom-count">${cnt}</span>
+                                    <span class="detail-dom-ago">${escapeHtml(ago)}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                </div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-label">Sessione</div>
+                <div class="detail-sessione">
+                    <span>connesso</span><span>${fmtTime(primoTs)}</span>
+                    <span>durata</span><span>${fmtDur(primoTs)}</span>
+                    <span>ultima</span><span>${fmtTime(ultimaTs)}</span>
+                    <span>OS</span><span class="muted">&mdash;</span>
+                    <span>browser</span><span class="muted">&mdash;</span>
+                    <span>MAC</span><span class="muted">&mdash;</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 /** Esegue tutti i renderer sincronamente. Chiamato da `renderAll` dentro RAF. */
+export function renderAllSync() { _renderAllSync(); }
 function _renderAllSync() {
-    renderSidebar();
-    renderStats();
-    renderPausaEBottoni();
-    renderTabellaIp();
-    renderSelectionBar();
-    renderWatchdogEventsPanel();
-    renderUltimeRichieste();
-    renderFocus();
-    renderReport();
-    renderImpostazioni();
-    renderWatchdogPluginsList();
-    renderAIListStatus();
-    renderCountdown();
+    // Ogni renderer in try/catch isolato: se un renderer crasha (tipico:
+    // elemento DOM rimosso nel redesign UI ma reference ancora viva),
+    // gli altri continuano. Un singolo throw NON deve piu' interrompere
+    // la cascata e impedire `avviaSSE()` di partire (sintomo: bottoni
+    // fanno il POST ma il broadcast non si applica perche' SSE mai aperto).
+    const safe = (name, fn) => {
+        try { fn(); }
+        catch (e) { console.error('[planck] renderer crash:', name, e); }
+    };
+    safe('renderSidebar', renderSidebar);
+    safe('renderStats', renderStats);
+    safe('renderPausaEBottoni', renderPausaEBottoni);
+    safe('renderTabellaIp', renderTabellaIp);
+    safe('renderSelectionBar', renderSelectionBar);
+    safe('renderWatchdogEventsPanel', renderWatchdogEventsPanel);
+    safe('renderUltimeRichieste', renderUltimeRichieste);
+    safe('renderDetailPane', renderDetailPane);
+    safe('renderFocus', renderFocus);
+    safe('renderReport', renderReport);
+    safe('renderImpostazioni', renderImpostazioni);
+    safe('renderWatchdogPluginsList', renderWatchdogPluginsList);
+    safe('renderAIListStatus', renderAIListStatus);
+    safe('renderCountdown', renderCountdown);
+    safe('aggiornaTopbarCount', aggiornaTopbarCount);
+    safe('aggiornaToggleArrows', aggiornaToggleArrows);
 }
 
 let rafPending = false;

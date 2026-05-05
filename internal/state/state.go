@@ -95,6 +95,9 @@ type State struct {
 
 	// --- Liste ---
 	bloccati       map[string]struct{}
+	// blocchiPerIp[ip] = set di domini bloccati SOLO per quell'IP
+	// (additivi rispetto alla blocklist globale). Persistito su DB.
+	blocchiPerIp   map[string]map[string]struct{}
 	dominiIgnorati []string
 	studenti       map[string]string
 
@@ -142,6 +145,7 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		authUser:            "docente",
 		authPasswordHash:    "",
 		bloccati:            map[string]struct{}{},
+		blocchiPerIp:        map[string]map[string]struct{}{},
 		dominiIgnorati:      ignorati,
 		studenti:            map[string]string{},
 		storia:              make([]Entry, 0, 256),
@@ -191,6 +195,19 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		}
 	} else {
 		log.Printf("state: errore lettura blocklist: %v", err)
+	}
+
+	// Carica blocchi per-IP.
+	if perIp, err := st.LoadBloccatiPerIp(); err == nil {
+		for ip, doms := range perIp {
+			set := make(map[string]struct{}, len(doms))
+			for _, d := range doms {
+				set[d] = struct{}{}
+			}
+			s.blocchiPerIp[ip] = set
+		}
+	} else {
+		log.Printf("state: errore lettura bloccati_per_ip: %v", err)
 	}
 
 	return s

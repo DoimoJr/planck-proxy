@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -62,24 +63,138 @@ func (s *State) BlockAllAI() {
 }
 
 // UnblockAllAI rimuove tutti i domini AI dalla blocklist.
+// Doppio sweep per robustezza: prima per stringa esatta dalla lista AI
+// corrente, poi per classification (cattura voci residue di una vecchia
+// versione della lista AI che non sono piu' in classify.AIDomains() ma
+// continuerebbero ad essere classificate AI per substring match).
 func (s *State) UnblockAllAI() {
 	s.mu.Lock()
+	before := len(s.bloccati)
 	for _, d := range classify.AIDomains() {
 		delete(s.bloccati, d)
 	}
+	for d := range s.bloccati {
+		if classify.Classifica(d) == classify.TipoAI {
+			delete(s.bloccati, d)
+		}
+	}
+	after := len(s.bloccati)
 	list := s.bloccatiSortedLocked()
 	s.mu.Unlock()
+	log.Printf("[state] UnblockAllAI: blocklist %d -> %d (rimossi %d AI)", before, after, before-after)
 	s.persistBloccati(list)
 	s.broadcastBlocklist(list)
 }
 
-// ClearBlocklist svuota completamente la blocklist.
+// ClearBlocklist svuota completamente la blocklist GLOBALE *e* tutti i
+// blocchi per-IP. "Reset totale" semantico: dopo questa chiamata nessun
+// dominio risulta piu' bloccato per nessuno studente.
 func (s *State) ClearBlocklist() {
 	s.mu.Lock()
 	s.bloccati = map[string]struct{}{}
+	hadPerIp := len(s.blocchiPerIp) > 0
+	s.blocchiPerIp = map[string]map[string]struct{}{}
 	s.mu.Unlock()
 	s.persistBloccati([]string{})
 	s.broadcastBlocklist([]string{})
+	if hadPerIp {
+		s.persistBloccatiPerIp(map[string][]string{})
+		s.broadcastBlocchiPerIp(map[string][]string{})
+	}
+}
+
+// ============================================================
+// Blocchi per-IP (additivi rispetto alla blocklist globale).
+// ============================================================
+
+// BlockForIp aggiunge un dominio alla lista di blocchi solo per `ip`.
+// Idempotente. Substring match-based (lo applica DominioBloccato).
+func (s *State) BlockForIp(ip, dominio string) {
+	if ip == "" || dominio == "" {
+		return
+	}
+	s.mu.Lock()
+	set, ok := s.blocchiPerIp[ip]
+	if !ok {
+		set = map[string]struct{}{}
+		s.blocchiPerIp[ip] = set
+	}
+	set[dominio] = struct{}{}
+	snap := s.blocchiPerIpSnapshotLocked()
+	s.mu.Unlock()
+	s.persistBloccatiPerIp(snap)
+	s.broadcastBlocchiPerIp(snap)
+}
+
+// UnblockForIp rimuove un dominio dai blocchi per `ip`. Idempotente.
+func (s *State) UnblockForIp(ip, dominio string) {
+	if ip == "" || dominio == "" {
+		return
+	}
+	s.mu.Lock()
+	if set, ok := s.blocchiPerIp[ip]; ok {
+		delete(set, dominio)
+		if len(set) == 0 {
+			delete(s.blocchiPerIp, ip)
+		}
+	}
+	snap := s.blocchiPerIpSnapshotLocked()
+	s.mu.Unlock()
+	s.persistBloccatiPerIp(snap)
+	s.broadcastBlocchiPerIp(snap)
+}
+
+// ClearBlocksForIp rimuove tutti i blocchi per uno specifico IP.
+func (s *State) ClearBlocksForIp(ip string) {
+	if ip == "" {
+		return
+	}
+	s.mu.Lock()
+	if _, ok := s.blocchiPerIp[ip]; !ok {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.blocchiPerIp, ip)
+	snap := s.blocchiPerIpSnapshotLocked()
+	s.mu.Unlock()
+	s.persistBloccatiPerIp(snap)
+	s.broadcastBlocchiPerIp(snap)
+}
+
+// blocchiPerIpSnapshotLocked deep-copia la mappa in formato serializzabile
+// (ip → []domini ordinati). DEVE essere chiamato col lock tenuto.
+func (s *State) blocchiPerIpSnapshotLocked() map[string][]string {
+	out := make(map[string][]string, len(s.blocchiPerIp))
+	for ip, set := range s.blocchiPerIp {
+		doms := make([]string, 0, len(set))
+		for d := range set {
+			doms = append(doms, d)
+		}
+		sort.Strings(doms)
+		out[ip] = doms
+	}
+	return out
+}
+
+// BlocchiPerIpSnapshot ritorna una copia thread-safe della mappa per /api/history.
+func (s *State) BlocchiPerIpSnapshot() map[string][]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.blocchiPerIpSnapshotLocked()
+}
+
+func (s *State) persistBloccatiPerIp(snap map[string][]string) {
+	if err := s.store.SaveBloccatiPerIp(snap); err != nil {
+		log.Printf("state: errore save bloccati_per_ip: %v", err)
+	}
+}
+
+func (s *State) broadcastBlocchiPerIp(snap map[string][]string) {
+	log.Printf("[state] broadcastBlocchiPerIp: %d ip", len(snap))
+	s.broker.Broadcast(struct {
+		Type string              `json:"type"`
+		PerIp map[string][]string `json:"perIp"`
+	}{Type: "blocchi-per-ip", PerIp: snap})
 }
 
 // persistBloccati e' un wrapper che serializza la blocklist su disco
@@ -91,6 +206,7 @@ func (s *State) persistBloccati(list []string) {
 }
 
 func (s *State) broadcastBlocklist(list []string) {
+	log.Printf("[state] broadcastBlocklist: %d domini", len(list))
 	s.broker.Broadcast(struct {
 		Type string   `json:"type"`
 		List []string `json:"list"`
@@ -106,11 +222,12 @@ func (s *State) broadcastBlocklist(list []string) {
 // Logica (vedi SPEC §3.4):
 //  1. Se `dominio` matcha `dominiIgnorati` (substring) → false (passa sempre)
 //  2. Se `pausato` → true (blocca tutto tranne ignorati)
-//  3. Modo `allowlist`: blocca se NON matcha la blocklist
-//  4. Modo `blocklist` (default): blocca se matcha la blocklist
+//  3. Se `clientIP` non vuoto e ha blocchi per-IP che matchano → true
+//  4. Modo `allowlist`: blocca se NON matcha la blocklist
+//  5. Modo `blocklist` (default): blocca se matcha la blocklist
 //
-// Match case-insensitive, sostringa.
-func (s *State) DominioBloccato(dominio string) bool {
+// Match case-insensitive, sostringa. `clientIP` puo' essere "" (test, etc.).
+func (s *State) DominioBloccato(dominio, clientIP string) bool {
 	d := strings.ToLower(dominio)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -125,7 +242,17 @@ func (s *State) DominioBloccato(dominio string) bool {
 	if s.pausato {
 		return true
 	}
-	// 3+4. Match con la blocklist.
+	// 3. Blocchi per-IP (additivi): se l'IP ha un blocco che matcha, blocca.
+	if clientIP != "" {
+		if set, ok := s.blocchiPerIp[clientIP]; ok {
+			for bl := range set {
+				if strings.Contains(d, strings.ToLower(bl)) {
+					return true
+				}
+			}
+		}
+	}
+	// 4+5. Match con la blocklist globale.
 	matchInLista := false
 	for bl := range s.bloccati {
 		if strings.Contains(d, bl) {
@@ -327,20 +454,18 @@ func (s *State) RemoveIgnorato(dominio string) {
 // in DB, poi crea una nuova riga in `sessioni` con snapshot di studenti
 // e bloccati. Azzera il ring buffer in-memory.
 //
-// Ritorna `(sessioneInizio, archiviata)`. `archiviata` e' il filename-id
-// della sessione precedente (vuoto se non c'era).
+// Ritorna `(sessioneInizio, archiviata)`. `archiviata` e' sempre vuoto in
+// questa implementazione: l'archiviazione avviene SOLO via SessionStop.
+// Se l'utente chiama Start su una sessione gia' attiva → no-op (ritorna
+// lo stato corrente senza chiudere/aprire nulla).
 func (s *State) SessionStart() (sessioneInizio string, archiviata string) {
 	s.mu.Lock()
 
-	// Chiudi la precedente in DB se attiva (defensive).
-	if s.sessioneAttiva && s.sessioneID > 0 {
-		now := time.Now().UTC()
-		fine := now.Format(time.RFC3339)
-		durata := computeDurata(s.sessioneInizio, now)
-		if err := s.store.SessionClose(s.sessioneID, fine, durata, now.UnixMilli()); err != nil {
-			log.Printf("state: errore close prev session: %v", err)
-		}
-		archiviata = sessionFilename(s.sessioneID, s.sessioneInizio)
+	// Sessione gia' attiva: no-op. L'utente deve premere Stop per archiviare.
+	if s.sessioneAttiva {
+		inizio := s.sessioneInizio
+		s.mu.Unlock()
+		return inizio, ""
 	}
 
 	// Apri nuova sessione in DB.

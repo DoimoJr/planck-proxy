@@ -40,7 +40,7 @@ import (
 type Recorder interface {
 	RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo classify.Tipo)
 	RegistraAlive(ip string)
-	DominioBloccato(dominio string) bool
+	DominioBloccato(dominio, clientIP string) bool
 }
 
 // paginaBloccata e' l'HTML servito allo studente sui domini bloccati.
@@ -151,7 +151,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, ip string) {
 
 	// Check blocco (Phase 1.5): se il dominio e' bloccato, registra come
 	// blocked=true e rispondi con la pagina 403, niente forwarding.
-	if s.recorder.DominioBloccato(dominio) {
+	if s.recorder.DominioBloccato(dominio, ip) {
 		s.recorder.RegistraTraffic(ip, r.Method, dominio, true, tipo)
 		rispondiBloccato(w)
 		return
@@ -220,7 +220,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, ip string
 	// client socket prima dell'handshake TLS. Il browser mostrera' un
 	// errore di connessione (non puo' renderizzare la pagina HTML perche'
 	// si aspettava TLS), ma il blocco e' effettivo e visibile in UI.
-	if s.recorder.DominioBloccato(dominio) {
+	if s.recorder.DominioBloccato(dominio, ip) {
 		s.recorder.RegistraTraffic(ip, "HTTPS", dominio, true, tipo)
 		_, _ = w.Write([]byte("HTTP/1.1 403 Forbidden\r\n" +
 			"Content-Type: text/html; charset=UTF-8\r\n" +

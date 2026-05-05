@@ -10,11 +10,13 @@ package main
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/store"
+	"github.com/DoimoJr/planck-proxy/internal/sysutil"
 	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 	"github.com/DoimoJr/planck-proxy/internal/watchdog/builtin"
 	"github.com/DoimoJr/planck-proxy/internal/web"
@@ -89,17 +92,40 @@ func openBrowserAndWaitForClose(url, profileDir string) {
 		candidates = append(candidates, p)
 	}
 
+	// Pulisci i singleton lock files lasciati da una precedente istanza
+	// di Edge/Chrome che usava lo stesso --user-data-dir. Senza, Edge
+	// "si attacca" a un'istanza esistente fantasma → cmd.Wait() ritorna
+	// in pochi millisecondi → Planck fa os.Exit(0) prima ancora che la
+	// finestra carichi → "pagina non raggiungibile" al primo avvio.
+	// Sintomatico nei log: <50ms tra "Browser avviato" e "Browser chiuso".
+	for _, lockName := range []string{"SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"} {
+		_ = os.Remove(filepath.Join(profileDir, lockName))
+	}
+
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}
-		cmd := exec.Command(p, "--app="+url, "--user-data-dir="+profileDir)
+		cmd := exec.Command(p, "--app="+url, "--user-data-dir="+profileDir,
+			"--no-first-run", "--no-default-browser-check")
+		sysutil.HideConsoleWindow(cmd)
+		startedAt := time.Now()
 		if err := cmd.Start(); err != nil {
 			log.Printf("Browser %s: errore avvio (%v), provo prossimo", p, err)
 			continue
 		}
 		log.Printf("Browser avviato (%s, PID %d). Chiusura finestra → shutdown del server.", filepath.Base(p), cmd.Process.Pid)
 		_ = cmd.Wait()
+		elapsed := time.Since(startedAt)
+		// Se Wait ritorna in <2s e' quasi certamente un caso "attached
+		// to existing instance" — la finestra non e' nostra. Non
+		// auto-spegnere Planck: l'utente la chiude dalla UI o killa
+		// dal Task Manager. Logghiamo + restiamo vivi (return, niente
+		// os.Exit). Il `wg.Wait()` in main mantiene il processo up.
+		if elapsed < 2*time.Second {
+			log.Printf("Browser exit prematuro (%v) — probabilmente attached to existing instance. Planck resta attivo, apri manualmente %s o killa il processo.", elapsed, url)
+			return
+		}
 		log.Println("Browser chiuso, spengo Planck.")
 		os.Exit(0)
 	}
@@ -121,6 +147,27 @@ func main() {
 		log.SetOutput(logFile)
 		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 		// Niente defer Close: il processo termina con os.Exit, l'OS chiude.
+	}
+
+	// Single-instance: se al boot esiste un planck.pid lasciato da un'istanza
+	// precedente (es. l'utente ha chiuso la finestra browser ma il processo
+	// e' rimasto orfano per il caso "attached to existing instance"), killa
+	// il vecchio PID e attendi che il kernel rilasci la porta. Niente piu'
+	// "porta gia' in uso" al secondo avvio.
+	pidPath := filepath.Join(dataDir, "planck.pid")
+	if data, err := os.ReadFile(pidPath); err == nil {
+		if oldPID, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && oldPID > 0 && oldPID != os.Getpid() {
+			if proc, err := os.FindProcess(oldPID); err == nil {
+				if err := proc.Kill(); err == nil {
+					log.Printf("[boot] killed stale planck process pid=%d", oldPID)
+					time.Sleep(800 * time.Millisecond) // attendi rilascio porta TCP
+				}
+			}
+		}
+		_ = os.Remove(pidPath)
+	}
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		log.Printf("[boot] non riesco a scrivere planck.pid: %v", err)
 	}
 
 	// Persistenza: apri SQLite (creandolo se non esiste) e applica le
@@ -234,16 +281,17 @@ func main() {
 	log.Printf("Data:  %s", dataDir)
 	log.Printf("In ascolto...")
 
-	// Apri il browser (Edge in modalita' app) dopo un breve delay,
-	// per dare tempo ai server HTTP di completare il bind. La funzione
-	// e' bloccante: aspetta che la finestra browser venga chiusa, poi
-	// chiama os.Exit(0). Lifecycle "single-process": chiudi la finestra
-	// = spegni Planck.
-	go func() {
-		time.Sleep(400 * time.Millisecond)
-		profileDir := filepath.Join(dataDir, ".planck-browser-profile")
-		openBrowserAndWaitForClose("http://localhost:"+webPort, profileDir)
-	}()
+	// Bind ESPLICITO del listener web prima di lanciare browser/Serve:
+	// `net.Listen` ritorna quando il TCP socket e' gia' in stato LISTEN,
+	// quindi connessioni successive entrano nella backlog del kernel
+	// anche prima che `http.Serve` cominci ad Accept. Cosi' Edge puo'
+	// fare GET subito senza beccare "pagina non raggiungibile".
+	log.Printf("[boot] bind web :%s ...", webPort)
+	webListener, err := net.Listen("tcp", ":"+webPort)
+	if err != nil {
+		log.Fatalf("Errore bind porta web :%s: %v", webPort, err)
+	}
+	log.Printf("[boot] web bind OK")
 
 	// Lancio i due server in parallelo. Se uno fallisce (es. porta occupata),
 	// l'intero processo termina via log.Fatalf.
@@ -252,16 +300,41 @@ func main() {
 
 	go func() {
 		defer wg.Done()
-		if err := http.ListenAndServe(":"+webPort, mux); err != nil {
+		log.Printf("[boot] http.Serve web :%s starting", webPort)
+		if err := http.Serve(webListener, mux); err != nil {
 			log.Fatalf("Errore avvio server web: %v", err)
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
+		log.Printf("[boot] proxy :%s starting", proxyPort)
 		if err := proxySrv.Start(); err != nil {
 			log.Fatalf("Errore avvio proxy: %v", err)
 		}
+	}()
+
+	// Apri il browser DOPO che ENTRAMBE le porte sono pronte:
+	// - :9999 (web) → la pagina UI
+	// - :9090 (proxy) → se il PC docente ha proxy_on.bat attivo, Edge
+	//   passa per 127.0.0.1:9090 anche per localhost:9999. Se quel
+	//   listener non e' ancora up al primo GET, Edge mostra "pagina
+	//   non raggiungibile". Aspettiamo TCP listen su entrambe le porte
+	//   + un GET reale a /api/health prima di lanciare la finestra.
+	go func() {
+		webURL := "http://localhost:" + webPort
+		log.Printf("[boot] waiting proxy :%s ...", proxyPort)
+		okProxy := sysutil.WaitForPort("127.0.0.1:"+proxyPort, 15*time.Second)
+		log.Printf("[boot] proxy :%s ready=%v", proxyPort, okProxy)
+		log.Printf("[boot] waiting web /api/health ...")
+		okWeb := sysutil.WaitForHTTP(webURL+"/api/health", 15*time.Second)
+		log.Printf("[boot] web /api/health ready=%v", okWeb)
+		// Margine extra: Edge a freddo crea il profilo --user-data-dir
+		// e puo' fare la prima GET prima di settare la connessione.
+		time.Sleep(500 * time.Millisecond)
+		log.Printf("[boot] launching browser at %s", webURL)
+		profileDir := filepath.Join(dataDir, ".planck-browser-profile")
+		openBrowserAndWaitForClose(webURL, profileDir)
 	}()
 
 	wg.Wait()

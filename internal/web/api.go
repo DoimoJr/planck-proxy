@@ -61,6 +61,14 @@ func (a *API) Register(mux *http.ServeMux) {
 		staticH.ServeHTTP(w, r)
 	}))
 
+	// Health check NON autenticato — usato da WaitForHTTP a boot per
+	// sapere quando il server e' davvero pronto a rispondere prima di
+	// lanciare il browser. Niente body, solo 200 OK.
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
 	// Read-only (Phase 1.4)
 	mux.HandleFunc("/api/version", auth(a.handleVersion))
 	mux.HandleFunc("/api/config", auth(a.handleConfig))
@@ -77,6 +85,9 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/block-all-ai", auth(a.handleBlockAllAI))
 	mux.HandleFunc("/api/unblock-all-ai", auth(a.handleUnblockAllAI))
 	mux.HandleFunc("/api/clear-blocklist", auth(a.handleClearBlocklist))
+	mux.HandleFunc("/api/block-per-ip", auth(a.handleBlockForIp))
+	mux.HandleFunc("/api/unblock-per-ip", auth(a.handleUnblockForIp))
+	mux.HandleFunc("/api/clear-blocks-for-ip", auth(a.handleClearBlocksForIp))
 
 	mux.HandleFunc("/api/session/start", auth(a.handleSessionStart))
 	mux.HandleFunc("/api/session/stop", auth(a.handleSessionStop))
@@ -284,18 +295,22 @@ func (a *API) handleUnblock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleBlockAllAI(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleBlockAllAI method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	a.state.BlockAllAI()
+	log.Printf("[api] BlockAllAI done")
 	writeOK(w, nil)
 }
 
 func (a *API) handleUnblockAllAI(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleUnblockAllAI method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	a.state.UnblockAllAI()
+	log.Printf("[api] UnblockAllAI done")
 	writeOK(w, nil)
 }
 
@@ -304,6 +319,70 @@ func (a *API) handleClearBlocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.state.ClearBlocklist()
+	writeOK(w, nil)
+}
+
+// handleBlockForIp aggiunge `dominio` ai blocchi di `ip`.
+// Body: {"ip": "...", "dominio": "..."}.
+func (a *API) handleBlockForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleBlockForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP      string `json:"ip"`
+		Dominio string `json:"dominio"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" || body.Dominio == "" {
+		writeError(w, http.StatusBadRequest, "ip e dominio richiesti", "BAD_REQUEST")
+		return
+	}
+	a.state.BlockForIp(body.IP, body.Dominio)
+	writeOK(w, nil)
+}
+
+func (a *API) handleUnblockForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleUnblockForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP      string `json:"ip"`
+		Dominio string `json:"dominio"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" || body.Dominio == "" {
+		writeError(w, http.StatusBadRequest, "ip e dominio richiesti", "BAD_REQUEST")
+		return
+	}
+	a.state.UnblockForIp(body.IP, body.Dominio)
+	writeOK(w, nil)
+}
+
+func (a *API) handleClearBlocksForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleClearBlocksForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP string `json:"ip"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" {
+		writeError(w, http.StatusBadRequest, "ip richiesto", "BAD_REQUEST")
+		return
+	}
+	a.state.ClearBlocksForIp(body.IP)
 	writeOK(w, nil)
 }
 
@@ -338,6 +417,7 @@ func (a *API) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 // ============================================================
 
 func (a *API) handlePauseToggle(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handlePauseToggle method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}

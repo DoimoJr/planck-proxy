@@ -401,6 +401,25 @@ export function renderCountdown() {
 const ALIVE_FRESH_MS = 15 * 1000;
 
 /**
+ * Flash visivo sulla card studente quando arriva una nuova entry traffic.
+ * Aggiunge la classe `.pulse-traffic` per ~500ms (animazione CSS via
+ * pseudo-elemento ::after — niente conflitto con bordo / box-shadow
+ * di stato della card). Riavviabile su eventi consecutivi via reflow.
+ * @param {string} ip
+ */
+export function flashCardTraffic(ip) {
+    if (!ip) return;
+    const cards = document.querySelectorAll(`.ip-card[data-ip="${CSS.escape(ip)}"]`);
+    if (cards.length === 0) return;
+    cards.forEach(card => {
+        card.classList.remove('pulse-traffic');
+        // Force reflow per riavviare l'animazione anche su ticks consecutivi.
+        void card.offsetWidth;
+        card.classList.add('pulse-traffic');
+    });
+}
+
+/**
  * Stato del proxy per un IP (pallino top-left della card).
  * - verde: heartbeat proxy recente (<15s)
  * - rosso: heartbeat in passato ma silente ora (>15s) → bypass
@@ -442,9 +461,30 @@ function statoPlugins(ip) {
         else missingNames.push(p.id);
     }
     const total = enabledPlugins.length;
-    if (alive === total) return { classe: 'verde', titolo: `Tutti i ${total} watchdog attivi` };
+
+    // Aliveness "rotta" (alcuni o tutti i plugin silenti) ha priorita'
+    // sul filtro eventi: e' un segnale di kill manuale piu' forte di
+    // un evento singolo. Se invece tutti pingano, controlliamo se ci
+    // sono eventi recenti (es. "USB inserita" — il plugin USB e' vivo
+    // ma sta segnalando) per portare il pallino a giallo/rosso anziche'
+    // verde "tutto ok".
     if (alive === 0) return { classe: 'rosso', titolo: `Tutti i ${total} watchdog mancanti (${missingNames.join(', ')})` };
-    return { classe: 'giallo', titolo: `${total - alive}/${total} watchdog mancanti: ${missingNames.join(', ')}` };
+    if (alive < total) return { classe: 'giallo', titolo: `${total - alive}/${total} watchdog mancanti: ${missingNames.join(', ')}` };
+
+    // Tutti vivi: guarda eventi WD recenti (5 min). Critical → rosso,
+    // warning → giallo. Senza eventi: verde "tutto ok".
+    const evts = state.watchdogEventsPerIp.get(ip) || [];
+    const cutoff = now - ALERT_WD_CUTOFF_MS;
+    let hasCritical = false, hasWarning = false, lastFmt = '';
+    for (let i = evts.length - 1; i >= 0; i--) {
+        const ev = evts[i];
+        if ((ev.ts || 0) < cutoff) continue;
+        if (ev.severity === 'critical') { hasCritical = true; lastFmt = ev.format || lastFmt; }
+        else if (ev.severity === 'warning') { hasWarning = true; if (!lastFmt) lastFmt = ev.format || ''; }
+    }
+    if (hasCritical) return { classe: 'rosso', titolo: 'Evento watchdog CRITICAL recente' + (lastFmt ? ' · ' + lastFmt : '') };
+    if (hasWarning)  return { classe: 'giallo', titolo: 'Evento watchdog warning recente' + (lastFmt ? ' · ' + lastFmt : '') };
+    return { classe: 'verde', titolo: `Tutti i ${total} watchdog attivi` };
 }
 
 // Ordinamento gravita' per "peggior colore" del bordo: verde < giallo
@@ -648,7 +688,7 @@ const ALERT_WD_CUTOFF_MS = 5 * 60 * 1000;  // 5 min
  * plugin watchdog (anch'esso 15s in v2.9.9).
  */
 const OFFLINE_PING_MS = 15 * 1000;        // 15s
-const IDLE_TRAFFIC_MS = 3 * 60 * 1000;    // 3 min
+const IDLE_TRAFFIC_MS = 15 * 1000;        // 15s
 
 /** Ritorna true se l'IP ha una entry AI nelle ultime ALERT_AI_CUTOFF_MS. */
 function hasAIRecente(ip, ora) {
@@ -687,11 +727,17 @@ function ipSignals(ip, ora) {
     const aliveTs = state.aliveMap.get(ip) || 0;
     const aliveAgo = aliveTs > 0 ? (ora - aliveTs) : Infinity;
     const lista = state.perIp.get(ip) || [];
+    // Idle = lo studente non sta navigando attivamente. Il traffico
+    // 'sistema' (OCSP, telemetry Microsoft, captive portal, ecc.) arriva
+    // anche a finestra Edge chiusa: includerlo nel calcolo significava
+    // tenere la card sempre "active". Filtriamo sull'ultima entry NON
+    // sistema (web/ai/blocked).
     let trafficoAgo = Infinity;
-    if (lista.length > 0) {
-        const last = lista[lista.length - 1];
-        const ts = last.ts || (last.ora ? Date.parse(last.ora.replace(' ', 'T') + 'Z') : 0);
-        if (ts) trafficoAgo = ora - ts;
+    for (let i = lista.length - 1; i >= 0; i--) {
+        const e = lista[i];
+        if (e.tipo === 'sistema') continue;
+        const ts = e.ts || (e.ora ? Date.parse(e.ora.replace(' ', 'T') + 'Z') : 0);
+        if (ts) { trafficoAgo = ora - ts; break; }
     }
     return { aliveAgo, trafficoAgo };
 }
@@ -1987,7 +2033,8 @@ export function renderDetailPane() {
                     <button class="btn" data-action="veyon-card-lock" data-ip="${attrEscape(ip)}" title="Blocca schermo">Blocca schermo</button>
                     <button class="btn" data-action="veyon-card-unlock" data-ip="${attrEscape(ip)}" title="Sblocca schermo">Sblocca schermo</button>
                     <button class="btn" data-action="veyon-card-msg" data-ip="${attrEscape(ip)}" title="Messaggia">Messaggia</button>
-                    <button class="btn" data-action="veyon-card-disinstalla-proxy" data-ip="${attrEscape(ip)}" title="Rimuovi proxy">Disconnetti proxy</button>
+                    <button class="btn" data-action="veyon-card-distribuisci-proxy" data-ip="${attrEscape(ip)}" title="Invia proxy_on.vbs">Invia proxy</button>
+                    <button class="btn" data-action="veyon-card-disinstalla-proxy" data-ip="${attrEscape(ip)}" title="Rimuovi proxy">Rimuovi proxy</button>
                     <button class="btn danger detail-action-wide" data-action="detail-blocca-dominio" title="Blocca un dominio">Blocca dominio</button>
                 </div>
             </div>

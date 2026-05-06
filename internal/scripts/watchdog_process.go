@@ -28,10 +28,22 @@ $plancUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/event"
 # anche con .exe.
 $denyList = @(__DENY_LIST__)
 
+function Strip-Exe([string]$s) {
+    $x = $s.ToLower()
+    if ($x.EndsWith('.exe')) { return $x.Substring(0, $x.Length - 4) }
+    return $x
+}
+
+# Pre-normalizziamo la denylist UNA VOLTA: Get-Process restituisce Name
+# senza .exe (es. "cmd", "powershell"), mentre la denylist puo' avere
+# .exe ("cmd.exe"). Senza questa normalizzazione il -contains falliva
+# sempre e nessun evento "started" veniva mai inviato.
+$denyListNorm = @()
+foreach ($d in $denyList) { $denyListNorm += Strip-Exe $d }
+
 function Test-Suspect($procName) {
-    $clean = $procName.ToLower()
-    if ($clean.EndsWith('.exe')) { $clean = $clean.Substring(0, $clean.Length - 4) }
-    return $denyList -contains $clean
+    $clean = Strip-Exe $procName
+    return $denyListNorm -contains $clean
 }
 
 function Send-Event($action, $proc) {

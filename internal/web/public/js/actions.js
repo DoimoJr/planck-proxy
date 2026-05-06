@@ -803,6 +803,14 @@ export async function veyonCardUnlock(ip) {
     }
 }
 
+/** Invia il proxy_on.vbs al singolo studente (shortcut dal detail pane). */
+export async function veyonCardDistribuisciProxy(ip) {
+    if (!state.veyonConfigured) return;
+    const r = await apiPost('/api/veyon/distribuisci-proxy', { ips: [ip] });
+    if (r.ok) toast.success('Proxy inviato a ' + ip);
+    else toast.error('Invio fallito: ' + (r.error || ''));
+}
+
 /** Disinstalla il proxy dal singolo studente (chiama proxy_off.vbs). */
 export async function veyonCardDisinstallaProxy(ip) {
     if (!state.veyonConfigured) return;

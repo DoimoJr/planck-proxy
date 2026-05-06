@@ -5,6 +5,83 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.17] — 2026-05-06
+
+### Risolto
+
+- **Pallino watchdog-dot e bordo card non riflettevano gli eventi
+  warning/critical**: quando arrivava un evento (es. USB inserita) il
+  detail pane coloriva il pallino del plugin specifico, ma sulla card
+  grid il pallino bottom-left e il bordo restavano verdi. Causa:
+  `statoPlugins` valutava SOLO l'aliveness dei plugin (che continuavano
+  a pingare regolarmente). Ora dopo aver verificato che tutti i plugin
+  sono attivi, controlla anche gli eventi recenti (5 min): warning →
+  giallo, critical → rosso. Aliveness rotta resta priorita' alta sul
+  filtro eventi (kill manuale = segnale piu' forte di un singolo evento).
+
+- **Card non si puliva dopo Remove+Rimando proxy**: gli eventi watchdog
+  recenti per quell'IP restavano in `state.watchdogEventsPerIp` e il
+  pallino restava giallo anche dopo aver "azzerato" lo studente. Ora
+  l'SSE `proxy-removed` cancella anche `watchdogEventsPerIp[ip]`: la
+  card riparte verde non appena il proxy ricomincia a pingare.
+
+## [v2.9.16] — 2026-05-06
+
+### Risolto
+
+- **Card studente non andavano mai in stato "idle"** anche dopo
+  minuti senza navigazione. Bug in `ipSignals`: calcolava il
+  `trafficoAgo` dall'ultima entry **qualsiasi**, includendo il
+  traffico tipo "sistema" (OCSP, telemetry Microsoft, captive
+  portal, ecc.) che arriva continuamente a finestra Edge chiusa.
+  Risultato: il timestamp dell'ultima entry era sempre <3 min →
+  card perennemente "active". Fix: cerco l'ultima entry NON sistema
+  (web/ai).
+
+### Modificato
+
+- **Soglia idle abbassata da 3 min a 15 secondi**
+  (`IDLE_TRAFFIC_MS`). Feedback molto piu' reattivo: la card
+  sbiadisce subito quando lo studente smette di navigare.
+
+## [v2.9.15] — 2026-05-06
+
+### Aggiunto
+
+- **Pulse animation sulla card studente ad ogni richiesta**: feedback
+  visivo in tempo reale quando un'entry SSE arriva per un IP. Onda
+  verde tenue di ~550ms che si espande dal bordo tramite pseudo-
+  elemento `::after` (isolato dal bordo/box-shadow di stato:
+  funziona insieme a data-border, data-state="ai", "selected"). Skip
+  sulle entry tipo "sistema" per evitare vibrazione costante. Riavvio
+  pulito su eventi consecutivi via reflow + remove/add classe.
+
+## [v2.9.14] — 2026-05-06
+
+### Risolto
+
+- **Watchdog Process non emetteva mai eventi**: bug nel template
+  PowerShell. `Get-Process` ritorna `Name` SENZA estensione (es.
+  `"cmd"`, `"powershell"`), mentre la denylist default contiene
+  `"cmd.exe"`, `"powershell.exe"`. Lo `Strip-Exe` lato script veniva
+  applicato solo al nome processo, non alla denylist, quindi
+  `$denyList -contains $clean` falliva SEMPRE. Fix: normalizzazione
+  una-tantum della denylist al boot dello script.
+
+### Aggiunto
+
+- **Pulsante "Invia proxy" nella scheda di dettaglio studente**:
+  shortcut accanto a "Rimuovi proxy" per distribuire `proxy_on.vbs`
+  al singolo studente senza dover passare per la toolbar Veyon globale.
+
+### Note
+
+- **Watchdog Network**: il plugin segnala SOLO interfacce che
+  appaiono DOPO che lo script e' partito. Tutte le interfacce gia'
+  Up al boot del proxy_on entrano nella baseline "trusted". Per
+  testare: lanciare il proxy con il dongle/hotspot scollegato, poi
+  collegarlo → l'evento "added" arrivera' entro 5s.
+
 ## [v2.9.13] — 2026-05-06
 
 ### Risolto

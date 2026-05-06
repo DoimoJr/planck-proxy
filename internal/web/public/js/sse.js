@@ -13,7 +13,7 @@
  */
 
 import { state, assorbiEntry, resetDatiTraffico } from './state.js';
-import { renderAll, aggiornaInputDeadline } from './render.js';
+import { renderAll, aggiornaInputDeadline, flashCardTraffic } from './render.js';
 import { $ } from './util.js';
 
 let audioCtx = null;
@@ -140,6 +140,12 @@ export function avviaSSE() {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'traffic') {
             trafficBatch.push(msg.entry);
+            // Flash sulla card dello studente: feedback visivo immediato
+            // ad ogni richiesta. Skip per traffic 'sistema' (rumore, fa
+            // vibrare la card senza informazione utile).
+            if (msg.entry.tipo !== 'sistema') {
+                flashCardTraffic(msg.entry.ip);
+            }
             // Beep + notifica desktop quando arriva un dominio AI nuovo:
             // il banner alert unificato (renderAlertBanner) si occupa
             // della parte visiva, qui solo audio/notifica se attivi.
@@ -208,9 +214,13 @@ export function avviaSSE() {
         } else if (msg.type === 'proxy-removed') {
             // L'utente ha appena chiesto Remove proxy: pulisci la card
             // (proxy grigio, plugin grigio) senza aspettare il timeout
-            // naturale.
+            // naturale. Pulisco anche gli eventi watchdog "appiccicati"
+            // di quell'IP cosi' la card riparte pulita: dopo
+            // remove+rimando deve sembrare un nuovo studente, non
+            // ereditare il giallo dell'evento precedente.
             state.aliveMap.delete(msg.ip);
             state.alivePluginMap.delete(msg.ip);
+            state.watchdogEventsPerIp.delete(msg.ip);
             renderAll();
         } else if (msg.type === 'reset-runtime') {
             // Pulizia client: storia traffic, eventi watchdog runtime,

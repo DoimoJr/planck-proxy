@@ -5,6 +5,26 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.22] — 2026-05-06
+
+### Modificato
+
+- **Distinzione "Remove esplicito" vs "kill sospetto del proxy"**
+  nei pallini plugin. v2.9.21 li metteva entrambi a grigio. Ora:
+  - **Mai visto / Remove esplicito** (`aliveMap[ip]` non esiste o
+    e' stato cancellato dall'SSE proxy-removed) → grigio
+    "Proxy non attivo: stato plugin sconosciuto"
+  - **Era vivo, ora silente** (`aliveMap[ip]` ha ts vecchio oltre
+    15s, lo studente ha killato il processo proxy) → rosso "Proxy
+    silente da Xs: plugin killati col processo"
+  - **Proxy fresco** → valutazione plugin normale
+
+  Stessa logica in card grid (`statoPlugins`) e detail pane
+  (`pluginRows`): per-plugin pallino diventa alert con detail
+  "proxy silente — kill sospetto". Entrambi i pallini bottom-left e
+  bordo della card seguono il rosso. Scenario "studente killa il
+  proxy via Task Manager" ora distinguibile a colpo d'occhio.
+
 ## [v2.9.21] — 2026-05-06
 
 ### Risolto

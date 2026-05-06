@@ -452,16 +452,21 @@ function statoPlugins(ip) {
     if (enabledPlugins.length === 0) {
         return { classe: 'grigio', titolo: 'Nessun watchdog abilitato' };
     }
-    // Se il proxy non sta pingando (proxy grigio o rosso), lo stato dei
-    // plugin e' "sconosciuto", non "killato". Coerente col server-side
-    // checkHeartbeats che skippa gli IP non-alive. Senza questo gate,
-    // dopo Remove proxy avevamo plugin "rosso" (mappa vuota → alive=0)
-    // che e' fuorviante: lo studente e' offline, non sta evadendo.
+    // Distingui tre scenari quando il proxy non e' fresco:
+    //   1. Mai visto (aliveTs === 0)        → grigio   (Remove esplicito
+    //                                          o studente mai connesso)
+    //   2. Era vivo, ora silente            → rosso    (kill sospetto:
+    //                                          studente ha killato il
+    //                                          processo proxy, plugin
+    //                                          uccisi col padre)
+    //   3. Fresco                           → continua valutazione plugin
     const aliveTs = state.aliveMap.get(ip) || 0;
     const now = Date.now();
-    const proxyFresh = aliveTs > 0 && (now - aliveTs) < ALIVE_FRESH_MS;
-    if (!proxyFresh) {
+    if (aliveTs === 0) {
         return { classe: 'grigio', titolo: 'Proxy non attivo: stato plugin sconosciuto' };
+    }
+    if ((now - aliveTs) >= ALIVE_FRESH_MS) {
+        return { classe: 'rosso', titolo: `Proxy silente da ${Math.round((now-aliveTs)/1000)}s: plugin killati col processo` };
     }
     const inner = state.alivePluginMap.get(ip);
     let alive = 0, missingNames = [];
@@ -2035,16 +2040,18 @@ export function renderDetailPane() {
     };
     const plugins = state.watchdogPlugins || [];
     const wdRecentCutoff = ora - ALERT_WD_CUTOFF_MS;
-    // Se il proxy non sta pingando, non sappiamo nulla dello stato dei
-    // plugin (lo studente potrebbe essere offline / proxy rimosso).
-    // Coerente con statoPlugins lato card: tutti grigi, niente verde
-    // fittizio.
+    // Stessi scenari di statoPlugins: mai visto vs era-vivo-ora-silente.
+    // Caso 2 (kill sospetto) propaga rosso anche ai pallini per-plugin.
     const proxyAliveTs = state.aliveMap.get(ip) || 0;
-    const proxyFresh = proxyAliveTs > 0 && (ora - proxyAliveTs) < ALIVE_FRESH_MS;
+    const proxyEverSeen = proxyAliveTs > 0;
+    const proxyFresh = proxyEverSeen && (ora - proxyAliveTs) < ALIVE_FRESH_MS;
     const pluginRows = plugins.map(p => {
         const meta = PLUGIN_META[p.id] || { label: p.name || p.id, okDetail: 'ok' };
-        if (!proxyFresh) {
+        if (!proxyEverSeen) {
             return { name: meta.label, state: 'muted', detail: 'proxy non attivo' };
+        }
+        if (!proxyFresh) {
+            return { name: meta.label, state: 'alert', detail: 'proxy silente — kill sospetto' };
         }
         // Eventi recenti: sia eventi originati dal plugin (es. "USB inserita")
         // sia meta-eventi "watchdog-<plugin>" (stopped) emessi dal server

@@ -5,6 +5,51 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.20] — 2026-05-06
+
+### Modificato
+
+- **Pulse traffic ora ben visibile**: l'animazione precedente usava
+  `box-shadow` rgba tenue (0.55 → 0 alpha) su `::after`, poco
+  percepibile su sfondi chiari. Ora usa `outline` che parte dal
+  bordo e si espande verso fuori (8px) sfumando — segue il
+  border-radius, nitido, indipendente dal box-shadow di stato.
+  Durata 650ms.
+
+## [v2.9.19] — 2026-05-06
+
+### Modificato
+
+- **Risoluzione warning con "Ignora + info successivo"**: ora la
+  semantica del pallino plugin (sia card grid che detail pane) e':
+  - warning attivo → giallo per 5 min
+  - utente clicca **Ignora** sul log eventi → warning resta GIALLO
+    (l'utente ha preso visione ma il problema e' ancora attivo, es.
+    USB ancora collegata)
+  - studente toglie USB → arriva evento info "removed"
+  - se l'evento era stato ignorato → pallino torna VERDE subito
+    (stato risolto)
+  - se non era stato ignorato → resta giallo per i 5 min residui
+    (l'utente non ha ancora preso visione, deve poterlo vedere)
+
+  Helper unificata `valutaWdPlugin(ip, pluginId, evts, cutoff,
+  ignoredIds)` riusata da `statoPlugins` (card grid) e dalle pluginRows
+  del detail pane: stessa logica ovunque.
+
+## [v2.9.18] — 2026-05-06
+
+### Risolto
+
+- **Detail pane plugin tornava verde subito dopo USB rimossa, ma card
+  grid restava gialla** (incoerenza). Causa: il detail pane guardava
+  l'**ultimo** evento del plugin, mentre `statoPlugins` (card grid)
+  cerca qualsiasi warning/critical nei 5 min. Quando l'utente toglie
+  la USB e arriva l'evento "removed" (info), questo diventava l'ultimo
+  → detail pane verde, ma il warning "USB inserita" 30s prima era
+  ancora nei 5 min → card gialla. Ora il detail pane usa la stessa
+  logica: l'evento di severity piu' alta nei 5 min determina il
+  colore, info "removed/stopped" successivi non azzerano il warning.
+
 ## [v2.9.17] — 2026-05-06
 
 ### Risolto

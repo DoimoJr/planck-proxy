@@ -471,16 +471,15 @@ function statoPlugins(ip) {
     if (alive === 0) return { classe: 'rosso', titolo: `Tutti i ${total} watchdog mancanti (${missingNames.join(', ')})` };
     if (alive < total) return { classe: 'giallo', titolo: `${total - alive}/${total} watchdog mancanti: ${missingNames.join(', ')}` };
 
-    // Tutti vivi: guarda eventi WD recenti (5 min). Critical → rosso,
-    // warning → giallo. Senza eventi: verde "tutto ok".
+    // Tutti vivi: per ciascun plugin valuta lo stato considerando
+    // ignora-utente + risoluzione (info successivo). Aggrega al peggio.
     const evts = state.watchdogEventsPerIp.get(ip) || [];
     const cutoff = now - ALERT_WD_CUTOFF_MS;
     let hasCritical = false, hasWarning = false, lastFmt = '';
-    for (let i = evts.length - 1; i >= 0; i--) {
-        const ev = evts[i];
-        if ((ev.ts || 0) < cutoff) continue;
-        if (ev.severity === 'critical') { hasCritical = true; lastFmt = ev.format || lastFmt; }
-        else if (ev.severity === 'warning') { hasWarning = true; if (!lastFmt) lastFmt = ev.format || ''; }
+    for (const p of enabledPlugins) {
+        const v = valutaWdPlugin(ip, p.id, evts, cutoff, state.eventiIgnoredIds);
+        if (v.severity === 'critical') { hasCritical = true; lastFmt = v.topEv.format || lastFmt; }
+        else if (v.severity === 'warning') { hasWarning = true; if (!lastFmt) lastFmt = v.topEv.format || ''; }
     }
     if (hasCritical) return { classe: 'rosso', titolo: 'Evento watchdog CRITICAL recente' + (lastFmt ? ' · ' + lastFmt : '') };
     if (hasWarning)  return { classe: 'giallo', titolo: 'Evento watchdog warning recente' + (lastFmt ? ' · ' + lastFmt : '') };
@@ -493,6 +492,51 @@ function statoPlugins(ip) {
 const STATO_RANK = { verde: 0, giallo: 1, grigio: 2, rosso: 3 };
 function peggiorStato(a, b) {
     return (STATO_RANK[a] || 0) >= (STATO_RANK[b] || 0) ? a : b;
+}
+
+/**
+ * Valuta lo stato di un singolo plugin watchdog per un IP, considerando:
+ *   - eventi nei recentMs piu' recenti
+ *   - severity warning/critical (info ignorati)
+ *   - "risoluzione": se l'utente ha cliccato Ignora sull'evento e dopo e'
+ *     arrivato un evento info (es. USB removed, processo stopped),
+ *     l'evento e' considerato risolto → torna OK.
+ *
+ * Senza Ignora, il warning resta visibile per i 5 min anche se l'evento
+ * e' stato "annullato" dal sistema (USB tolta).
+ *
+ * @returns {{topEv: object|null, severity: 'ok'|'warning'|'critical', resolved: boolean}}
+ */
+function valutaWdPlugin(ip, pluginId, evts, cutoff, ignoredIds) {
+    const metaName = 'watchdog-' + pluginId;
+    let topEv = null;
+    let topRank = 0;
+    for (const ev of evts) {
+        if (ev.plugin !== pluginId && ev.plugin !== metaName) continue;
+        if ((ev.ts || 0) < cutoff) continue;
+        const rank = ev.severity === 'critical' ? 3 : ev.severity === 'warning' ? 2 : 0;
+        if (rank === 0) continue; // info skipped per topEv
+        if (rank > topRank || (rank === topRank && (ev.ts || 0) > (topEv?.ts || 0))) {
+            topEv = ev;
+            topRank = rank;
+        }
+    }
+    if (!topEv) return { topEv: null, severity: 'ok', resolved: false };
+
+    // Risoluzione = l'utente ha esplicitamente ignorato l'evento E dopo
+    // di esso e' arrivato un info (USB removed, processo stopped, ...)
+    // che indica che la condizione che l'aveva generato non c'e' piu'.
+    const evId = 'wd:' + ip + ':' + topEv.plugin + ':' + topEv.ts;
+    if (ignoredIds.has(evId)) {
+        for (const ev of evts) {
+            if (ev.plugin !== pluginId && ev.plugin !== metaName) continue;
+            if ((ev.ts || 0) <= (topEv.ts || 0)) continue;
+            if (ev.severity === 'info') {
+                return { topEv, severity: 'ok', resolved: true };
+            }
+        }
+    }
+    return { topEv, severity: topEv.severity, resolved: false };
 }
 
 /**
@@ -1987,18 +2031,18 @@ export function renderDetailPane() {
         // sia meta-eventi "watchdog-<plugin>" (stopped) emessi dal server
         // quando il plugin va silente. Cosi' il pallino riflette anche il
         // caso "il plugin USB e' stato killato dallo studente".
-        const metaName = 'watchdog-' + p.id;
-        const evtsP = wdEvts.filter(ev =>
-            (ev.plugin === p.id || ev.plugin === metaName) &&
-            (ev.ts || 0) >= wdRecentCutoff
-        );
-        const last = evtsP.length > 0 ? evtsP[evtsP.length - 1] : null;
+        // Coerente con statoPlugins (card grid): l'evento warning/critical
+        // piu' grave nei 5 min determina il colore. Un info successivo
+        // NON azzera il warning, MA se l'utente l'ha esplicitamente
+        // ignorato e poi e' arrivato un info ("USB removed"), il warning
+        // viene considerato "risolto" → torna verde subito.
+        const v = valutaWdPlugin(ip, p.id, wdEvts, wdRecentCutoff, state.eventiIgnoredIds);
         let st = 'ok';
         let detail = meta.okDetail;
-        if (last) {
-            if (last.severity === 'critical') st = 'alert';
-            else if (last.severity === 'warning') st = 'warn';
-            const formatted = last.format || JSON.stringify(last.payload || {});
+        if (v.topEv && !v.resolved) {
+            if (v.severity === 'critical') st = 'alert';
+            else if (v.severity === 'warning') st = 'warn';
+            const formatted = v.topEv.format || JSON.stringify(v.topEv.payload || {});
             detail = formatted;
             if (typeof detail === 'string' && detail.length > 60) detail = detail.slice(0, 57) + '…';
         }

@@ -488,16 +488,16 @@ function statoPlugins(ip) {
 
     // Tutti vivi: per ciascun plugin valuta lo stato considerando
     // ignora-utente + risoluzione (info successivo). Aggrega al peggio.
+    // Niente cutoff: un warning resta visibile fino alla gestione utente.
     const evts = state.watchdogEventsPerIp.get(ip) || [];
-    const cutoff = now - ALERT_WD_CUTOFF_MS;
     let hasCritical = false, hasWarning = false, lastFmt = '';
     for (const p of enabledPlugins) {
-        const v = valutaWdPlugin(ip, p.id, evts, cutoff, state.eventiIgnoredIds);
+        const v = valutaWdPlugin(ip, p.id, evts, state.eventiIgnoredIds);
         if (v.severity === 'critical') { hasCritical = true; lastFmt = v.topEv.format || lastFmt; }
         else if (v.severity === 'warning') { hasWarning = true; if (!lastFmt) lastFmt = v.topEv.format || ''; }
     }
-    if (hasCritical) return { classe: 'rosso', titolo: 'Evento watchdog CRITICAL recente' + (lastFmt ? ' · ' + lastFmt : '') };
-    if (hasWarning)  return { classe: 'giallo', titolo: 'Evento watchdog warning recente' + (lastFmt ? ' · ' + lastFmt : '') };
+    if (hasCritical) return { classe: 'rosso', titolo: 'Evento watchdog CRITICAL attivo' + (lastFmt ? ' · ' + lastFmt : '') };
+    if (hasWarning)  return { classe: 'giallo', titolo: 'Evento watchdog warning attivo' + (lastFmt ? ' · ' + lastFmt : '') };
     return { classe: 'verde', titolo: `Tutti i ${total} watchdog attivi` };
 }
 
@@ -510,25 +510,27 @@ function peggiorStato(a, b) {
 }
 
 /**
- * Valuta lo stato di un singolo plugin watchdog per un IP, considerando:
- *   - eventi nei recentMs piu' recenti
- *   - severity warning/critical (info ignorati)
- *   - "risoluzione": se l'utente ha cliccato Ignora sull'evento e dopo e'
- *     arrivato un evento info (es. USB removed, processo stopped),
- *     l'evento e' considerato risolto → torna OK.
+ * Valuta lo stato di un singolo plugin watchdog per un IP.
  *
- * Senza Ignora, il warning resta visibile per i 5 min anche se l'evento
- * e' stato "annullato" dal sistema (USB tolta).
+ * Regola: un evento warning/critical e' "attivo" finche' l'utente non lo
+ * gestisce. La gestione e' duplice:
+ *   - Click "Ignora" sul log eventi
+ *   - Arrivo di un evento info di scomparsa (USB removed, processo
+ *     stopped, ...)
+ * Un evento e' considerato RISOLTO solo quando entrambe le condizioni
+ * sono soddisfatte: l'utente ha ignorato E il problema e' scomparso.
+ *
+ * Niente cutoff temporale: un warning attivo resta visibile finche'
+ * l'utente non agisce. Cap implicito 20 eventi/IP (state.watchdogEventsPerIp).
  *
  * @returns {{topEv: object|null, severity: 'ok'|'warning'|'critical', resolved: boolean}}
  */
-function valutaWdPlugin(ip, pluginId, evts, cutoff, ignoredIds) {
+function valutaWdPlugin(ip, pluginId, evts, ignoredIds) {
     const metaName = 'watchdog-' + pluginId;
     let topEv = null;
     let topRank = 0;
     for (const ev of evts) {
         if (ev.plugin !== pluginId && ev.plugin !== metaName) continue;
-        if ((ev.ts || 0) < cutoff) continue;
         const rank = ev.severity === 'critical' ? 3 : ev.severity === 'warning' ? 2 : 0;
         if (rank === 0) continue; // info skipped per topEv
         if (rank > topRank || (rank === topRank && (ev.ts || 0) > (topEv?.ts || 0))) {
@@ -538,9 +540,7 @@ function valutaWdPlugin(ip, pluginId, evts, cutoff, ignoredIds) {
     }
     if (!topEv) return { topEv: null, severity: 'ok', resolved: false };
 
-    // Risoluzione = l'utente ha esplicitamente ignorato l'evento E dopo
-    // di esso e' arrivato un info (USB removed, processo stopped, ...)
-    // che indica che la condizione che l'aveva generato non c'e' piu'.
+    // Risoluzione = utente ha ignorato + arrivato info successivo.
     const evId = 'wd:' + ip + ':' + topEv.plugin + ':' + topEv.ts;
     if (ignoredIds.has(evId)) {
         for (const ev of evts) {
@@ -2039,7 +2039,6 @@ export function renderDetailPane() {
         network: { label: 'Network',  okDetail: 'instradato via proxy' },
     };
     const plugins = state.watchdogPlugins || [];
-    const wdRecentCutoff = ora - ALERT_WD_CUTOFF_MS;
     // Stessi scenari di statoPlugins: mai visto vs era-vivo-ora-silente.
     // Caso 2 (kill sospetto) propaga rosso anche ai pallini per-plugin.
     const proxyAliveTs = state.aliveMap.get(ip) || 0;
@@ -2062,7 +2061,7 @@ export function renderDetailPane() {
         // NON azzera il warning, MA se l'utente l'ha esplicitamente
         // ignorato e poi e' arrivato un info ("USB removed"), il warning
         // viene considerato "risolto" → torna verde subito.
-        const v = valutaWdPlugin(ip, p.id, wdEvts, wdRecentCutoff, state.eventiIgnoredIds);
+        const v = valutaWdPlugin(ip, p.id, wdEvts, state.eventiIgnoredIds);
         let st = 'ok';
         let detail = meta.okDetail;
         // Verifico anche aliveness del singolo plugin: se il proxy pinga

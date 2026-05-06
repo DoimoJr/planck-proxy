@@ -5,6 +5,24 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.23] — 2026-05-06
+
+### Modificato
+
+- **Eventi watchdog non scadono piu' a 5 min**: con la semantica
+  "Ignora + info = risolto" introdotta in v2.9.19, il cutoff
+  temporale era contraddittorio (toglieva eventi ancora attivi).
+  Ora un warning/critical resta visibile finche' l'utente non lo
+  gestisce esplicitamente:
+  - Ignora cliccato + arriva info successivo → risolto, torna verde
+  - Ignora cliccato + nessun info → resta visibile (problema attivo)
+  - Info arrivato + niente Ignora → resta visibile (utente non ha
+    ancora preso visione)
+
+  Cap implicito: 20 eventi/IP in `state.watchdogEventsPerIp`. Vale
+  per tutti i plugin (USB, Process, Network) — stesso pattern
+  warning/critical "comparsa" + info "scomparsa".
+
 ## [v2.9.22] — 2026-05-06
 
 ### Modificato

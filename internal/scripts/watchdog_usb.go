@@ -76,9 +76,15 @@ foreach ($d in Get-InterestingPnp) {
 }
 
 $heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
+$stopFlag = Join-Path $env:TEMP 'planck_stop.flag'
 $tick = 0
 while ($true) {
+    # Self-terminate gentile: proxy_off crea il flag, noi lo vediamo e usciamo.
+    # Piu' affidabile del kill PowerShell esterno (che puo' fallire su null
+    # CommandLine o regex match issues).
+    if (Test-Path $stopFlag) { exit 0 }
     Start-Sleep -Seconds 5
+    if (Test-Path $stopFlag) { exit 0 }
     $current = @{}
     foreach ($d in Get-InterestingPnp) {
         $current[$d.InstanceId] = $d

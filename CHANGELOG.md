@@ -5,6 +5,40 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.10] — 2026-05-06
+
+### Risolto
+
+- **Plugin PowerShell che si accumulano ad ogni Send proxy** (bug
+  noto da v2.9.7-9, fix incompleto in v2.9.9). Causa duplice:
+  1. Il kill PowerShell del Step 2 di proxy_on.vbs poteva fallire
+     anche col self-skip (es. `Get-CimInstance` ritorna alcuni
+     processi con CommandLine null, che non vengono filtrati e
+     passano oltre senza essere killati).
+  2. Anche se killasse correttamente, c'era un race tra il kill
+     async e i `Start-Sleep -Seconds 5` dentro i loop dei plugin —
+     potevano "non arrendersi" subito e lasciare timestamp lock.
+
+  **Fix definitivo**: i 3 plugin .ps1 ora controllano un **flag file
+  `$env:TEMP\planck_stop.flag` ad ogni tick** (sia prima che dopo
+  lo `Start-Sleep`); quando il flag esiste, escono con `exit 0`.
+  Indipendente dal kill esterno.
+
+  proxy_on.vbs Step 2 ridisegnato:
+    A) crea il flag → watchdog vecchi exit gentile entro 5s
+    B) sleep 7s per dare tempo
+    C) kill PowerShell defensivo come backup
+    D) delete flag prima di lanciare i nuovi watchdog
+
+  proxy_off.vbs gia' usava il flag per il proxy_watchdog.vbs;
+  ora i plugin .ps1 lo rispettano allo stesso modo.
+
+- **Remove proxy non killava i plugin PowerShell**: stessa causa.
+  Il proxy_off creava il flag ma SOLO il proxy_watchdog.vbs lo
+  controllava — i plugin .ps1 ignoravano il flag e venivano
+  killati solo dal PowerShell defensivo, che spesso falliva.
+  Ora i plugin si auto-terminano al vedere il flag.
+
 ## [v2.9.9] — 2026-05-06
 
 Patch focus: detection real-time degli stati studente, fix bug kill

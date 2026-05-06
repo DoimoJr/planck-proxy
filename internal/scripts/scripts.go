@@ -51,17 +51,21 @@ ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Pr
 ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer", ipProf & ":" & portaProxy, "REG_SZ"
 ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyOverride", ipProf & ";localhost;127.0.0.1;<local>", "REG_SZ"
 
-' --- Step 2: kill watchdog precedenti (proxy + plugin) via PowerShell ---
-' WMIC e' deprecato/rimosso in Windows 11 24H2+; usiamo Get-CimInstance
-' che e' disponibile ovunque PowerShell e' presente (sempre, su Win 7+).
-'
-' IMPORTANTE: il PID-self filter ($_.ProcessId -ne $PID) e OBBLIGATORIO
-' perche la CommandLine di QUESTO stesso powershell contiene letteralmente
-' la stringa planck_.*_watchdog.ps1 come parametro -Command. Senza
-' il filtro, il PowerShell di kill si AUTO-UCCIDE a meta iterazione e
-' alcuni plugin precedenti sopravvivono → i powershell si accumulano
-' a ogni redistribuzione su PC studente.
+' --- Step 2: ferma watchdog precedenti via flag self-stop ---
+' Strategia a due livelli:
+'   A) Crea planck_stop.flag → tutti i watchdog (proxy_watchdog.vbs +
+'      i 3 plugin .ps1) lo controllano ad ogni iterazione e EXITano da
+'      soli. Affidabile, indipendente da CommandLine parsing / regex.
+'   B) Aspetta 7s (un ciclo loop dei watchdog = 5s + margine).
+'   C) Kill PowerShell defensivo come backup, per i casi edge in cui
+'      un plugin abbia ignorato il flag (es. sleep lungo). Skippa se
+'      stesso ($_.ProcessId -ne $PID) o si auto-uccide a meta'.
+'   D) Cancella flag prima di lanciare i nuovi watchdog (altrimenti
+'      i nuovi escono subito al primo controllo).
 On Error Resume Next
+Dim stopF : Set stopF = fso.CreateTextFile(tmpDir & "\planck_stop.flag", True)
+If Not stopF Is Nothing Then stopF.Close
+WScript.Sleep 7000  ' attendi che i watchdog vivi vedano il flag e exit
 ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & _
     "Get-CimInstance Win32_Process -Filter ""Name='wscript.exe' OR Name='powershell.exe'"" | " & _
     "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'proxy_watchdog\.vbs|planck_(usb|process|network)_watchdog\.ps1' } | " & _
@@ -70,8 +74,7 @@ fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_network_watchdog.ps1", True
-' Cancella il flag stop dell'eventuale sessione precedente, altrimenti
-' il watchdog appena lanciato uscirebbe immediatamente.
+' Cancella il flag DOPO il kill cosi' i nuovi watchdog non lo trovano.
 fso.DeleteFile tmpDir & "\planck_stop.flag", True
 On Error Goto 0
 

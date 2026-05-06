@@ -1,6 +1,9 @@
 package web
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -190,7 +193,24 @@ func (a *API) handleVeyonDistribuisciProxy(w http.ResponseWriter, r *http.Reques
 }
 
 // handleVeyonDisinstallaProxy invia proxy_off.vbs ai target.
+// Prima della distribuzione, marca gli IP come "proxy rimosso" cosi'
+// checkHeartbeats non emette alert spuri "watchdog stopped" durante
+// e dopo la rimozione (il watchdog DEVE morire, l'utente l'ha chiesto).
 func (a *API) handleVeyonDisinstallaProxy(w http.ResponseWriter, r *http.Request) {
+	// Per pre-marcare gli IP come "proxy rimosso" senza consumare il body
+	// che distributeBat legge di nuovo, leggo i bytes e poi reinietto.
+	if r.Method == http.MethodPost && r.Body != nil {
+		raw, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err == nil {
+			var body distributeBatBody
+			if jerr := json.Unmarshal(raw, &body); jerr == nil && len(body.IPs) > 0 {
+				a.state.MarkProxyRemoved(body.IPs)
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			r.ContentLength = int64(len(raw))
+		}
+	}
 	a.distributeBat(w, r, "proxy_off.vbs")
 }
 

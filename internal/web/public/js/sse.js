@@ -200,6 +200,32 @@ export function avviaSSE() {
         } else if (msg.type === 'alive') {
             state.aliveMap.set(msg.ip, msg.ts);
             renderAll();
+        } else if (msg.type === 'plugin-alive') {
+            let inner = state.alivePluginMap.get(msg.ip);
+            if (!inner) { inner = new Map(); state.alivePluginMap.set(msg.ip, inner); }
+            inner.set(msg.plugin, msg.ts);
+            renderAll();
+        } else if (msg.type === 'proxy-removed') {
+            // L'utente ha appena chiesto Remove proxy: pulisci la card
+            // (proxy grigio, plugin grigio) senza aspettare il timeout
+            // naturale.
+            state.aliveMap.delete(msg.ip);
+            state.alivePluginMap.delete(msg.ip);
+            renderAll();
+        } else if (msg.type === 'reset-runtime') {
+            // Pulizia client: storia traffic, eventi watchdog runtime,
+            // marker eventi ignorati. NON tocca aliveMap (heartbeat
+            // continuano dai PC ancora vivi).
+            state.entries.length = 0;
+            state.perIp.clear();
+            state.perDominio.clear();
+            state.ultimaPerIp.clear();
+            state.watchdogEvents.length = 0;
+            state.watchdogEventsPerIp.clear();
+            state.eventiIgnoredIds.clear();
+            state.bannerDismissed = false;
+            state.bannerLastEventKey = null;
+            renderAll();
         } else if (msg.type === 'ai-list') {
             state.aiList = {
                 count: msg.count,

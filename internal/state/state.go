@@ -97,6 +97,13 @@ type State struct {
 	// IP. Evita duplicati nel ciclo checkHeartbeats. Resettato al
 	// primo resumed ricevuto da quell'IP.
 	watchdogAllStoppedAlerted map[string]bool
+	// proxyRemovedAt[ip] = ms epoch del momento in cui l'utente ha
+	// chiesto Remove proxy per quell'IP. Per il "grace period" di
+	// ProxyRemovedGrace dopo, checkHeartbeats salta gli alert per
+	// quell'IP (atteso che vada silente, e' l'utente ad averlo
+	// chiesto). Cancellato quando un nuovo heartbeat torna ad
+	// arrivare (proxy reinstallato) o naturalmente decade.
+	proxyRemovedAt map[string]int64
 
 	// --- Liste ---
 	bloccati       map[string]struct{}
@@ -164,6 +171,7 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		watchdogHeartbeats:        map[string]map[string]int64{},
 		watchdogStoppedAlerted:    map[string]map[string]bool{},
 		watchdogAllStoppedAlerted: map[string]bool{},
+		proxyRemovedAt:            map[string]int64{},
 	}
 
 	// Carica config persistita (se esiste).
@@ -330,6 +338,23 @@ func (s *State) RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo c
 		Type  string `json:"type"`
 		Entry Entry  `json:"entry"`
 	}{Type: "traffic", Entry: entry})
+}
+
+// ResetRuntime svuota i buffer runtime: storia traffic + tracking
+// alert-stato watchdog. NON tocca DB persistito (sessioni, eventi
+// storici): solo la memoria volatile e la coda usata da SSE/UI live.
+// Broadcast `{type:"reset-runtime"}` ai client per pulire le mappe
+// aggregate. Usato dal pulsante Reset dell'UI.
+func (s *State) ResetRuntime() {
+	s.mu.Lock()
+	s.storia = s.storia[:0]
+	s.watchdogStoppedAlerted = map[string]map[string]bool{}
+	s.watchdogAllStoppedAlerted = map[string]bool{}
+	s.mu.Unlock()
+
+	s.broker.Broadcast(struct {
+		Type string `json:"type"`
+	}{Type: "reset-runtime"})
 }
 
 // RegistraAlive aggiorna aliveMap[ip] e broadcasta `{type:"alive",ip,ts}`.

@@ -50,6 +50,14 @@ export const state = {
     ultimaPerIp: new Map(),
     /** @type {Map<string, number>} IP -> timestamp ms dell'ultimo ping watchdog. NON resettata da `resetDatiTraffico`. */
     aliveMap: new Map(),
+    /**
+     * Per-plugin heartbeat: IP -> Map<pluginID, lastTs>. Aggiornata
+     * via SSE 'plugin-alive' (uno per ogni heartbeat 5s di ogni plugin
+     * sullo studente). Usata dal pallino bottom-left della card per
+     * sapere quanti plugin abilitati sono "vivi".
+     * @type {Map<string, Map<string, number>>}
+     */
+    alivePluginMap: new Map(),
 
     /** @type {Set<string>} Domini in blocklist (rispecchia lo stato server). */
     bloccati: new Set(),

@@ -5,6 +5,114 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.13] — 2026-05-06
+
+### Risolto
+
+- **Pallino top-left blu in vista Lista quando la card e' selected**:
+  il col-status della tabella usava una mappa `selected→info` che
+  forzava blu sul dot. Ora il dot rispecchia SOLO lo stato proxy
+  (verde/rosso/grigio), coerente con la card grid. Il bordo/row
+  selezionato continua a essere segnalato dall'highlight del row.
+
+- **Remove proxy generava alert "watchdog stopped" spuri**: dopo aver
+  cliccato "Rimuovi proxy", i watchdog vengono killati e il server
+  tirava su l'alert "il watchdog e' silente". Ovviamente atteso, ma
+  rumoroso. Nuovo metodo server `MarkProxyRemoved(ips)` chiamato dal
+  handler `/api/veyon/disinstalla-proxy`:
+  - pulisce `aliveMap`, `watchdogHeartbeats`, `*StoppedAlerted` per
+    quegli IP (la card si pulisce subito → grigia su entrambi i dot);
+  - imposta `proxyRemovedAt[ip] = now`. Per i prossimi 60s
+    (`ProxyRemovedGrace`) `checkHeartbeats` salta gli alert per
+    quell'IP. Cancellato anticipatamente se il proxy torna a pingare.
+  - broadcast SSE `{type:"proxy-removed", ip}` per pulizia immediata
+    lato UI.
+
+### Modificato
+
+- **Banner alert non scade piu' automaticamente**: prima gli eventi
+  spirivano dal banner dopo 5-10 min. Ora restano fino a quando
+  l'utente non li ignora esplicitamente (click "Ignora" nel log
+  eventi, "Ignora tutto", o un Reset). Cap implicito invariato:
+  `state.entries` (5000) e `state.watchdogEvents` (200) garantiscono
+  roll-off naturale.
+
+- **Bottone "Reset" ora svuota davvero tutto**: prima cancellava solo
+  blocklist + pausa + lock Veyon. Ora chiama anche `/api/reset-runtime`
+  che svuota `s.storia` e marker watchdog server-side, e il broadcast
+  SSE `reset-runtime` pulisce `state.entries`, `state.perIp`,
+  `state.perDominio`, `state.watchdogEvents`, `state.watchdogEventsPerIp`,
+  `state.eventiIgnoredIds`, `bannerDismissed`. Il DB persistito
+  (sessioni, eventi storici) NON viene toccato.
+
+### Aggiunto
+
+- **Bottone "Ignora tutto" nel pannello Log eventi**: appare quando
+  ci sono eventi correnti. Click → `state.eventiIgnoredIds` ingloba
+  tutti gli id correnti → spariscono da banner + log senza doverli
+  cliccare uno a uno. Toast di conferma con il numero di eventi
+  ignorati.
+
+## [v2.9.12] — 2026-05-06
+
+### Modificato
+
+- **Card studente — semantica dei 3 indicatori chiarita**:
+  1. **Pallino top-left** (`.status`): rappresenta SOLO lo stato del
+     proxy.
+     - verde: heartbeat proxy recente (<15s)
+     - rosso: heartbeat in passato ma silente ora → bypass sospetto
+     - grigio: proxy mai visto (PC scoperto via LAN scan ma proxy
+       non installato/avviato)
+  2. **Pallino bottom-left** (`.watchdog-dot` nel piede): rappresenta
+     lo stato dei plugin watchdog **abilitati nelle Impostazioni**.
+     - verde: tutti i plugin abilitati pingano regolarmente (<15s)
+     - giallo: alcuni mancanti (ma non tutti)
+     - rosso: TUTTI mancanti — kill globale dei watchdog
+     - grigio: nessun plugin abilitato
+  3. **Bordo della card**: prende il **peggior colore** tra i due
+     pallini (verde<giallo<grigio<rosso). Override speciali: AI
+     (rosso saturato + glow) e selected (info + outline) vincono sul
+     bordo "peggio".
+
+### Aggiunto
+
+- **Tracking per-plugin heartbeat lato client**: nuova mappa
+  `state.alivePluginMap` (ip → plugin → lastTs). Idratata a boot via
+  `/api/history` (campo `alivePlugins`) e aggiornata in tempo reale
+  via SSE `{type:"plugin-alive", ip, plugin, ts}` emesso dal server
+  ad ogni `/api/watchdog/heartbeat` (un evento ogni 5s per ogni
+  coppia ip+plugin attiva).
+
+## [v2.9.11] — 2026-05-05
+
+### Risolto
+
+- **Pallino top-left della card si coloriva di arancione per eventi
+  watchdog** (bug UI v2.9.10). Il pallino top-left rappresenta lo
+  stato del proxy (online/offline/idle/AI/selected): non deve
+  cambiare colore quando un plugin watchdog emette un warning.
+  Ora il segnale visivo per eventi watchdog e' SOLO il bordo
+  arancione della card + il pallino watchdog-dot in basso.
+
+- **Pallino watchdog-dot in basso non rifletteva eventi plugin**:
+  prima si basava SOLO sul ping del proxy_watchdog.vbs (alive map).
+  Ora considera anche eventi plugin recenti (5 min):
+  - rosso: c'e' un evento `critical` recente (es. tutti i plugin
+    silenti = sospetto kill globale);
+  - giallo: c'e' un evento `warning` recente (es. plugin singolo
+    stopped, USB inserita, processo sospetto avviato);
+  - verde: proxy alive, nessun evento;
+  - grigio: proxy mai visto.
+
+- **Detail pane studente — pallini per-plugin non si aggiornavano
+  quando il plugin veniva killato**. Il filtro eventi cercava solo
+  `ev.plugin === "usb"`, ma i meta-eventi emessi dal server quando
+  un plugin va silente hanno plugin = `"watchdog-usb"` (con
+  prefisso). Il filtro ora matcha entrambi: cosi' se lo studente
+  killa il watchdog USB, il pallino del plugin USB nel detail pane
+  si colora correttamente.
+
 ## [v2.9.10] — 2026-05-06
 
 ### Risolto

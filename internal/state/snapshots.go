@@ -68,6 +68,10 @@ type HistorySnapshot struct {
 	Pausato         bool                `json:"pausato"`
 	DeadlineISO     string              `json:"deadlineISO,omitempty"`
 	Alive           map[string]int64    `json:"alive"`
+	// AlivePlugins[ip][plugin] = ms epoch dell'ultimo heartbeat ricevuto
+	// per quella tupla. Usato dalla UI per colorare il pallino "stato
+	// plugin" della card studente al boot prima che arrivino SSE.
+	AlivePlugins    map[string]map[string]int64 `json:"alivePlugins"`
 }
 
 // HistorySnapshotData ritorna il payload per /api/history.
@@ -80,6 +84,14 @@ func (s *State) HistorySnapshotData() HistorySnapshot {
 	for k, v := range s.aliveMap {
 		aliveCopy[k] = v
 	}
+	alivePluginsCopy := make(map[string]map[string]int64, len(s.watchdogHeartbeats))
+	for ip, plugins := range s.watchdogHeartbeats {
+		inner := make(map[string]int64, len(plugins))
+		for p, ts := range plugins {
+			inner[p] = ts
+		}
+		alivePluginsCopy[ip] = inner
+	}
 	return HistorySnapshot{
 		Entries:         storiaCopy,
 		Bloccati:        s.bloccatiSortedLocked(),
@@ -90,6 +102,7 @@ func (s *State) HistorySnapshotData() HistorySnapshot {
 		Pausato:         s.pausato,
 		DeadlineISO:     s.deadlineISO,
 		Alive:           aliveCopy,
+		AlivePlugins:    alivePluginsCopy,
 	}
 }
 

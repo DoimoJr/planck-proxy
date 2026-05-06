@@ -69,6 +69,13 @@ async function init() {
     if (histRes.alive) {
         for (const [ip, ts] of Object.entries(histRes.alive)) state.aliveMap.set(ip, ts);
     }
+    if (histRes.alivePlugins) {
+        for (const [ip, plugins] of Object.entries(histRes.alivePlugins)) {
+            const inner = new Map();
+            for (const [p, ts] of Object.entries(plugins)) inner.set(p, ts);
+            state.alivePluginMap.set(ip, inner);
+        }
+    }
 
     for (const e of histRes.entries) assorbiEntry(e);
 
@@ -166,6 +173,7 @@ document.body.addEventListener('click', (e) => {
         case 'banner-dismiss': e.stopPropagation(); actions.dismissBanner(); break;
         case 'evento-apri-studente': e.stopPropagation(); actions.eventoApriStudente(el.dataset.ip); break;
         case 'evento-ignora': e.stopPropagation(); actions.ignoraEvento(el.dataset.id); break;
+        case 'ignora-tutti': e.stopPropagation(); actions.ignoraTuttiEventi(); break;
         case 'evento-blocca-dominio': e.stopPropagation(); actions.bloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
         case 'detail-blocca-dominio': e.stopPropagation(); actions.detailBloccaDominio(); break;
         case 'unblock-per-ip': e.stopPropagation(); actions.sbloccaPerIp(el.dataset.ip, el.dataset.dominio); break;

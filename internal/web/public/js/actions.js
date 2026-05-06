@@ -86,7 +86,7 @@ export async function svuotaBlocklist() {
  * conferma utente, niente prompt nested.
  */
 export async function resetTutto() {
-    if (!confirm('Reset: rimuovo tutti i blocchi domini e sblocco i PC. Continuare?')) return;
+    if (!confirm('Reset: svuoto eventi e richieste, rimuovo tutti i blocchi e sblocco i PC. Continuare?')) return;
     // 1. Svuota la blocklist (cattura sia "Blocca tutto AI" che blocchi puntuali).
     await apiPost('/api/clear-blocklist');
     // 2. Disattiva la pausa globale se attiva.
@@ -96,8 +96,12 @@ export async function resetTutto() {
         const { ips } = targetIps();
         await Promise.all(ips.map(ip => veyonSendFeature(ip, 'screenUnlock').catch(() => false)));
         for (const ip of ips) state.lockedIps.delete(ip);
-        renderAll();
     }
+    // 4. Svuota runtime server (storia traffic + tracking alert watchdog).
+    //    Il server broadcasta 'reset-runtime' che sull'SSE pulisce le mappe
+    //    aggregate client (entries, perIp, perDominio, watchdogEvents,
+    //    eventiIgnoredIds). Il banner alert si svuota di conseguenza.
+    await apiPost('/api/reset-runtime');
     toast.success('Reset completato');
 }
 
@@ -331,6 +335,30 @@ export function ignoraEvento(id) {
     if (!id) return;
     state.eventiIgnoredIds.add(id);
     renderAll();
+}
+
+/** Marca TUTTI gli eventi correntemente in lista come ignorati.
+ *  Equivalente a cliccare "Ignora" su ognuno: spariscono da banner+log
+ *  ma non vengono cancellati dal DB (history). */
+export function ignoraTuttiEventi() {
+    // Itera state.entries (per AI) + state.watchdogEvents (per WD)
+    // costruendo gli stessi id di aggregaEventiAlert.
+    let n = 0;
+    const aiSeen = new Set();
+    for (const e of state.entries) {
+        if (e.tipo !== 'ai') continue;
+        const id = 'ai:' + e.ip + ':' + e.dominio;
+        if (aiSeen.has(id)) continue;
+        aiSeen.add(id);
+        if (!state.eventiIgnoredIds.has(id)) { state.eventiIgnoredIds.add(id); n++; }
+    }
+    for (const ev of state.watchdogEvents || []) {
+        if (ev.severity !== 'warning' && ev.severity !== 'critical') continue;
+        const id = 'wd:' + ev.ip + ':' + ev.plugin + ':' + ev.ts;
+        if (!state.eventiIgnoredIds.has(id)) { state.eventiIgnoredIds.add(id); n++; }
+    }
+    renderAll();
+    if (n > 0) toast.info(`${n} ${n === 1 ? 'evento ignorato' : 'eventi ignorati'}`);
 }
 
 /** Apre lo studente dell'evento e chiude il log. */

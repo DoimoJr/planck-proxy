@@ -395,18 +395,64 @@ export function renderCountdown() {
 // Tabella/Griglia IP (Live tab, pannello principale)
 // ========================================================================
 
+// Soglia "alive" per proxy/plugin heartbeats: oltre questa eta' il
+// dato e' considerato stale. 15s = 3 ping mancati a 5s di intervallo
+// (allineata a HeartbeatTimeout server-side).
+const ALIVE_FRESH_MS = 15 * 1000;
+
 /**
- * Determina stato + label del dot watchdog per un IP.
+ * Stato del proxy per un IP (pallino top-left della card).
+ * - verde: heartbeat proxy recente (<15s)
+ * - rosso: heartbeat in passato ma silente ora (>15s) → bypass
+ * - grigio: mai visto un heartbeat (PC scoperto via LAN, proxy non
+ *   installato/avviato)
+ * @param {string} ip
+ * @returns {{classe:'verde'|'rosso'|'grigio', titolo:string}}
+ */
+function statoProxy(ip) {
+    const ts = state.aliveMap.get(ip);
+    if (!ts) return { classe: 'grigio', titolo: 'Proxy mai visto' };
+    const age = Date.now() - ts;
+    if (age < ALIVE_FRESH_MS) return { classe: 'verde', titolo: `Proxy attivo (${Math.round(age/1000)}s fa)` };
+    return { classe: 'rosso', titolo: `Proxy silente da ${Math.round(age/1000)}s — possibile bypass` };
+}
+
+/**
+ * Stato dei plugin watchdog abilitati per un IP (pallino bottom-left).
+ * Conta quanti plugin abilitati nelle Impostazioni stanno pingando
+ * recentemente:
+ * - verde: tutti i plugin abilitati sono vivi
+ * - giallo: alcuni mancanti (1+, ma non tutti)
+ * - rosso: TUTTI mancanti
+ * - grigio: nessun plugin abilitato (oppure mai ricevuto heartbeat)
  * @param {string} ip
  * @returns {{classe:'verde'|'giallo'|'rosso'|'grigio', titolo:string}}
  */
-function statoWatchdog(ip) {
-    const ts = state.aliveMap.get(ip);
-    if (!ts) return { classe: 'grigio', titolo: 'Watchdog mai visto' };
-    const age = Date.now() - ts;
-    if (age < 15000) return { classe: 'verde', titolo: `Attivo (${Math.round(age/1000)}s fa)` };
-    if (age < 60000) return { classe: 'giallo', titolo: `Ritardo (${Math.round(age/1000)}s fa)` };
-    return { classe: 'rosso', titolo: `OFFLINE da ${Math.round(age/1000)}s - possibile bypass` };
+function statoPlugins(ip) {
+    const enabledPlugins = (state.watchdogPlugins || []).filter(p => p.enabled);
+    if (enabledPlugins.length === 0) {
+        return { classe: 'grigio', titolo: 'Nessun watchdog abilitato' };
+    }
+    const inner = state.alivePluginMap.get(ip);
+    const now = Date.now();
+    let alive = 0, missingNames = [];
+    for (const p of enabledPlugins) {
+        const ts = inner ? inner.get(p.id) : 0;
+        if (ts && (now - ts) < ALIVE_FRESH_MS) alive++;
+        else missingNames.push(p.id);
+    }
+    const total = enabledPlugins.length;
+    if (alive === total) return { classe: 'verde', titolo: `Tutti i ${total} watchdog attivi` };
+    if (alive === 0) return { classe: 'rosso', titolo: `Tutti i ${total} watchdog mancanti (${missingNames.join(', ')})` };
+    return { classe: 'giallo', titolo: `${total - alive}/${total} watchdog mancanti: ${missingNames.join(', ')}` };
+}
+
+// Ordinamento gravita' per "peggior colore" del bordo: verde < giallo
+// < grigio < rosso. Grigio e' "sconosciuto/offline" e' meno grave del
+// rosso ("attivo ma silente = bypass").
+const STATO_RANK = { verde: 0, giallo: 1, grigio: 2, rosso: 3 };
+function peggiorStato(a, b) {
+    return (STATO_RANK[a] || 0) >= (STATO_RANK[b] || 0) ? a : b;
 }
 
 /**
@@ -436,8 +482,13 @@ function calcolaStatoIp(ip, ora, soglia) {
     const diffSec = ultimaDate ? Math.floor((ora - ultimaDate.getTime()) / 1000) : 0;
     const inattivo = ultimaDate && (ora - ultimaDate.getTime()) > soglia;
     const nome = nomeStudente(ip);
-    const wd = statoWatchdog(ip);
-    return { lista, listaAttive, dominiMap, diffSec, inattivo, nome, wd };
+    const proxy = statoProxy(ip);
+    const plugins = statoPlugins(ip);
+    const bordo = peggiorStato(proxy.classe, plugins.classe);
+    // wd e' mantenuto per compat con la lista (vista lista usa s.wd):
+    // li' rappresentava lo stato watchdog generale, ora lo mappiamo sui
+    // plugin (semantica piu' utile dello "alive proxy" gia' nella status).
+    return { lista, listaAttive, dominiMap, diffSec, inattivo, nome, wd: plugins, proxy, plugins, bordo };
 }
 
 /**
@@ -692,16 +743,15 @@ function renderListaIp(container, ips, ora, soglia) {
 
             const tds = tr.children;
 
-            // Col 0: status dot (verde/grigio/rosso/arancione in base a stato)
+            // Col 0: status dot = stato proxy (verde/rosso/grigio).
+            // NON cambia colore per selected/ai/watchdog: quelli vivono
+            // su altri segnali visivi (bordo card, banner, focus row).
             const statusDot = tds[0].firstElementChild;
             const dotClass = ({
-                active: 'dot ok',
-                idle: 'dot muted',
-                offline: 'dot muted',
-                ai: 'dot alert',
-                watchdog: 'dot warn',
-                selected: 'dot info',
-            })[stato] || 'dot';
+                verde:  'dot ok',
+                rosso:  'dot alert',
+                grigio: 'dot muted',
+            })[s.proxy.classe] || 'dot';
             if (statusDot.className !== dotClass) statusDot.className = dotClass;
 
             // Col 1: nome studente (fallback IP last octet se senza nome).
@@ -842,19 +892,19 @@ function renderGrigliaIp(container, ips, ora, soglia) {
         (card, ip) => {
             const s = calcolaStatoIp(ip, ora, soglia);
 
-            // Stato derivato (Claude Designer):
-            //   - offline: PC discoverato dallo scan LAN ma niente proxy
-            //              (nessun traffico, nessun ping watchdog) → grigio
-            //   - idle:    ha avuto traffico/ping ma e' inattivo da >soglia
-            //   - active:  traffico/ping recente attraverso il proxy → verde
-            //   - watchdog/ai/selected: come prima
+            // Stato derivato:
+            //   - .status (top-left)   = stato proxy: statoProxy(ip)
+            //   - .watchdog-dot (foot) = stato plugin abilitati: statoPlugins(ip)
+            //   - data-border          = peggior colore tra i due → bordo card
+            //   - data-state (legacy) = ai/selected/idle per override visivi
+            //     speciali (banner AI, focus modal, opacity idle).
             const hasAI = hasAIRecente(ip, ora);
-            const hasWD = hasWDRecente(ip, ora);
-            let stato = statoBase(ip, ora);
-            if (hasWD) stato = 'watchdog';
+            let stato = statoBase(ip, ora); // active/idle/offline (per opacity)
             if (hasAI) stato = 'ai';
             if (state.focusIp === ip) stato = 'selected';
             card.dataset.state = stato;
+            card.dataset.border = s.bordo;
+            card.dataset.proxy = s.proxy.classe;
 
             const classi = ['ip-card'];
             if (state.selectedIps.has(ip)) classi.push('multi');
@@ -1517,12 +1567,15 @@ export function renderWatchdogPluginsList() {
  * filtrati e non contano per banner ne' log feed.
  */
 function aggregaEventiAlert() {
-    const cutoff = Date.now() - 10 * 60 * 1000; // 10 min
+    // v2.9.13: niente cutoff temporale. Gli eventi restano in lista (e nel
+    // banner) finche' l'utente non li gestisce esplicitamente — click
+    // "Ignora" nel log oppure "Ignora tutto" — oppure finche' un Reset
+    // non ripulisce la coda. Cap implicito: state.entries (5000),
+    // state.watchdogEvents (200) → naturale roll-off.
     const aiByIp = new Map(); // ip -> ultima entry AI
     for (const e of state.entries) {
         if (e.tipo !== 'ai') continue;
         const ts = e.ts || (e.ora ? Date.parse(e.ora.replace(' ', 'T') + 'Z') : 0);
-        if (ts && ts < cutoff) continue;
         const prev = aiByIp.get(e.ip);
         if (!prev || (prev.ts || 0) < ts) {
             aiByIp.set(e.ip, { ...e, ts });
@@ -1539,10 +1592,8 @@ function aggregaEventiAlert() {
             detail: 'richiesta AI rilevata',
         });
     }
-    const wdCutoff = Date.now() - 5 * 60 * 1000;
     for (const ev of state.watchdogEvents || []) {
         if (ev.severity !== 'warning' && ev.severity !== 'critical') continue;
-        if (ev.ts < wdCutoff) continue;
         const id = 'wd:' + ev.ip + ':' + ev.plugin + ':' + ev.ts;
         if (state.eventiIgnoredIds.has(id)) continue;
         const fmt = ev.format || (ev.plugin + ' ' + JSON.stringify(ev.payload || {}));
@@ -1675,6 +1726,7 @@ export function renderLogPanel() {
             <button class="log-filtro-btn ${filtro === 'all' ? 'attivo' : ''}" data-action="log-filter" data-filter="all">Tutti · ${agg.eventi.length}</button>
             <button class="log-filtro-btn ai ${filtro === 'ai' ? 'attivo' : ''}" data-action="log-filter" data-filter="ai">AI · ${agg.aiCount}</button>
             <button class="log-filtro-btn wd ${filtro === 'wd' ? 'attivo' : ''}" data-action="log-filter" data-filter="wd">WD · ${agg.wdCount}</button>
+            ${agg.eventi.length > 0 ? '<button class="log-filtro-btn ghost" data-action="ignora-tutti" title="Ignora tutti gli eventi correnti">Ignora tutto</button>' : ''}
         </div>
         <div class="detail-body">
             ${eventiFiltrati.length === 0 ? '<div class="detail-empty" style="padding: 20px; text-align: center;">Nessun evento.</div>' :
@@ -1885,9 +1937,15 @@ export function renderDetailPane() {
     const wdRecentCutoff = ora - ALERT_WD_CUTOFF_MS;
     const pluginRows = plugins.map(p => {
         const meta = PLUGIN_META[p.id] || { label: p.name || p.id, okDetail: 'ok' };
-        // Solo eventi recenti (entro ALERT_WD_CUTOFF_MS): eventi vecchi
-        // del DB non devono colorare il plugin a "warn" forever.
-        const evtsP = wdEvts.filter(ev => ev.plugin === p.id && (ev.ts || 0) >= wdRecentCutoff);
+        // Eventi recenti: sia eventi originati dal plugin (es. "USB inserita")
+        // sia meta-eventi "watchdog-<plugin>" (stopped) emessi dal server
+        // quando il plugin va silente. Cosi' il pallino riflette anche il
+        // caso "il plugin USB e' stato killato dallo studente".
+        const metaName = 'watchdog-' + p.id;
+        const evtsP = wdEvts.filter(ev =>
+            (ev.plugin === p.id || ev.plugin === metaName) &&
+            (ev.ts || 0) >= wdRecentCutoff
+        );
         const last = evtsP.length > 0 ? evtsP[evtsP.length - 1] : null;
         let st = 'ok';
         let detail = meta.okDetail;

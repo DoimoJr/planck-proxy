@@ -89,6 +89,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/block-per-ip", auth(a.handleBlockForIp))
 	mux.HandleFunc("/api/unblock-per-ip", auth(a.handleUnblockForIp))
 	mux.HandleFunc("/api/clear-blocks-for-ip", auth(a.handleClearBlocksForIp))
+	mux.HandleFunc("/api/reset-runtime", auth(a.handleResetRuntime))
 
 	mux.HandleFunc("/api/session/start", auth(a.handleSessionStart))
 	mux.HandleFunc("/api/session/stop", auth(a.handleSessionStop))
@@ -351,6 +352,18 @@ func (a *API) handleClearBlocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.state.ClearBlocklist()
+	writeOK(w, nil)
+}
+
+// handleResetRuntime svuota la storia traffic + tracking watchdog
+// alert-state. Non tocca il DB persistito (sessioni, eventi storici).
+// Trigger del bottone Reset dell'UI: la coda alert/feed si pulisce
+// senza distruggere i dati di sessione.
+func (a *API) handleResetRuntime(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	a.state.ResetRuntime()
 	writeOK(w, nil)
 }
 

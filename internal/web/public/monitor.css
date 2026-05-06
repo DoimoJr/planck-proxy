@@ -1212,12 +1212,21 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 .ip-card:hover { background: var(--hover); }
 .ip-card.filtro-hidden { display: none; }
 
-/* Stati card via data-state (border colorato + box-shadow inset). */
-.ip-card[data-state="active"]   { border-color: var(--border-strong); }
+/* Bordo card via data-border = peggior colore tra proxy-state (top-left dot)
+   e plugins-state (bottom-left watchdog-dot). v2.9.12: tre indicatori
+   indipendenti — il bordo e' la sintesi visiva.
+   Verde<giallo<grigio<rosso. */
+.ip-card[data-border="verde"]  { border-color: var(--border-strong); }
+.ip-card[data-border="giallo"] { border-color: var(--warn); }
+.ip-card[data-border="grigio"] { border-color: var(--border); }
+.ip-card[data-border="rosso"]  { border-color: var(--alert); }
+
+/* Stati legacy data-state per opacity (idle/offline) e override speciali
+   AI / selected che vincono sul data-border (specificita' uguale, ordine
+   nel file: questi vengono dopo). */
 .ip-card[data-state="idle"]     { opacity: .55; }
 .ip-card[data-state="offline"]  { opacity: .35; }
 .ip-card[data-state="ai"]       { border-color: var(--alert); box-shadow: 0 0 0 1px var(--alert) inset; }
-.ip-card[data-state="watchdog"] { border-color: var(--warn); }
 .ip-card[data-state="selected"] { border-color: var(--info); box-shadow: 0 0 0 1px var(--info) inset; }
 .ip-card.multi { outline: 1.5px solid var(--info); outline-offset: -1.5px; background: var(--info-bg); }
 
@@ -1243,12 +1252,14 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--muted);
 }
-.ip-card[data-state="active"]   .status { background: var(--ok); }
-.ip-card[data-state="idle"]     .status { background: var(--muted); }
-.ip-card[data-state="offline"]  .status { background: var(--muted); }
-.ip-card[data-state="ai"]       .status { background: var(--alert); }
-.ip-card[data-state="watchdog"] .status { background: var(--warn); }
-.ip-card[data-state="selected"] .status { background: var(--info); }
+/* Status dot top-left: rappresenta SOLO lo stato del proxy (data-proxy):
+   verde = proxy heartbeat recente; rosso = proxy mai/silente da troppo →
+   bypass sospetto; grigio = proxy mai visto (PC scoperto via LAN ma
+   proxy non installato). Indipendente da data-state (AI/selected non
+   alterano questo dot). */
+.ip-card[data-proxy="verde"]  .status { background: var(--ok); }
+.ip-card[data-proxy="rosso"]  .status { background: var(--alert); }
+.ip-card[data-proxy="grigio"] .status { background: var(--muted); }
 
 /* Head: nome (flex 1) + IP mono (margin-left: auto). */
 .ip-card-head {

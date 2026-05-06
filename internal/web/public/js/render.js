@@ -1176,6 +1176,55 @@ export function renderReport() {
         return { label, sub, n, kind: 'std' };
     });
     $('report-top-studenti').innerHTML = renderReportTable(studenti, 'Nessuna attività.');
+
+    // Eventi watchdog (USB / process / network) della sessione.
+    // Per archivio: presi dal payload `watchdogEvents` salvato a Stop.
+    // Per sessione corrente: presi da state.watchdogEvents (live).
+    let eventi;
+    if (usaArchivio) {
+        eventi = state.datiSessioneVisualizzata.watchdogEvents || [];
+    } else {
+        // Per la corrente filtro per timestamp >= sessioneInizio (se disponibile).
+        const inizioMs = sessioneInizio ? new Date(sessioneInizio).getTime() : 0;
+        eventi = (state.watchdogEvents || []).filter(e => !inizioMs || (e.ts || 0) >= inizioMs);
+    }
+    const cntEl = $('report-eventi-count');
+    if (cntEl) cntEl.textContent = eventi.length > 0 ? `${eventi.length} totali` : '';
+    $('report-eventi').innerHTML = renderReportEventi(eventi, studentiMap);
+}
+
+/** Render della tabella "Eventi watchdog" del Report. */
+function renderReportEventi(eventi, studentiMap) {
+    if (!eventi || eventi.length === 0) {
+        return '<div class="report-empty">Nessun evento durante questa sessione.</div>';
+    }
+    // Ordine cronologico inverso (recenti prima).
+    const ordinati = [...eventi].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const PLUGIN_LABEL = { usb: 'USB', process: 'Processi', network: 'Network' };
+    const SEVERITY_DOT = { warning: 'warn', critical: 'alert', info: 'muted' };
+    const fmtTs = (ts) => ts
+        ? new Date(ts).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'medium' })
+        : '—';
+    return ordinati.map(ev => {
+        const plugin = PLUGIN_LABEL[ev.plugin] || ev.plugin || '?';
+        const dotCls = SEVERITY_DOT[ev.severity] || 'muted';
+        const nome = ev.nome || (studentiMap || {})[ev.ip] || '';
+        const studLabel = nome ? `${nome} · ${ev.ip}` : (ev.ip || '');
+        let detail = '';
+        if (ev.payload && typeof ev.payload === 'object') {
+            const parts = Object.entries(ev.payload)
+                .filter(([k]) => k !== 'event')
+                .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+            detail = parts.join(' · ');
+        }
+        return `<div class="report-evento">
+            <span class="dot ${dotCls}"></span>
+            <span class="re-ts">${escapeHtml(fmtTs(ev.ts))}</span>
+            <span class="re-plugin">${escapeHtml(plugin)}</span>
+            <span class="re-stud">${escapeHtml(studLabel)}</span>
+            <span class="re-detail">${escapeHtml(detail)}</span>
+        </div>`;
+    }).join('');
 }
 
 /**

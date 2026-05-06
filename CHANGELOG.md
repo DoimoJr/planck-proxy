@@ -5,6 +5,33 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.8] — 2026-05-06
+
+### Aggiunto
+
+- **Sezione "Eventi watchdog" nel Report** (full-width, sotto Attività
+  studente): lista cronologica inversa degli eventi USB / processi /
+  network accaduti durante la sessione. Per archivio: presi da
+  `state.datiSessioneVisualizzata.watchdogEvents` (nuovo campo nel
+  payload `SessionWithEntries`); per sessione corrente: presi da
+  `state.watchdogEvents` filtrati per `ts >= sessioneInizio`.
+  - Backend: `SessionLoad` ora query anche `watchdog_events WHERE
+    sessione_id = ?`, payload deserializzato + nome studente. Campo
+    `WatchdogEvents []json.RawMessage` aggiunto a `SessionWithEntries`.
+  - Frontend: `renderReportEventi(eventi, studentiMap)` produce
+    righe con dot severity (warn/alert/muted) + timestamp mono +
+    plugin label (USB/Processi/Network) + studente·IP + dettaglio
+    payload key:value.
+
+### Rimosso
+
+- **Banner AI legacy** (`lampeggiaBannerAI`): popup rosso "ATTENZIONE
+  accesso AI rilevato" che lampeggiava 5s al primo dominio AI di una
+  sessione. Era ridondante col banner alert unificato in alto
+  (`renderAlertBanner`) introdotto in v2.9.0. Beep + notifica desktop
+  spostati direttamente nell'handler SSE `traffic` quando l'entry
+  e' di tipo AI.
+
 ## [v2.9.7] — 2026-05-06
 
 Patch release.

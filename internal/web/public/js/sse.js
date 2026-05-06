@@ -61,25 +61,6 @@ function beep() {
 }
 
 /**
- * Mostra il banner rosso lampeggiante per 5s con il dominio AI rilevato.
- * Sparisce dopo 5s (timer reimpostato se arrivano nuove detection).
- * Emette anche notifica desktop + beep se le notifiche sono attive.
- * @param {string} dominio
- */
-function lampeggiaBannerAI(dominio) {
-    const b = $('ai-banner');
-    b.textContent = `ATTENZIONE: accesso AI rilevato - ${dominio}`;
-    b.style.display = 'block';
-    clearTimeout(lampeggiaBannerAI._t);
-    lampeggiaBannerAI._t = setTimeout(() => { b.style.display = 'none'; }, 5000);
-
-    if (state.notifiche && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        try { new Notification('AI rilevata', { body: dominio, silent: true }); } catch {}
-    }
-    beep();
-}
-
-/**
  * Mostra il banner "TEMPO SCADUTO" (resta visibile fino al prossimo reset),
  * emette notifica desktop non silenziosa + tripla serie di beep.
  */
@@ -159,8 +140,14 @@ export function avviaSSE() {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'traffic') {
             trafficBatch.push(msg.entry);
+            // Beep + notifica desktop quando arriva un dominio AI nuovo:
+            // il banner alert unificato (renderAlertBanner) si occupa
+            // della parte visiva, qui solo audio/notifica se attivi.
             if (msg.entry.tipo === 'ai' && !state.bloccati.has(msg.entry.dominio)) {
-                lampeggiaBannerAI(msg.entry.dominio);
+                if (state.notifiche && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                    try { new Notification('AI rilevata', { body: msg.entry.dominio, silent: true }); } catch {}
+                }
+                beep();
             }
             scheduleTrafficFlush();
         } else if (msg.type === 'blocklist') {

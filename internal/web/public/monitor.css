@@ -1453,6 +1453,37 @@ tr.filtro-hidden { display: none; }
 }
 .report-row.ai .rt-count { color: var(--alert); }
 
+/* Lista eventi watchdog nel Report (più colonne testuali, no barra). */
+.report-evento {
+    display: grid;
+    grid-template-columns: 14px 150px 90px minmax(140px, 1fr) minmax(0, 2fr);
+    gap: 12px; align-items: baseline;
+    padding: 5px var(--s-3);
+    font-size: 11px; color: var(--text-2);
+    border-bottom: 1px solid var(--border);
+}
+.report-evento:last-child { border-bottom: 0; }
+.report-evento:hover { background: var(--hover); }
+.report-evento .dot { margin-top: 4px; }
+.report-evento .re-ts {
+    font-family: var(--font-mono); color: var(--text-3);
+    font-size: 10.5px;
+    white-space: nowrap;
+}
+.report-evento .re-plugin {
+    color: var(--text-2); font-weight: 500;
+}
+.report-evento .re-stud {
+    font-family: var(--font-mono); color: var(--text-3);
+    font-size: 10.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.report-evento .re-detail {
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--text-3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ============== TAB IMPOSTAZIONI (Linear style + sub-tab) ============== */
 #tab-impostazioni { padding: 0; overflow-y: auto; }
 

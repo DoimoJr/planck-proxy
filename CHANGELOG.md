@@ -5,6 +5,21 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.7] — 2026-05-06
+
+Patch release.
+
+### Risolto
+
+- **Floating selection bar flickerava** rendendo i bottoni
+  (Blocca/Sblocca schermo, Messaggia, Proxy on/off, Blocca dominio,
+  ✕) impossibili da cliccare durante la multi-selezione. Causa: ogni
+  `renderAll()` ricostruiva l'innerHTML della pillola → bottoni
+  distrutti durante il click. Fix: content-key skip basato su
+  `selectedIps.size + veyonConfigured` — la pillola si rebuilda solo
+  quando cambia il count o lo stato Veyon, non ad ogni evento SSE.
+  Stesso pattern dei fix flicker di detail-pane e log-pane in v2.9.0.
+
 ## [v2.9.6] — 2026-05-06
 
 Polish dopo testing reale a scuola: rifacimento tab Report e Impostazioni

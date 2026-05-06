@@ -1704,13 +1704,21 @@ export function renderSelectionBar() {
     const bar = $('selection-bar');
     if (!bar) return;
     const n = state.selectedIps.size;
+    const veyonOn = !!state.veyonConfigured;
+
+    // Skip rebuild se nulla di significativo e' cambiato. Senza, ogni
+    // renderAll distruggeva e ricostruiva i bottoni → click "perso" durante
+    // il flicker. Stesso fix applicato a detail-pane e log-pane.
+    const key = n === 0 ? 'empty' : `n=${n}|veyon=${veyonOn}`;
+    if (bar.dataset.lastKey === key) return;
+    bar.dataset.lastKey = key;
+
     if (n === 0) {
         bar.classList.add('hidden');
         bar.textContent = '';
         return;
     }
     bar.classList.remove('hidden');
-    const veyonOn = !!state.veyonConfigured;
 
     // Icone SVG inline (Linear style, stroke 1.5, viewBox 12).
     const icoLock   = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V3.5a2 2 0 1 1 4 0v2"/></svg>';

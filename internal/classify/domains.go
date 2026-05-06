@@ -162,7 +162,7 @@ var PatternSistema = []string{
 	// ---------- Microsoft / Windows / Edge (telemetria, update, servizi) ----------
 	".msftconnecttest.com", ".msftncsi.com",
 	".windowsupdate.com", ".update.microsoft.com",
-	".events.data.microsoft.com", ".telemetry.microsoft.com",
+	".events.data.microsoft.com", "events.data.msn.", ".telemetry.microsoft.com",
 	".delivery.mp.microsoft.com", ".dsp.mp.microsoft.com",
 	".licensing.mp.microsoft.com", ".displaycatalog.mp.microsoft.com",
 	".checkappexec.microsoft.com",
@@ -171,7 +171,7 @@ var PatternSistema = []string{
 	".live.com", ".outlook.com", ".skype.com",
 	".azure.com",
 	".windows.com",
-	"cxcs.microsoft.net",
+	"cxcs.microsoft.net", ".gfx.ms",
 	"default.exp-tas.com",
 	"config.edge.skype.com",
 	"tile-service.weather.microsoft.com",
@@ -197,6 +197,7 @@ var PatternSistema = []string{
 	"analytics.", "telemetry.", "metrics.", "stats.",
 	"logs.", "logger.", "tracker.", "tracking.",
 	".hotjar.com", ".segment.com", ".mixpanel.com", ".amplitude.com",
+	".sprig.com", ".imrworldwide.com",
 	".newrelic.com", ".nr-data.net",
 	"datadoghq.com", ".datadoghq-browser-agent.com",
 	".signalfx.com", ".sentry.io",
@@ -210,7 +211,7 @@ var PatternSistema = []string{
 
 	// ---------- Consent Management Platforms ----------
 	".usercentrics.eu", ".onetrust.com", ".cookielaw.org",
-	".privacymanager.io", "privacy-proxy.",
+	".privacymanager.io", "privacy-proxy.", ".trustarc.com",
 
 	// ---------- Ad tech / RTB / bid sync ----------
 	".adsense.", ".adnxs.com", ".criteo.com", ".taboola.com", ".outbrain.com",
@@ -233,7 +234,7 @@ var PatternSistema = []string{
 	".safeframe.googlesyndication.com",
 	".platinumai.net", ".vistarsagency.com", ".company-target.com",
 	".rfihub.com", ".ctnsnet.com",
-	".yahoo.com",
+	".yahoo.com", "ad-delivery.net",
 
 	// ---------- Adobe check-ins / DTM (Reader, Acrobat, Experience Platform) ----------
 	"acroipm", "armmf.adobe.com", "ardownload", ".adobedtm.com",
@@ -249,6 +250,13 @@ var PatternSistema = []string{
 	"telemetry.canva.com", "static.canva.com",
 	"chunk-composing.canva.com", "avatar.canva.com",
 	"template.canva.com", ".canva-apps.com",
+
+	// ---------- Endpoint security / sandbox antimalware (rumore) ----------
+	".bromium-online.com",
+
+	// ---------- Telemetria scuola/PA italiana ----------
+	"analytics.istruzione.it", "analytics-1.istruzione.it",
+	"analytics-2.istruzione.it", "analytics1.istruzione.it",
 
 	// ---------- Privacy sandbox / altri ----------
 	".privacysandboxservices.com",

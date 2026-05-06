@@ -77,6 +77,7 @@ async function init() {
     aggiornaInputDeadline();
     renderTabs();
     actions.applicaCollassi();
+    actions.cambiaSubtabImpostazioni(state.settingsSubtab);
     avviaTopbarClock();
     avviaRecTimer();
     // Primo render SINCRONO (no RAF): garantisce che la grid IP sia
@@ -190,6 +191,7 @@ document.body.addEventListener('click', (e) => {
         case 'pausa-toggle': actions.togglePausa(); break;
         case 'clear-deadline': actions.annullaDeadline(); break;
         case 'tab': actions.cambiaTab(el.dataset.tab); break;
+        case 'settings-subtab': actions.cambiaSubtabImpostazioni(el.dataset.subtab); break;
         case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
         case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
         case 'veyon-configure': actions.veyonConfigura(); break;

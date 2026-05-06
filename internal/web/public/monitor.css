@@ -8,6 +8,69 @@
 /* Scrollbar nascoste globalmente (scroll funziona, niente barra visibile). */
 * { scrollbar-width: none; -ms-overflow-style: none; }
 *::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* ============== MODAL DIALOG (Claude Designer style) ============== */
+/* Sostituisce prompt() nativo per le azioni che richiedono testo (es.
+   Veyon broadcast message). Overlay scuro + card centrata. */
+.modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, .55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(2px);
+}
+.modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-3);
+    box-shadow: 0 12px 40px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.15);
+    width: 440px; max-width: calc(100% - 40px);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    color: var(--text);
+}
+.modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.modal-title {
+    font-size: 13px; font-weight: 600;
+    letter-spacing: -.01em;
+}
+.modal-x {
+    width: 22px; height: 22px;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    color: var(--text-3); cursor: pointer;
+    font-size: 14px; line-height: 1;
+    padding: 0; flex-shrink: 0;
+}
+.modal-x:hover { color: var(--text); background: var(--hover); }
+.modal-body {
+    padding: 10px 14px 0;
+    font-size: 11.5px; color: var(--text-2);
+}
+.modal-input {
+    margin: 12px 14px;
+    min-height: 90px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: inherit; font-size: 12px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.4;
+}
+.modal-input:focus { border-color: var(--border-strong); }
+.modal-actions {
+    display: flex; gap: 8px; justify-content: flex-end;
+    padding: 8px 14px 14px;
+}
+.modal-actions .btn { height: 28px; padding: 0 14px; font-size: 11.5px; }
 :root {
     /* Tipografia */
     --font-ui: -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -187,7 +250,10 @@ body { font-family: var(--font-ui); background: var(--bg); color: var(--text); t
 .tab-panel { display: none; flex: 1; min-height: 0; overflow: hidden; }
 .tab-panel.active { display: flex; flex-direction: column; }
 
-#tab-report, #tab-impostazioni { padding: 14px; overflow-y: auto; }
+/* Tab Report: niente padding esterno, le sezioni hanno border-bottom
+   come la Live tab. Tab Impostazioni mantiene il padding centrato. */
+#tab-report { padding: 0; overflow-y: auto; }
+#tab-impostazioni { padding: 14px; overflow-y: auto; }
 
 /* ============== LAYOUT LIVE ============== */
 /* Layout Live: niente padding/gap esterni — le sezioni sono attaccate
@@ -1290,90 +1356,283 @@ tr.filtro-hidden { display: none; }
 
 .hidden { display: none !important; }
 
-/* ============== TAB REPORT ============== */
-.report-layout { display: flex; flex-direction: column; gap: 12px; max-width: 1400px; margin: 0 auto; width: 100%; }
-.report-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.report-header h2 { border: none; padding: 0; margin: 0; font-size: 1.1em; }
-.report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.report-stats dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 0.9em; }
-.report-stats dt { color: var(--text-muted); }
-.report-stats dd { font-weight: 600; color: var(--text); }
-
-.report-bars { display: flex; flex-direction: column; gap: 4px; font-size: 0.85em; }
-.report-bar {
-    display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
-    padding: 4px 6px; border-radius: 3px;
+/* ============== TAB REPORT (Linear style coerente con Live) ============== */
+.report-toolbar {
+    background: var(--surface);
 }
-.report-bar:hover { background: var(--hover); }
-.report-bar .barra-wrap { position: relative; height: 20px; background: var(--header-bg); border-radius: 3px; overflow: hidden; }
-.report-bar .barra {
-    position: absolute; top: 0; left: 0; bottom: 0;
-    background: var(--accent); opacity: 0.75;
-    transition: width 0.2s;
+.report-tb-label {
+    color: var(--text-3); font-size: 11px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: .04em;
+    margin-right: -2px;
 }
-.report-bar.ai .barra { background: var(--danger); }
-.report-bar .label { position: absolute; top: 50%; transform: translateY(-50%); left: 8px; right: 8px; z-index: 1; font-family: monospace; color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.report-bar .label.on-dark { color: white; }
-.report-bar .count { font-weight: bold; min-width: 40px; text-align: right; }
-
-/* ============== TAB IMPOSTAZIONI ============== */
-.impostazioni-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 1200px; margin: 0 auto; width: 100%; }
-.info-dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 0.9em; }
-.info-dl dt { color: var(--text-muted); }
-.info-dl dd { font-weight: 600; font-family: monospace; word-break: break-all; }
-
-/* Settings form */
-.settings-grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px 12px; align-items: center; }
-.settings-grid label { color: var(--text-muted); font-size: 0.9em; }
-.settings-grid input, .settings-grid select {
-    padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
-    background: var(--bg); color: var(--text); font-size: 0.9em; width: 100%;
+.report-select {
+    height: 26px; min-width: 280px; max-width: 360px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r-2); color: var(--text);
+    font-family: inherit; font-size: 11.5px;
+    padding: 0 8px; outline: none; cursor: pointer;
 }
-.settings-grid input:focus, .settings-grid select:focus { outline: none; border-color: var(--accent); }
-.settings-grid input[type="checkbox"] { width: auto; height: 18px; }
-.settings-grid input[type="number"] { max-width: 140px; }
-.hint-inline { font-size: 0.75em; color: var(--warn); font-weight: normal; margin-left: 8px; }
+.report-select:focus { border-color: var(--border-strong); }
+.report-titolo {
+    color: var(--text-3); font-size: 11px;
+    font-style: italic;
+}
+
+.report-tables {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+.report-section {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.report-section:nth-child(2n) { border-right: 0; }
+.report-section.report-section-wide {
+    grid-column: 1 / 3;
+    border-right: 0;
+}
+.report-section-head {
+    padding: 10px var(--s-3) 8px;
+    color: var(--text-3);
+    font-size: 11px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: .06em;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 1;
+}
+.report-section-body {
+    padding: 4px 0 8px;
+}
+.report-empty {
+    padding: 20px var(--s-3);
+    color: var(--text-3); font-size: 11px;
+    font-style: italic; text-align: center;
+}
+
+/* Riga "tabella" densa: nome | barra | count.
+   Stile coerente con vista lista IP della Live (.ip-list-table). */
+.report-row {
+    display: grid; grid-template-columns: minmax(0, 1.6fr) 1fr 60px;
+    gap: 12px; align-items: center;
+    padding: 4px var(--s-3);
+    font-size: 11px;
+    color: var(--text-2);
+}
+.report-row:hover { background: var(--hover); }
+.report-row .rt-name {
+    display: flex; flex-direction: column;
+    overflow: hidden; min-width: 0;
+}
+.report-row .rt-label {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.report-row.ai .rt-label { color: var(--alert); }
+.report-row .rt-sub {
+    font-family: var(--font-mono); font-size: 9.5px;
+    color: var(--text-3);
+}
+.report-row .rt-bar {
+    height: 6px; background: var(--surface-3);
+    border-radius: 3px; overflow: hidden;
+}
+.report-row .rt-bar-fill {
+    height: 100%;
+    background: var(--text-3);
+    border-radius: 3px;
+}
+.report-row.ai .rt-bar-fill { background: var(--alert); }
+.report-row .rt-count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-2);
+    font-size: 11px; font-weight: 500;
+}
+.report-row.ai .rt-count { color: var(--alert); }
+
+/* ============== TAB IMPOSTAZIONI (Linear style + sub-tab) ============== */
+#tab-impostazioni { padding: 0; overflow-y: auto; }
+
+/* Sub-tab nav (stile coerente con .tabs della topbar). */
+.settings-nav {
+    display: flex; gap: 2px;
+    padding: 8px var(--s-4) 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-wrap: wrap;
+}
+.settings-tab-btn {
+    height: 28px; padding: 0 12px;
+    background: transparent; color: var(--text-2);
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: var(--r-2) var(--r-2) 0 0;
+    cursor: pointer;
+    font-family: inherit; font-size: 12px; font-weight: 500;
+    line-height: 1;
+    margin-bottom: -1px; /* sovrappone al border-bottom della nav */
+}
+.settings-tab-btn:hover { color: var(--text); }
+.settings-tab-btn.active {
+    color: var(--text);
+    background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--bg);
+}
+
+/* Pannello sub-tab: nascosto di default, visibile solo l'attivo. */
+.settings-tab-panel { display: none; padding: 16px var(--s-4); max-width: 960px; }
+.settings-tab-panel.active { display: block; }
+
 .riavvio-banner {
-    background: var(--warn); color: white;
-    padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;
-    font-size: 0.85em; font-weight: 600;
+    background: var(--warn-bg);
+    color: var(--warn);
+    padding: 8px var(--s-4);
+    border-bottom: 1px solid color-mix(in oklab, var(--warn) 30%, var(--border));
+    font-size: 11.5px; font-weight: 500;
+}
+.riavvio-banner.hidden { display: none; }
+
+/* Sezione settings dentro un sub-tab: header uppercase + body con grid. */
+.settings-section {
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    overflow: hidden;
+}
+.settings-section-head {
+    padding: 8px var(--s-3);
+    color: var(--text-3);
+    font-size: 11px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: .06em;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+}
+.settings-section .settings-grid,
+.settings-section .settings-add-row,
+.settings-section .ignorati-list,
+.settings-section .sessioni-list,
+.settings-section .link-list,
+.settings-section .settings-hint,
+.settings-section #watchdog-plugins-list {
+    margin: 0;
+    padding: 12px var(--s-3);
+}
+.settings-section .ignorati-list,
+.settings-section .sessioni-list,
+.settings-section .link-list { padding: 0; }
+
+.settings-grid {
+    display: grid; grid-template-columns: 200px 1fr;
+    gap: 8px 14px; align-items: center;
+}
+.settings-grid label {
+    color: var(--text-2); font-size: 11.5px;
+}
+.settings-grid input[type="text"],
+.settings-grid input[type="password"],
+.settings-grid input[type="number"],
+.settings-grid select {
+    height: 26px;
+    padding: 0 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    color: var(--text);
+    font-family: inherit; font-size: 11.5px;
+    outline: none; max-width: 360px;
+}
+.settings-grid input:focus,
+.settings-grid select:focus { border-color: var(--border-strong); }
+.settings-grid input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.settings-grid input[type="number"] { max-width: 140px; }
+.settings-cell-with-hint {
+    display: flex; align-items: center; gap: 8px;
+}
+.settings-cell-with-hint .hint-inline {
+    color: var(--text-3); font-style: italic;
 }
 
-.ignorati-list { list-style: none; padding: 0; margin: 6px 0; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; }
-.ignorati-list li { display: flex; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 0.85em; gap: 8px; }
-.ignorati-list li:last-child { border-bottom: none; }
-.ignorati-list li .dominio { flex: 1; font-family: monospace; }
-.ignorati-list li button { padding: 2px 8px; font-size: 0.75em; }
-.ignorati-list li.hint { justify-content: center; color: var(--text-muted); font-style: italic; }
-.hint { font-size: 0.8em; color: var(--text-muted); margin: 8px 0; line-height: 1.5; }
-.hint code { background: var(--header-bg); padding: 1px 5px; border-radius: 3px; font-family: monospace; }
+.hint-inline {
+    font-size: 10.5px; color: var(--text-3); font-weight: 400;
+    text-transform: none; letter-spacing: 0; margin-left: 6px;
+}
+.settings-hint {
+    font-size: 10.5px; color: var(--text-3);
+    line-height: 1.5;
+}
+.settings-hint code {
+    background: var(--surface-3);
+    padding: 1px 5px; border-radius: var(--r-1);
+    font-family: var(--font-mono); font-size: 10px;
+}
 
-.sessioni-list, .link-list { list-style: none; padding: 0; margin-top: 6px; max-height: 200px; overflow-y: auto; }
-.sessioni-list li { display: flex; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--border); font-size: 0.85em; gap: 8px; }
+.settings-add-row {
+    display: flex; gap: 8px; align-items: center;
+}
+.settings-add-row .filtro-input {
+    flex: 1; height: 26px;
+}
 
-/* Form "aggiungi" inline (riusato da: aggiungi-ignorato, veyon-test).
-   Layout flex con input full-width + bottone in coda. */
-.aggiungi-studente { display: flex; gap: 8px; margin: 10px 0 6px; align-items: center; }
-.aggiungi-studente input {
-    padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
-    background: var(--bg); color: var(--text); font-size: 0.85em;
+.ignorati-list {
+    list-style: none;
+    max-height: 320px; overflow-y: auto;
+}
+.ignorati-list li {
+    display: flex; align-items: center;
+    padding: 6px var(--s-3); gap: 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+}
+.ignorati-list li:last-child { border-bottom: 0; }
+.ignorati-list li .dominio {
     flex: 1;
+    font-family: var(--font-mono); color: var(--text-2);
+}
+.ignorati-list li.hint {
+    justify-content: center; color: var(--text-3); font-style: italic;
 }
 
-.sessioni-list li { cursor: pointer; }
+.sessioni-list {
+    list-style: none;
+    max-height: 360px; overflow-y: auto;
+}
+.sessioni-list li {
+    display: flex; align-items: center;
+    padding: 6px var(--s-3); gap: 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; cursor: pointer;
+}
+.sessioni-list li:last-child { border-bottom: 0; }
 .sessioni-list li:hover { background: var(--hover); }
-.sessioni-list li .nome { flex: 1; font-family: monospace; font-size: 0.82em; }
-.sessioni-list li button { padding: 2px 6px; font-size: 0.75em; }
+.sessioni-list li .nome { flex: 1; color: var(--text-2); }
 
-.link-list li { padding: 4px 0; }
-.link-list a { color: var(--accent); text-decoration: none; font-size: 0.9em; }
+.link-list {
+    list-style: none;
+}
+.link-list li {
+    padding: 6px var(--s-3);
+    border-bottom: 1px solid var(--border);
+}
+.link-list li:last-child { border-bottom: 0; }
+.link-list a {
+    color: var(--info); text-decoration: none;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+}
 .link-list a:hover { text-decoration: underline; }
 
 @media (max-width: 900px) {
     .layout { flex-direction: column; }
     .sidebar { width: 100%; max-height: 250px; }
     .main-panels { flex-direction: column; }
-    .report-grid, .impostazioni-layout { grid-template-columns: 1fr; }
+    .report-tables { grid-template-columns: 1fr; }
+    .report-section { border-right: 0; }
+    .report-section.report-section-wide { grid-column: 1 / 2; }
 }
 
 /* ====================================================================

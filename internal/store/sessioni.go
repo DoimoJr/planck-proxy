@@ -92,6 +92,21 @@ func (s *Store) SessionClose(sessionID int64, fineISO string, durataSec int64, a
 	return err
 }
 
+// SessionRename aggiorna il titolo (nome custom) di una sessione esistente.
+// Usato dopo Stop quando l'utente da' un nome alla sessione appena archiviata.
+func (s *Store) SessionRename(sessionID int64, titolo string) error {
+	if s.disabled {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`UPDATE sessioni SET titolo = ? WHERE id = ?`,
+		titolo, sessionID,
+	)
+	return err
+}
+
 // SessionFindActive cerca una sessione attiva (sessione_fine NULL).
 // Usato al boot per crash recovery: se ne esiste una, il chiamante puo'
 // decidere di chiuderla forzatamente come "recovered".

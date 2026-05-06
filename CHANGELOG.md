@@ -5,6 +5,170 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.6] — 2026-05-06
+
+Polish dopo testing reale a scuola: rifacimento tab Report e Impostazioni
+in stile Linear, naming sessione, hot-swap auth, rec come toggle, alert
+nativi sostituiti con toast/modal, scan analizzato per nuovi domini di
+sistema.
+
+### Aggiunto
+
+- **Naming sessione dopo Stop**: alla fine della registrazione appare un
+  modal in stile app per dare un nome custom (es. "Verifica Storia 5B"),
+  che diventa il display name dell'archivio nel dropdown Report e nella
+  lista Impostazioni → Archivio. Saltabile (resta default "Planck Proxy").
+  Endpoint `POST /api/session/rename {id, titolo}` + `SessionRename`
+  store helper. `GET /api/sessioni` ora ritorna `[{filename, titolo,
+  inizio, fine, durataSec}]` invece di array di filename.
+
+- **Modal custom in stile app** (`js/modal.js`) sostituisce `prompt()`
+  nativo per "Invia messaggio" Veyon e "Naming sessione". Overlay
+  scuro + card 440px centrata, header surface-2 con titolo + X,
+  textarea ridimensionabile, bottoni Annulla/Invia. Esc / click fuori
+  / ✕ chiudono. Ctrl/Cmd+Enter conferma. API riusabile via
+  `showPromptModal({title, message, defaultValue, placeholder, okLabel,
+  cancelLabel})` → `Promise<string|null>`.
+
+- **Pulsante Rec sessione come toggle**: rimosso bottone Stop separato.
+  Click su "Rec sessione" (idle, primary rosso) avvia. Click su "Sta
+  registrando" (filled alert + dot pulse) ferma e archivia. Pattern
+  uniforme a Blocca tutto / Blocca AI.
+
+- **Tab Report ridisegnata** in stile Linear coerente con Live:
+  - Toolbar in alto: dropdown sessione (con titolo custom + data/ora)
+    + Elimina archivio + titolo report a destra.
+  - Stat strip 5 col (riusa `.stat-row` della Live): Durata / Richieste
+    / Domini / Bloccate / In blocklist, ognuno con label uppercase 10px
+    + numero 22px tabular + sub-line.
+  - 3 sezioni dense (Top AI / Top 10 domini / Attività studente):
+    righe `nome | barra proporzionale | count tabular-right` invece dei
+    box con barre orizzontali viola di prima.
+
+- **Tab Impostazioni in 7 sub-tab** (rectangular pill nav coerente con
+  i tab principali):
+  - **Generale**: profilo, comportamento proxy (modo/inattività),
+    discovery & notifiche.
+  - **Rete & Auth**: porte (richiede riavvio) + auth (applicata subito,
+    hot-swap del middleware `RequireAuth`).
+  - **Domini & AI**: domini ignorati + lista AI auto-aggiornata.
+  - **Watchdog**: lista plugin USB/process/network.
+  - **Archivio**: sessioni archiviate.
+  - **Veyon**: stato + test connessione.
+  - **Sistema**: endpoint API debug (export/status/sessioni/health/version).
+  - Sub-tab persistito in `localStorage` (`settingsSubtab`).
+
+- **Toggle EVENTI button** in toolbar (testuale, sempre disponibile)
+  per aprire/chiudere il pannello Log eventi anche senza alert attivi.
+
+- **Bottone "Sblocca schermo"** nelle azioni rapide del detail pane
+  (era raggiungibile solo dalla multi-selezione). Layout 5 bottoni:
+  Blocca/Sblocca schermo + Messaggia + Disconnetti proxy in 2x2 +
+  Blocca dominio (rosso, full-width).
+
+- **Tools**:
+  - `tools/importsession`: copia sessioni archiviate da un planck.db
+    sorgente al destinazione (rimappa id, copia entries + watchdog
+    events). Usato per recuperare la sessione di test fatta a scuola
+    da un binario v2.9.0.
+  - `tools/analizzasessione`: classifica i domini di una sessione con
+    `classify.Classifica` e suggerisce candidati per nuove voci nelle
+    liste AI / Sistema, basato su euristica nome.
+
+### Cambiato
+
+- **`HideOwnConsole`** ora chiama anche `FreeConsole()` dopo
+  `ShowWindow(SW_HIDE)`. Senza il detach esplicito, la finestra cmd
+  restava "minimizzata in taskbar" lasciando un'icona persistente.
+  Ora il processo non ha piu' una console attached: zero icone fantasma.
+
+- **EVENTI / STREAM / DOMINI** in toolbar (testuali) sostituiscono le
+  icone SVG dei toggle log/stream/sidebar. Bottone EVENTI spostato a
+  destra del search input. Feedback visivo `.attivo` (verde) coerente
+  quando il rispettivo pannello e' aperto.
+
+- **Confirm popup nativi rimossi** dalle azioni non distruttive:
+  Rec sessione (toast "Registrazione avviata"), Send proxy, Remove
+  proxy, Lock screens, Unlock screens. Solo le azioni davvero
+  irreversibili (Reset, Reboot/Spegni classe, Elimina sessione,
+  Spegni server) mantengono il `confirm()` nativo.
+
+- **`veyonForEachTarget(label, fn, skipConfirm)`**: parametro nuovo
+  per saltare il confirm su lock/unlock/msg/proxy on/off mantenendolo
+  per reboot/poweroff.
+
+- **Stati card refactored a logica `aliveAgo` + `trafficoAgo`** separati:
+  - `offline` (grigio scuro): nessun ping watchdog da > 60s.
+  - `idle` (grigio chiaro): ping ok ma traffico utente assente da > 3
+    min (incluso "mai navigato dopo Send proxy").
+  - `active` (verde): ping ok + traffico recente.
+  - Override: `watchdog` (5 min cutoff) → `ai` (10 min) → `selected`.
+  - Risolve "card resta colorata anche dopo riavvio Planck" e
+    "non distinguibile online ma non naviga vs online attivo".
+
+- **Stato `locked` della card**: tracking client-side via
+  `state.lockedIps`. Quando l'utente blocca lo schermo via Veyon
+  da Planck, la card mostra un overlay scuro semitrasparente (.55
+  alpha) con icona lucchetto centrata. Sblocco → overlay sparisce.
+  Vista lista: riga con bg `info-bg` + lucchetto blu nella colonna
+  status.
+
+- **`classify.PatternSistema`** arricchita con 10 nuovi pattern
+  scoperti dall'analisi della sessione di scuola: `events.data.msn.`
+  (variante CN), `.gfx.ms`, `.bromium-online.com`, `analytics*.istruzione.it`,
+  `.sprig.com`, `.imrworldwide.com`, `ad-delivery.net`, `.trustarc.com`.
+
+- **Click sui chip dominio nelle card** non blocca piu' il dominio:
+  apre il detail pane (uniforme col resto della card). Il blocco
+  per-IP avviene dal bottone "Blocca dominio" del detail pane.
+
+- **Watchdog events panel sopra la grid** rimosso: era ridondante col
+  banner alert + log eventi.
+
+- **Single-instance lock** via `planck.pid`: kill istanza precedente
+  al boot (sleep 800ms per il rilascio della porta TCP).
+
+- **ESC chain finale**: multi-sel > detail pane > log pane > focus IP
+  > sidebar dx > sidebar sx.
+
+### Risolto
+
+- **Timer report archive che continuava ad aumentare**: `renderReport`
+  usava `state.datiSessioneVisualizzata.esportatoAlle || Date.now()`
+  come "fine sessione" per calcolare la durata. `esportatoAlle` era
+  un campo legacy v1, mai popolato dal backend SQLite v2 → cadeva
+  sempre su `Date.now()` → durata cresceva ogni 5s mentre guardavi
+  un archivio. Ora calcolata da `durataSec` (persistito in
+  `SessionClose`).
+
+- **Dropdown sessione vuoto in tab Report**: il `<select>` era
+  popolato solo in `renderImpostazioni`, che fa early-return se non
+  sei in tab Impostazioni. Estratta la logica in
+  `aggiornaSelectSessioniArchivio()`, chiamata anche da
+  `renderReport`.
+
+- **Stat strip Report invisibile**: avevo usato `class="stats"` (non
+  esiste) invece di `class="stat-row"` (la classe usata dalla Live
+  per il grid 5 col).
+
+- **"Bottone Eventi" / "Stream" / "Sidebar" SmartScreen Defender**:
+  build cambiata a console subsystem + runtime hide → niente piu'
+  popup "App non riconosciuta" al primo avvio. Effetto a cascata:
+  anche i `.vbs` distribuiti via Veyon FileTransfer non vengono piu'
+  flaggati (il processo master non e' piu' "sospetto").
+
+- **Hint "richiede riavvio"** mostrato sulla sezione Autenticazione
+  nelle Impostazioni: era sbagliato. Auth e' hot-swap (middleware
+  `RequireAuth` legge `state.AuthInfo()` ad ogni request).
+
+### Known issues
+
+- Le porte (`proxy.port`, `web.port`) richiedono ancora riavvio: il
+  TCP listener e' bound una sola volta in `main.go`. Restart graceful
+  del listener possibile ma non implementato.
+- Stato locked tracciato client-side: se l'utente blocca da un altro
+  Veyon Master non Planck, lo state non si aggiorna.
+
 ## [v2.9.5] — 2026-05-05
 
 Iterazione di polish su v2.9.0 dopo testing reale su VM. Focus: multi-

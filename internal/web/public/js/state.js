@@ -121,6 +121,8 @@ export const state = {
     vistaIp: localStorage.getItem('vistaIp') || 'griglia',
     sidebarCollassata: localStorage.getItem('sidebarCollassata') === '1',
     richiesteCollassate: localStorage.getItem('richiesteCollassate') === '1',
+    /** Sub-tab attivo dentro Impostazioni: 'generale'/'rete'/'domini'/'watchdog'/'archivio'/'veyon'/'sistema'. */
+    settingsSubtab: localStorage.getItem('settingsSubtab') || 'generale',
 
     // Sessione (lifecycle esplicito: Avvia/Ferma)
     sessioneAttiva: false,

@@ -591,6 +591,13 @@ func computeDurata(inizio string, now time.Time) int64 {
 	return d
 }
 
+// RenameSession aggiorna il titolo di una sessione archiviata. Usato
+// dopo Stop quando l'utente vuole dare un nome custom (es. "Verifica
+// Storia 5B"). Idempotente, no-op se sessionID non esiste.
+func (s *State) RenameSession(sessionID int64, titolo string) error {
+	return s.store.SessionRename(sessionID, titolo)
+}
+
 // sessionFilename costruisce l'id-stringa "<id>-<inizio>.json" usato
 // dagli endpoint API per retro-compatibilita' col modello v1 file-based.
 func sessionFilename(id int64, inizio string) string {

@@ -285,14 +285,12 @@ export function renderPausaEBottoni() {
         }
     }
 
-    // Rec/Stop: 2 bottoni distinti con stato visivo coerente.
-    //   idle      → Rec primary rosso pieno + Stop disabled neutro, timer hidden
-    //   recording → Rec con classe .recording + dot pulse, disabled (no double-start)
-    //               Stop enabled neutro, timer visibile e in scorrimento.
+    // Bottone Rec sessione come toggle (stile blocca-tutto/blocca-ai):
+    //   idle       → label "Rec sessione", primary rosso pieno
+    //   recording  → label "Sta registrando", classe .recording (dot pulse + alone)
+    // Click → toggleSessione (start o stop con confirm durata+eventi).
     const btnRec = $('btn-rec');
-    const btnStop = $('btn-stop');
     if (btnRec) {
-        btnRec.disabled = state.sessioneAttiva;
         btnRec.classList.toggle('recording', state.sessioneAttiva);
         // Sostituisce solo il TEXT NODE finale, preservando il <span class="rec-dot">.
         const last = btnRec.lastChild;
@@ -303,14 +301,8 @@ export function renderPausaEBottoni() {
             btnRec.appendChild(document.createTextNode(label));
         }
         btnRec.title = state.sessioneAttiva
-            ? 'Registrazione in corso — clicca Stop per archiviare'
+            ? 'Registrazione in corso — clicca per fermare e archiviare'
             : 'Avvia registrazione sessione';
-    }
-    if (btnStop) {
-        btnStop.disabled = !state.sessioneAttiva;
-        btnStop.title = state.sessioneAttiva
-            ? 'Ferma e archivia la sessione'
-            : 'Nessuna sessione attiva';
     }
 }
 
@@ -1108,6 +1100,11 @@ export function renderReport() {
     const tab = $('tab-report');
     if (!tab.classList.contains('active') && state.tabAttivo !== 'report') return;
 
+    // Popola il dropdown delle sessioni archiviate anche qui (oltre che
+    // in renderImpostazioni): se l'utente apre Report come prima tab,
+    // senza passare da Impostazioni, il select restava vuoto.
+    aggiornaSelectSessioniArchivio();
+
     const usaArchivio = !!state.datiSessioneVisualizzata;
     const entries = usaArchivio ? state.datiSessioneVisualizzata.entries : state.entries;
     const sessioneInizio = usaArchivio ? state.datiSessioneVisualizzata.sessioneInizio : state.sessioneInizio;
@@ -1117,56 +1114,92 @@ export function renderReport() {
     const titoloEl = $('report-titolo');
     if (usaArchivio) {
         const d = new Date(sessioneInizio);
-        titoloEl.textContent = `Archivio: ${d.toLocaleString('it-IT')}`;
+        titoloEl.textContent = `Archivio · ${d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}`;
         $('btn-elimina-sessione').disabled = false;
     } else {
-        titoloEl.textContent = 'Report sessione corrente';
+        titoloEl.textContent = state.sessioneAttiva ? 'Sessione corrente · in registrazione' : 'Sessione corrente';
         $('btn-elimina-sessione').disabled = true;
     }
 
     const agg = aggregaPerReport(entries);
-    const fine = usaArchivio
-        ? new Date(state.datiSessioneVisualizzata.esportatoAlle || Date.now()).getTime()
-        : (state.sessioneAttiva ? Date.now() : (state.sessioneFineISO ? new Date(state.sessioneFineISO).getTime() : Date.now()));
-    const durataSec = sessioneInizio
-        ? Math.max(0, Math.floor((fine - new Date(sessioneInizio).getTime()) / 1000))
-        : 0;
+    // Calcolo durata: per archivio usa sessioneFineISO/durataSec dal payload
+    // (NON Date.now() — altrimenti il timer continua a salire mentre guardi
+    // un report passato). Per sessione corrente: now se attiva, sessioneFineISO
+    // se ferma.
+    let durataSec = 0;
+    if (usaArchivio) {
+        const dv = state.datiSessioneVisualizzata;
+        if (typeof dv.durataSec === 'number' && dv.durataSec > 0) {
+            durataSec = dv.durataSec;
+        } else if (dv.sessioneFineISO && sessioneInizio) {
+            durataSec = Math.max(0, Math.floor(
+                (new Date(dv.sessioneFineISO).getTime() - new Date(sessioneInizio).getTime()) / 1000
+            ));
+        }
+    } else if (sessioneInizio) {
+        const fine = state.sessioneAttiva
+            ? Date.now()
+            : (state.sessioneFineISO ? new Date(state.sessioneFineISO).getTime() : Date.now());
+        durataSec = Math.max(0, Math.floor((fine - new Date(sessioneInizio).getTime()) / 1000));
+    }
 
-    const riepilogo = $('report-riepilogo');
+    // Stat strip 5 colonne (stile coerente con Live tab).
+    $('report-stat-durata').textContent = formatDurata(durataSec);
+    $('report-stat-inizio').textContent = sessioneInizio
+        ? new Date(sessioneInizio).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+        : '—';
+    $('report-stat-richieste').textContent = (agg.totale || 0).toLocaleString('it');
+    $('report-stat-mix').textContent = `${agg.perTipo.utente || 0} utente · ${agg.perTipo.ai || 0} AI`;
+    $('report-stat-domini').textContent = agg.perDominio.size;
+    $('report-stat-ip-sub').textContent = `${agg.perIp.size} studenti`;
     const pctBloccate = agg.totale > 0 ? Math.round((agg.bloccate / agg.totale) * 100) : 0;
-    riepilogo.innerHTML = `
-        <dt>Inizio</dt><dd>${escapeHtml(new Date(sessioneInizio || Date.now()).toLocaleString('it-IT'))}</dd>
-        <dt>Durata</dt><dd>${formatDurata(durataSec)}</dd>
-        <dt>Richieste totali</dt><dd>${agg.totale}</dd>
-        <dt>Richieste bloccate</dt><dd>${agg.bloccate} (${pctBloccate}%)</dd>
-        <dt>Domini contattati</dt><dd>${agg.perDominio.size}</dd>
-        <dt>IP attivi</dt><dd>${agg.perIp.size}</dd>
-        <dt>Richieste AI</dt><dd>${agg.perTipo.ai || 0}</dd>
-        <dt>Richieste utente</dt><dd>${agg.perTipo.utente || 0}</dd>
-        <dt>Richieste sistema</dt><dd>${agg.perTipo.sistema || 0}</dd>
-        <dt>In blocklist</dt><dd>${bloccatiList.length}</dd>
-    `;
+    $('report-stat-bloccate').textContent = agg.bloccate;
+    $('report-stat-bloccate-pct').textContent = `${pctBloccate}% del totale`;
+    $('report-stat-blocklist').textContent = bloccatiList.length;
 
+    // Tabelle dense (stile lista IP della Live).
     const dominiOrdinati = [...agg.perDominio.entries()].sort((a, b) => b[1].count - a[1].count);
     const soloAI = dominiOrdinati.filter(([, info]) => info.tipo === 'ai').slice(0, 10);
-    $('report-top-ai').innerHTML = soloAI.length > 0
-        ? renderBarre(soloAI.map(([d, i]) => [d, i.count]), true)
-        : '<p class="hint">Nessuna richiesta AI in questa sessione.</p>';
+    $('report-top-ai').innerHTML = renderReportTable(
+        soloAI.map(([d, i]) => ({ label: d, n: i.count, kind: 'ai' })),
+        'Nessuna richiesta AI in questa sessione.'
+    );
 
-    const top10 = dominiOrdinati.slice(0, 10).map(([d, i]) => [d, i.count]);
-    $('report-top-domini').innerHTML = top10.length > 0
-        ? renderBarre(top10, false)
-        : '<p class="hint">Nessuna richiesta.</p>';
+    const top10 = dominiOrdinati.slice(0, 10).map(([d, i]) => ({ label: d, n: i.count, kind: i.tipo }));
+    $('report-top-domini').innerHTML = renderReportTable(top10, 'Nessuna richiesta.');
 
-    const ipOrdinati = [...agg.perIpAttive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
-    const barreStudenti = ipOrdinati.map(([ip, n]) => {
+    const ipOrdinati = [...agg.perIpAttive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30);
+    const studenti = ipOrdinati.map(([ip, n]) => {
         const nome = studentiMap[ip];
-        const label = nome ? `${nome} (${ip})` : ip;
-        return [label, n];
+        const label = nome ? `${nome}` : ip;
+        const sub = nome ? ip : '';
+        return { label, sub, n, kind: 'std' };
     });
-    $('report-top-studenti').innerHTML = barreStudenti.length > 0
-        ? renderBarre(barreStudenti, false)
-        : '<p class="hint">Nessuna attivita\'.</p>';
+    $('report-top-studenti').innerHTML = renderReportTable(studenti, 'Nessuna attività.');
+}
+
+/**
+ * Rende una "tabella" densa con riga per ogni elemento: nome (mono per IP),
+ * count tabular-right + barra proporzionale (max → 100%).
+ * Stile coerente con la vista lista IP della Live.
+ */
+function renderReportTable(items, emptyMsg) {
+    if (!items || items.length === 0) {
+        return `<div class="report-empty">${escapeHtml(emptyMsg)}</div>`;
+    }
+    const max = Math.max(...items.map(i => i.n));
+    return items.map(it => {
+        const pct = max > 0 ? Math.round((it.n / max) * 100) : 0;
+        const kindCls = it.kind === 'ai' ? ' ai' : '';
+        const labelHtml = it.sub
+            ? `<span class="rt-label">${escapeHtml(it.label)}</span><span class="rt-sub">${escapeHtml(it.sub)}</span>`
+            : `<span class="rt-label">${escapeHtml(it.label)}</span>`;
+        return `<div class="report-row${kindCls}">
+            <div class="rt-name">${labelHtml}</div>
+            <div class="rt-bar"><div class="rt-bar-fill" style="width:${pct}%"></div></div>
+            <div class="rt-count">${it.n.toLocaleString('it')}</div>
+        </div>`;
+    }).join('');
 }
 
 /**
@@ -1240,19 +1273,52 @@ export function renderImpostazioni() {
 
     renderIgnorati();
 
+    aggiornaSelectSessioniArchivio();
     const sessioniEl = $('sessioni-list');
+    sessioniEl.innerHTML = state.sessioniArchivio.length > 0
+        ? state.sessioniArchivio.map(s => {
+            const i = sessInfo(s);
+            return `<li data-action="sessione-apri" data-nome="${attrEscape(i.filename)}">
+            <span class="nome">${escapeHtml(i.label)}</span>
+            <button class="btn btn-danger" data-action="sessione-elimina" data-nome="${attrEscape(i.filename)}">Elimina</button>
+        </li>`;
+        }).join('')
+        : '<li class="hint">Archivio vuoto. Ogni "Nuova sessione" archivia la precedente.</li>';
+}
+
+/**
+ * Helper: ritorna {filename, label} per una sessione archiviata,
+ * supporta sia il nuovo array di oggetti `{filename, titolo, inizio}`
+ * sia il vecchio array di stringhe (back-compat).
+ */
+function sessInfo(s) {
+    if (typeof s === 'string') {
+        return { filename: s, label: s.replace(/\.json$/, '') };
+    }
+    const filename = s.filename || '';
+    const inizio = (s.inizio || '').replace('T', ' ').replace(/\..*$/, '').slice(0, 16);
+    const lbl = s.titolo
+        ? `${s.titolo} · ${inizio}`
+        : (filename.replace(/\.json$/, ''));
+    return { filename, label: lbl };
+}
+
+/**
+ * Popola il <select id="report-sessione-select"> con tutte le sessioni
+ * archiviate. Chiamato sia da renderImpostazioni sia da renderReport
+ * cosi' il dropdown del Report e' sempre aggiornato anche se l'utente
+ * non e' mai passato per il tab Impostazioni.
+ */
+function aggiornaSelectSessioniArchivio() {
     const select = $('report-sessione-select');
+    if (!select) return;
     const valSel = select.value;
     select.innerHTML = '<option value="">-- Sessione corrente --</option>'
-        + state.sessioniArchivio.map(s => `<option value="${attrEscape(s)}">${escapeHtml(s.replace(/\.json$/, ''))}</option>`).join('');
+        + state.sessioniArchivio.map(s => {
+            const i = sessInfo(s);
+            return `<option value="${attrEscape(i.filename)}">${escapeHtml(i.label)}</option>`;
+        }).join('');
     select.value = valSel;
-
-    sessioniEl.innerHTML = state.sessioniArchivio.length > 0
-        ? state.sessioniArchivio.map(s => `<li data-action="sessione-apri" data-nome="${attrEscape(s)}">
-            <span class="nome">${escapeHtml(s.replace(/\.json$/, ''))}</span>
-            <button class="btn btn-danger" data-action="sessione-elimina" data-nome="${attrEscape(s)}">Elimina</button>
-        </li>`).join('')
-        : '<li class="hint">Archivio vuoto. Ogni "Nuova sessione" archivia la precedente.</li>';
 }
 
 /** Rigenera la lista dei domini ignorati nel tab Impostazioni. */

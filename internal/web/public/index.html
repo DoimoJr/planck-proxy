@@ -105,21 +105,13 @@
             <div class="main">
                 <div class="toolbar">
                     <!-- Sidebar toggle (sinistra). -->
-                    <button data-action="toggle-sidebar" id="btn-toggle-sidebar" class="btn btn-icon" title="Mostra/nascondi sidebar domini" aria-label="Sidebar">
-                        <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="1.5" y="2" width="9" height="8" rx="1"/>
-                            <path d="M4.5 2v8"/>
-                            <path id="sidebar-arrow" d="M7 4.5L8.5 6L7 7.5"/>
-                        </svg>
+                    <button data-action="toggle-sidebar" id="btn-toggle-sidebar" class="btn" title="Mostra/nascondi sidebar domini">
+                        DOMINI
                     </button>
                     <span class="sep"></span>
-                    <button data-action="session-start" id="btn-rec" class="btn btn-primary" title="Avvia registrazione sessione">
+                    <button data-action="session-toggle" id="btn-rec" class="btn btn-primary" title="Avvia registrazione sessione">
                         <span class="rec-dot"></span>
                         Rec sessione
-                    </button>
-                    <button data-action="session-stop" id="btn-stop" class="btn" title="Ferma e archivia la sessione">
-                        <span class="stop-square"></span>
-                        Stop
                     </button>
                     <span class="sep big"></span>
                     <button data-action="pausa-toggle" id="btn-pausa" class="btn block" title="Blocca tutti i domini">
@@ -133,16 +125,12 @@
                     </button>
                     <div class="toolbar-right">
                         <span id="rec-timer" class="rec-timer hidden">&#x25CF; rec 00:00:00</span>
-                        <button data-action="log-toggle" id="btn-toggle-log" class="btn" title="Mostra/nascondi log eventi">
-                            LOG
-                        </button>
                         <input id="filtro-toolbar" class="search-input" type="text" placeholder="Studente o IP..." data-action="filtro">
-                        <button data-action="toggle-stream" id="btn-toggle-stream" class="btn btn-icon" title="Mostra/nascondi stream live" aria-label="Stream">
-                            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="1.5" y="2" width="9" height="8" rx="1"/>
-                                <path d="M7.5 2v8"/>
-                                <path id="stream-arrow" d="M3.5 4.5L5 6L3.5 7.5"/>
-                            </svg>
+                        <button data-action="log-toggle" id="btn-toggle-log" class="btn" title="Mostra/nascondi log eventi">
+                            EVENTI
+                        </button>
+                        <button data-action="toggle-stream" id="btn-toggle-stream" class="btn" title="Mostra/nascondi stream live">
+                            STREAM
                         </button>
                     </div>
                 </div>
@@ -251,34 +239,60 @@
 
     <!-- ====================== TAB REPORT ====================== -->
     <div id="tab-report" class="tab-panel">
-        <div class="report-layout">
-            <div class="card report-header">
-                <h2 id="report-titolo">Report sessione corrente</h2>
-                <div class="toolbar-group">
-                    <select id="report-sessione-select" data-action="report-sessione-select">
-                        <option value="">-- Sessione corrente --</option>
-                    </select>
-                    <button data-action="report-elimina" class="btn btn-danger" id="btn-elimina-sessione" disabled>Elimina archivio</button>
-                </div>
+        <!-- Report toolbar (stile coerente con Live: dropdown sessione + bottoni). -->
+        <div class="toolbar report-toolbar">
+            <span class="report-tb-label">Sessione</span>
+            <select id="report-sessione-select" class="report-select" data-action="report-sessione-select">
+                <option value="">-- Sessione corrente --</option>
+            </select>
+            <button data-action="report-elimina" class="btn danger" id="btn-elimina-sessione" disabled>Elimina archivio</button>
+            <div class="toolbar-right">
+                <span id="report-titolo" class="report-titolo">Report sessione corrente</span>
             </div>
+        </div>
 
-            <div class="report-grid">
-                <div class="card report-stats">
-                    <h3>Riepilogo</h3>
-                    <dl id="report-riepilogo"></dl>
-                </div>
-                <div class="card">
-                    <h3>Top domini AI contattati</h3>
-                    <div class="report-bars" id="report-top-ai">-</div>
-                </div>
-                <div class="card">
-                    <h3>Top 10 domini (tutti)</h3>
-                    <div class="report-bars" id="report-top-domini">-</div>
-                </div>
-                <div class="card">
-                    <h3>Attivita' per studente</h3>
-                    <div class="report-bars" id="report-top-studenti">-</div>
-                </div>
+        <!-- Stat strip 5 col (riuso .stat-row della Live). -->
+        <div class="stat-row">
+            <div class="stat-card">
+                <div class="etichetta">Durata</div>
+                <div class="numero" id="report-stat-durata">--:--</div>
+                <div class="stat-sub" id="report-stat-inizio">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="etichetta">Richieste</div>
+                <div class="numero" id="report-stat-richieste">0</div>
+                <div class="stat-sub" id="report-stat-mix">— utente · — AI</div>
+            </div>
+            <div class="stat-card">
+                <div class="etichetta">Domini</div>
+                <div class="numero" id="report-stat-domini">0</div>
+                <div class="stat-sub" id="report-stat-ip-sub">— studenti</div>
+            </div>
+            <div class="stat-card">
+                <div class="etichetta">Bloccate</div>
+                <div class="numero" id="report-stat-bloccate">0</div>
+                <div class="stat-sub" id="report-stat-bloccate-pct">0%</div>
+            </div>
+            <div class="stat-card">
+                <div class="etichetta">In blocklist</div>
+                <div class="numero" id="report-stat-blocklist">0</div>
+                <div class="stat-sub">domini</div>
+            </div>
+        </div>
+
+        <!-- Sezioni dense con tabelle (stile coerente con la vista lista IP). -->
+        <div class="report-tables">
+            <div class="report-section">
+                <div class="report-section-head">TOP DOMINI AI</div>
+                <div class="report-section-body" id="report-top-ai"></div>
+            </div>
+            <div class="report-section">
+                <div class="report-section-head">TOP 10 DOMINI</div>
+                <div class="report-section-body" id="report-top-domini"></div>
+            </div>
+            <div class="report-section report-section-wide">
+                <div class="report-section-head">ATTIVITÀ PER STUDENTE</div>
+                <div class="report-section-body" id="report-top-studenti"></div>
             </div>
         </div>
     </div>
@@ -302,27 +316,54 @@
 
     <!-- ====================== TAB IMPOSTAZIONI ====================== -->
     <div id="tab-impostazioni" class="tab-panel">
-        <div class="impostazioni-layout">
-            <div class="card">
-                <h3>Configurazione</h3>
-                <div id="riavvio-banner" class="riavvio-banner hidden">Alcune modifiche richiedono il riavvio del server per avere effetto.</div>
+        <!-- Sub-tab nav (stile coerente con la topbar tabs della Live). -->
+        <div class="settings-nav">
+            <button class="settings-tab-btn active" data-action="settings-subtab" data-subtab="generale">Generale</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="rete">Rete &amp; Auth</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="domini">Domini &amp; AI</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="watchdog">Watchdog</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="archivio">Archivio</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="veyon">Veyon</button>
+            <button class="settings-tab-btn" data-action="settings-subtab" data-subtab="sistema">Sistema</button>
+        </div>
 
-                <h4>Generale</h4>
+        <div id="riavvio-banner" class="riavvio-banner hidden">Alcune modifiche richiedono il riavvio del server per avere effetto.</div>
+
+        <!-- ============== GENERALE ============== -->
+        <div class="settings-tab-panel active" data-subtab="generale">
+            <div class="settings-section">
+                <div class="settings-section-head">PROFILO</div>
                 <div class="settings-grid">
                     <label>Titolo</label>
                     <input type="text" data-action="settings-field" data-key="titolo">
 
                     <label>Classe / contesto</label>
                     <input type="text" data-action="settings-field" data-key="classe">
+                </div>
+            </div>
 
-                    <label>Modo proxy</label>
+            <div class="settings-section">
+                <div class="settings-section-head">COMPORTAMENTO PROXY</div>
+                <div class="settings-grid">
+                    <label>Modo</label>
                     <select data-action="settings-field" data-key="modo">
                         <option value="blocklist">Blocklist (blocca solo elencati)</option>
                         <option value="allowlist">Allowlist (passa solo elencati)</option>
                     </select>
 
-                    <label>Soglia inattivita' (sec)</label>
+                    <label>Soglia inattività (sec)</label>
                     <input type="number" data-action="settings-field" data-key="inattivitaSogliaSec" min="10" max="3600">
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-section-head">DISCOVERY &amp; NOTIFICHE</div>
+                <div class="settings-grid">
+                    <label>Solo PC con Veyon</label>
+                    <div class="settings-cell-with-hint">
+                        <input type="checkbox" data-action="settings-field" data-key="discoverVeyonOnly" id="cb-discover-veyon">
+                        <label for="cb-discover-veyon" class="hint-inline">Mostra in grid solo i PC col servizio Veyon attivo (porta 11100). Disattiva per vedere tutti i Windows in LAN.</label>
+                    </div>
 
                     <label>Notifiche AI</label>
                     <div>
@@ -331,15 +372,14 @@
                             <span class="notif-off">🔕 Disattivate</span>
                         </button>
                     </div>
-
-                    <label>Solo PC con Veyon</label>
-                    <div>
-                        <input type="checkbox" data-action="settings-field" data-key="discoverVeyonOnly" id="cb-discover-veyon">
-                        <label for="cb-discover-veyon" class="hint-inline">Mostra in grid solo i PC che hanno il servizio Veyon attivo (porta 11100). Disattiva per vedere tutti i Windows in LAN.</label>
-                    </div>
                 </div>
+            </div>
+        </div>
 
-                <h4 style="margin-top:16px">Porte <span class="hint-inline">(richiede riavvio)</span></h4>
+        <!-- ============== RETE & AUTH ============== -->
+        <div class="settings-tab-panel" data-subtab="rete">
+            <div class="settings-section">
+                <div class="settings-section-head">PORTE <span class="hint-inline">richiede riavvio</span></div>
                 <div class="settings-grid">
                     <label>Porta proxy</label>
                     <input type="number" data-action="settings-field" data-key="proxy.port" min="1024" max="65535">
@@ -347,8 +387,10 @@
                     <label>Porta monitor</label>
                     <input type="number" data-action="settings-field" data-key="web.port" min="1024" max="65535">
                 </div>
+            </div>
 
-                <h4 style="margin-top:16px">Autenticazione <span class="hint-inline">(richiede riavvio)</span></h4>
+            <div class="settings-section">
+                <div class="settings-section-head">AUTENTICAZIONE <span class="hint-inline">applicata immediatamente</span></div>
                 <div class="settings-grid">
                     <label>Abilitata</label>
                     <input type="checkbox" data-action="settings-field" data-key="web.auth.enabled">
@@ -360,66 +402,87 @@
                     <input type="password" data-action="settings-field" data-key="web.auth.password" placeholder="(non modificata)">
                 </div>
             </div>
+        </div>
 
-            <div class="card">
-                <h3>Domini ignorati</h3>
-                <p class="hint">Traffico verso questi domini non compare nel monitor (match per sostringa). Sono anche sempre consentiti dal proxy, anche in pausa/allowlist.</p>
+        <!-- ============== DOMINI & AI ============== -->
+        <div class="settings-tab-panel" data-subtab="domini">
+            <div class="settings-section">
+                <div class="settings-section-head">DOMINI IGNORATI</div>
+                <p class="settings-hint">Traffico verso questi domini non compare nel monitor (match per sostringa). Sono anche sempre consentiti dal proxy, anche in pausa/allowlist.</p>
                 <ul class="ignorati-list" id="ignorati-list"></ul>
-                <div class="aggiungi-studente">
-                    <input type="text" id="nuovo-ignorato" placeholder="es. ocsp.digicert.com" data-action="nuovo-ignorato-key" style="flex:1">
+                <div class="settings-add-row">
+                    <input type="text" id="nuovo-ignorato" class="filtro-input" placeholder="es. ocsp.digicert.com" data-action="nuovo-ignorato-key">
                     <button data-action="aggiungi-ignorato" class="btn btn-primary">Aggiungi</button>
                 </div>
             </div>
 
-            <div class="card">
-                <h3>Archivio sessioni</h3>
-                <p class="hint">All'"Avvia sessione" la precedente (se aveva dati) viene archiviata in <code>sessioni/</code>. L'archivio sopravvive ai riavvii.</p>
-                <button data-action="archivia-ora" class="btn">Archivia sessione corrente</button>
-                <button data-action="ricarica-sessioni" class="btn">Aggiorna lista</button>
+            <div class="settings-section" id="card-ai-list">
+                <div class="settings-section-head">LISTA AI AUTO-AGGIORNATA</div>
+                <p class="settings-hint">Lista canonica di domini AI mantenuta nel repo GitHub. Senza connettività usa la copia integrata nel binario.</p>
+                <div id="ai-list-status" class="settings-grid">
+                    <label>Stato</label>
+                    <div id="ai-list-status-value">caricamento...</div>
+                </div>
+                <div class="settings-add-row" style="margin-top:8px">
+                    <button data-action="ai-refresh" class="btn">Aggiorna ora</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============== WATCHDOG ============== -->
+        <div class="settings-tab-panel" data-subtab="watchdog">
+            <div class="settings-section" id="card-watchdog">
+                <div class="settings-section-head">WATCHDOG PLUGINS</div>
+                <p class="settings-hint">Monitor remoto che gira sui PC studenti come script PowerShell. Polling ogni 5s, eventi inviati a Planck via HTTP. Si attivano col bottone, vengono lanciati al prossimo Send proxy.</p>
+                <div id="watchdog-plugins-list"></div>
+            </div>
+        </div>
+
+        <!-- ============== ARCHIVIO ============== -->
+        <div class="settings-tab-panel" data-subtab="archivio">
+            <div class="settings-section">
+                <div class="settings-section-head">ARCHIVIO SESSIONI</div>
+                <p class="settings-hint">Le sessioni vengono archiviate quando premi Stop. Sopravvivono ai riavvii (DB SQLite).</p>
+                <div class="settings-add-row">
+                    <button data-action="archivia-ora" class="btn">Archivia corrente</button>
+                    <button data-action="ricarica-sessioni" class="btn">Aggiorna lista</button>
+                </div>
                 <ul class="sessioni-list" id="sessioni-list"></ul>
             </div>
+        </div>
 
-            <div class="card" id="card-veyon">
-                <h3>Veyon (controllo studenti)</h3>
-                <p class="hint">Planck importa automaticamente la chiave master del PC docente al boot tramite <code>veyon-cli</code>. Niente upload manuale: spostati in un altro laboratorio e Planck prende la chiave di quella postazione.</p>
+        <!-- ============== VEYON ============== -->
+        <div class="settings-tab-panel" data-subtab="veyon">
+            <div class="settings-section" id="card-veyon">
+                <div class="settings-section-head">VEYON · CONTROLLO STUDENTI</div>
+                <p class="settings-hint">Planck importa automaticamente la chiave master del PC docente al boot tramite <code>veyon-cli</code>. Niente upload manuale.</p>
 
                 <div id="veyon-status-row" class="settings-grid">
                     <label>Stato</label>
                     <div id="veyon-status">caricamento...</div>
                 </div>
+            </div>
 
-                <h4 style="margin-top:14px">Test connessione</h4>
-                <div class="aggiungi-studente">
-                    <input type="text" id="veyon-test-ip" placeholder="IP studente (es. 192.168.6.15)">
+            <div class="settings-section">
+                <div class="settings-section-head">TEST CONNESSIONE</div>
+                <div class="settings-add-row">
+                    <input type="text" id="veyon-test-ip" class="filtro-input" placeholder="IP studente (es. 192.168.6.15)">
                     <button data-action="veyon-test" class="btn">Test</button>
                 </div>
-                <div id="veyon-test-result" class="hint" style="margin-top:6px"></div>
+                <div id="veyon-test-result" class="settings-hint" style="margin-top:6px"></div>
             </div>
+        </div>
 
-            <div class="card" id="card-ai-list">
-                <h3>Lista AI auto-aggiornata</h3>
-                <p class="hint">Planck mantiene una lista di domini AI (chatbot, code assistant, ecc.) usata per evidenziarli nel monitor. La lista canonica vive nel repo GitHub e si aggiorna manualmente con il bottone qui sotto. Senza connettività, viene usata la copia integrata nel binario (~129 domini).</p>
-                <div id="ai-list-status" class="settings-grid">
-                    <label>Stato</label>
-                    <div id="ai-list-status-value">caricamento...</div>
-                </div>
-                <div class="toolbar-group" style="margin-top:8px">
-                    <button data-action="ai-refresh" class="btn btn-primary">🔄 Aggiorna ora</button>
-                </div>
-            </div>
-
-            <div class="card" id="card-watchdog">
-                <h3>Watchdog plugins</h3>
-                <p class="hint">Plugin di monitoraggio remoto che girano sui PC studenti come script PowerShell. Polling ogni 5s, eventi inviati a Planck via HTTP. Si attivano col bottone qui sotto e vengono lanciati alla prossima distribuzione del proxy_on.bat.</p>
-                <div id="watchdog-plugins-list"></div>
-            </div>
-
-            <div class="card">
-                <h3>Collegamenti utili</h3>
+        <!-- ============== SISTEMA ============== -->
+        <div class="settings-tab-panel" data-subtab="sistema">
+            <div class="settings-section">
+                <div class="settings-section-head">ENDPOINT API · DEBUG</div>
                 <ul class="link-list">
                     <li><a href="/api/export" target="_blank">Scarica JSON sessione corrente</a></li>
                     <li><a href="/api/session/status" target="_blank">Stato sessione (JSON)</a></li>
                     <li><a href="/api/sessioni" target="_blank">Lista archivio (JSON)</a></li>
+                    <li><a href="/api/health" target="_blank">Health check</a></li>
+                    <li><a href="/api/version" target="_blank">Versione (JSON)</a></li>
                 </ul>
             </div>
         </div>

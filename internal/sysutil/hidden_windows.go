@@ -34,9 +34,17 @@ func HideConsoleWindow(cmd *exec.Cmd) {
 // (default Go) ma vogliamo comportamento "GUI app" senza il flag
 // -H=windowsgui che triggera Windows Defender (pattern malware).
 //
+// Strategia (in quest'ordine):
+//  1. ShowWindow(hwnd, SW_HIDE) — nasconde immediatamente la finestra
+//     visivamente. Risultato: niente flash sulla taskbar.
+//  2. FreeConsole() — detach completo del processo dalla console.
+//     Senza questo, la finestra resta "minimized to taskbar" — visualmente
+//     nascosta ma con un'icona persistente in taskbar.
+//
 // Trade-off: la finestra cmd viene allocata da Windows al lancio e poi
-// nascosta entro pochi ms — l'utente puo' vedere un flash breve, ma il
-// PE header resta "console subsystem" → niente piu' false positive AV.
+// nascosta entro pochi ms — l'utente vede solo un flash brevissimo, e
+// dopo FreeConsole nessuna icona resta. Il PE header resta "console
+// subsystem" → niente piu' false positive AV.
 //
 // No-op se il processo non ha una console attached (es. lanciato da
 // servizio).
@@ -45,6 +53,7 @@ func HideOwnConsole() {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getConsoleWindow := kernel32.NewProc("GetConsoleWindow")
 	showWindow := user32.NewProc("ShowWindow")
+	freeConsole := kernel32.NewProc("FreeConsole")
 
 	hwnd, _, _ := getConsoleWindow.Call()
 	if hwnd == 0 {
@@ -52,4 +61,6 @@ func HideOwnConsole() {
 	}
 	const SW_HIDE = 0
 	_, _, _ = showWindow.Call(hwnd, SW_HIDE)
+	// Detach del processo dalla console: rimuove l'icona dalla taskbar.
+	_, _, _ = freeConsole.Call()
 }

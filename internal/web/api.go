@@ -15,6 +15,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -91,6 +92,7 @@ func (a *API) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("/api/session/start", auth(a.handleSessionStart))
 	mux.HandleFunc("/api/session/stop", auth(a.handleSessionStop))
+	mux.HandleFunc("/api/session/rename", auth(a.handleSessionRename))
 
 	mux.HandleFunc("/api/pause/toggle", auth(a.handlePauseToggle))
 	mux.HandleFunc("/api/pause/on", auth(a.handlePauseOn))
@@ -240,12 +242,42 @@ func (a *API) handleSessioni(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	lista, err := a.state.Store().SessionListFilenames()
+	metas, err := a.state.Store().SessionList()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Errore lettura archivio: "+err.Error(), "STORE_ERROR")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessioni": lista})
+	// Risposta arricchita: per ogni sessione filename + titolo + inizio +
+	// durata. Cosi' il client puo' mostrare il nome custom dato dall'utente
+	// dopo Stop, oltre alla data/ora storiche.
+	type Item struct {
+		Filename   string `json:"filename"`
+		Titolo     string `json:"titolo"`
+		Inizio     string `json:"inizio"`
+		Fine       string `json:"fine,omitempty"`
+		DurataSec  int64  `json:"durataSec"`
+	}
+	out := make([]Item, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, Item{
+			Filename:  sessionFilenameForMeta(m.ID, m.SessioneInizio),
+			Titolo:    m.Titolo,
+			Inizio:    m.SessioneInizio,
+			Fine:      m.SessioneFineISO,
+			DurataSec: m.DurataSec,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessioni": out})
+}
+
+// sessionFilenameForMeta replica state.sessionFilename per il livello API
+// (lo state e' opaco qui). Stesso formato "<id>-<inizio>.json".
+func sessionFilenameForMeta(id int64, inizio string) string {
+	clean := strings.NewReplacer(":", "-", "T", "-", ".", "-").Replace(inizio)
+	if len(clean) > 19 {
+		clean = clean[:19]
+	}
+	return fmt.Sprintf("%d-%s.json", id, clean)
 }
 
 func (a *API) handlePresets(w http.ResponseWriter, r *http.Request) {
@@ -410,6 +442,27 @@ func (a *API) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 		"sessioneFineISO": fine,
 		"archiviata":      archiviata,
 	})
+}
+
+// handleSessionRename aggiorna il titolo di una sessione archiviata.
+// Body: {"id": 5, "titolo": "Verifica Storia 5B"}.
+func (a *API) handleSessionRename(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		ID     int64  `json:"id"`
+		Titolo string `json:"titolo"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil || body.ID <= 0 {
+		writeError(w, http.StatusBadRequest, "Body deve essere {id: int, titolo: string}", "BAD_BODY")
+		return
+	}
+	if err := a.state.RenameSession(body.ID, body.Titolo); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "RENAME_FAIL")
+		return
+	}
+	writeOK(w, nil)
 }
 
 // ============================================================

@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	Versione = "2.9.5"
+	Versione = "2.9.6"
 	Fase     = "stable"
 )
 

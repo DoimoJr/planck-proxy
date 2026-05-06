@@ -17,6 +17,7 @@
 import { state, salvaNascosti, salvaDarkmode, salvaNotifiche, salvaTab, salvaVistaIp, salvaCollassi } from './state.js';
 import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs } from './render.js';
 import { toast } from './toast.js';
+import { showPromptModal } from './modal.js';
 
 /** Wrapper GET → JSON. */
 async function apiGet(path) {
@@ -111,15 +112,11 @@ export async function startSessione() {
         toast.info('Una sessione e\' gia\' in corso. Premi Stop per archiviarla prima di avviarne un\'altra.');
         return;
     }
-    const hadData = state.entries.length > 0 && state.sessioneInizio;
-    const messaggio = hadData
-        ? 'Avviare una nuova sessione?\n\nIl buffer corrente verra\' azzerato (la sessione precedente NON e\' archiviata: era stata fermata senza salvare).'
-        : 'Avviare la sessione?\n\nIl monitor inizia a registrare il traffico.';
-    if (!confirm(messaggio)) return;
     const r = await apiPost('/api/session/start');
     state.sessioneInizio = r.sessioneInizio;
     state.sessioneAttiva = true;
     state.sessioneFineISO = null;
+    toast.success('Registrazione avviata');
 }
 
 /** Ferma e archivia la sessione corrente (no-op se nessuna attiva). */
@@ -140,29 +137,37 @@ export async function stopSessione() {
     }
     let nEventi = 0;
     for (const e of state.entries) if (e.tipo !== 'sistema') nEventi++;
-    const msg = `Chiudere e archiviare la sessione?\n\nDurata: ${durTxt}\nEventi: ${nEventi}\n\nLa registrazione si interrompe; i dati restano visibili finche\' non avvii una nuova sessione.`;
-    if (!confirm(msg)) return;
     const r = await apiPost('/api/session/stop');
-    if (r.archiviata) await ricaricaSessioni();
+    // Dopo lo stop, chiedi all'utente un nome custom (modal in stile app).
+    // Esc / Annulla → mantiene il default. r.archiviata e' "<id>-<inizio>.json".
+    if (r.archiviata) {
+        const m = r.archiviata.match(/^(\d+)-/);
+        const sessionId = m ? parseInt(m[1], 10) : 0;
+        if (sessionId > 0) {
+            const nome = await showPromptModal({
+                title: 'Sessione archiviata',
+                message: `Durata ${durTxt} · ${nEventi} eventi. Dai un nome alla sessione (opzionale, oltre a data e ora).`,
+                placeholder: 'Es. "Verifica Storia 5B"',
+                okLabel: 'Salva',
+                cancelLabel: 'Salta',
+            });
+            if (nome !== null && nome.trim()) {
+                await apiPost('/api/session/rename', { id: sessionId, titolo: nome.trim() });
+            }
+        }
+        await ricaricaSessioni();
+    }
 }
 
+/** Toggle della sessione: delega a stopSessione (con confirm durata+eventi)
+    o startSessione (con toast di conferma). Sostituisce i 2 bottoni
+    Rec/Stop separati con un solo bottone in stile blocca-tutto/blocca-ai. */
 export async function toggleSessione() {
     if (state.sessioneAttiva) {
-        if (!confirm('Fermare la sessione?\n\nLa registrazione si interrompe e la sessione viene archiviata.\nI dati restano visibili finche\' non avvii una nuova sessione.')) return;
-        const r = await apiPost('/api/session/stop');
-        if (r.archiviata) await ricaricaSessioni();
-        return;
+        await stopSessione();
+    } else {
+        await startSessione();
     }
-    const hadData = state.entries.length > 0 && state.sessioneInizio;
-    const messaggio = hadData
-        ? 'Avviare una nuova sessione?\n\nIl buffer corrente verra\' azzerato (la sessione precedente e\' gia\' archiviata).'
-        : 'Avviare la sessione?\n\nIl monitor inizia a registrare il traffico.';
-    if (!confirm(messaggio)) return;
-    const r = await apiPost('/api/session/start');
-    state.sessioneInizio = r.sessioneInizio;
-    state.sessioneAttiva = true;
-    state.sessioneFineISO = null;
-    if (r.archiviata) await ricaricaSessioni();
 }
 
 export async function esportaSessione() {
@@ -454,6 +459,12 @@ export function applicaCollassi() {
     const pr = document.getElementById('panel-richieste');
     if (sb) sb.classList.toggle('collassata', state.sidebarCollassata);
     if (pr) pr.classList.toggle('collassata', state.richiesteCollassate);
+    // Feedback visivo "attivo" sui bottoni quando le rispettive sidebar
+    // sono APERTE (non collassate). Coerente con btn-toggle-log/EVENTI.
+    const btnSb = document.getElementById('btn-toggle-sidebar');
+    const btnSt = document.getElementById('btn-toggle-stream');
+    if (btnSb) btnSb.classList.toggle('attivo', !state.sidebarCollassata);
+    if (btnSt) btnSt.classList.toggle('attivo', !state.richiesteCollassate);
 }
 
 // ========================================================================
@@ -494,6 +505,19 @@ export function cambiaTab(nome) {
     renderAll();
     if (nome === 'impostazioni' || nome === 'report') ricaricaSessioni();
     if (nome === 'impostazioni') veyonAggiornaStato();
+}
+
+/** Switch tra i sub-tab di Impostazioni (Generale / Rete / Domini / etc.). */
+export function cambiaSubtabImpostazioni(nome) {
+    if (!nome) return;
+    state.settingsSubtab = nome;
+    localStorage.setItem('settingsSubtab', nome);
+    document.querySelectorAll('.settings-tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.subtab === nome);
+    });
+    document.querySelectorAll('.settings-tab-panel').forEach(p => {
+        p.classList.toggle('active', p.dataset.subtab === nome);
+    });
 }
 
 // (Rimosso in v2.6.0: edit nome studente, classi/lab salvate.)
@@ -807,14 +831,19 @@ function targetIps() {
     return { ips: a, desc: a.length + ' studenti attivi' };
 }
 
-/** Esegue una callback async per ogni IP target, raccoglie ok/fail. */
-async function veyonForEachTarget(label, fn) {
+/**
+ * Esegue una callback async per ogni IP target, raccoglie ok/fail.
+ * `skipConfirm=true` salta il confirm() nativo (usato per azioni
+ * non distruttive: lock/unlock/messaggio/proxy on/off). Le azioni
+ * distruttive (reboot, poweroff) lo lasciano a false di default.
+ */
+async function veyonForEachTarget(label, fn, skipConfirm = false) {
     const { ips, desc } = targetIps();
     if (!ips.length) {
         toast.info('Nessuno studente nel target. Compila la mappa studenti o aspetta che pinghino il watchdog.');
         return;
     }
-    if (!confirm(label + ' su ' + desc + '?')) return;
+    if (!skipConfirm && !confirm(label + ' su ' + desc + '?')) return;
     let ok = 0, fail = 0;
     await Promise.all(ips.map(async ip => {
         try { (await fn(ip)) ? ok++ : fail++; }
@@ -834,7 +863,7 @@ export async function veyonClasseLock() {
         const ok = await veyonSendFeature(ip, 'screenLock');
         if (ok) state.lockedIps.add(ip);
         return ok;
-    });
+    }, /*skipConfirm*/ true);
     renderAll();
 }
 
@@ -845,17 +874,29 @@ export async function veyonClasseUnlock() {
         const ok = await veyonSendFeature(ip, 'screenUnlock');
         if (ok) state.lockedIps.delete(ip);
         return ok;
-    });
+    }, /*skipConfirm*/ true);
     renderAll();
 }
 
-/** TextMessage su tutti i target. */
+/** TextMessage su tutti i target — modal in stile app invece di prompt(). */
 export async function veyonClasseMsg() {
     if (!state.veyonConfigured) return;
-    const text = prompt('Messaggio da mostrare:', '');
-    if (!text) return;
+    const { ips, desc } = targetIps();
+    if (!ips.length) {
+        toast.info('Nessuno studente nel target. Compila la mappa studenti o aspetta che pinghino il watchdog.');
+        return;
+    }
+    const text = await showPromptModal({
+        title: 'Invia messaggio a ' + desc,
+        placeholder: 'Scrivi il messaggio da mostrare agli studenti...',
+        okLabel: 'Invia',
+        cancelLabel: 'Annulla',
+    });
+    if (text === null || !text.trim()) return;
     // TextMessage Argument enum: Text=0, Icon=1.
-    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { '0': text, '1': 1 }));
+    await veyonForEachTarget('TextMessage',
+        ip => veyonSendFeature(ip, 'textMsg', 0, { '0': text.trim(), '1': 1 }),
+        /*skipConfirm*/ true);
 }
 
 /** Reboot su tutti i target. */
@@ -900,7 +941,6 @@ export async function veyonDistribuisciProxy() {
  */
 export async function veyonDisinstallaProxy() {
     if (!state.veyonConfigured) return;
-    if (!confirm('Rimuovere il proxy da tutti i target?')) return;
     await veyonDistribuisciHelper('/api/veyon/disinstalla-proxy', 'Disinstallazione proxy');
 }
 
@@ -911,7 +951,6 @@ async function veyonDistribuisciHelper(endpoint, label) {
         toast.info('Nessuno studente nel target. Compila la mappa studenti.');
         return;
     }
-    if (!confirm(label + ' su ' + desc + '?')) return;
 
     const r = await apiPost(endpoint, { ips });
     if (r.ok) {

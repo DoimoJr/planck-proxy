@@ -5,6 +5,28 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.21] — 2026-05-06
+
+### Risolto
+
+- **Post Remove proxy: card grid bottom-left rosso, bordo rosso,
+  detail pane plugin verdi** (incoerenza). Causa: `statoPlugins`
+  contava 0 plugin alive (mappa pulita) → "tutti mancanti = rosso";
+  pluginRows del detail pane invece guardava solo gli eventi → 0
+  eventi → tutti verdi.
+
+  Fix:
+  - `statoPlugins` ora gate sul proxy: se `aliveMap[ip]` non e'
+    fresco (proxy grigio o rosso), ritorna grigio "stato plugin
+    sconosciuto". Lo studente e' offline, non sta evadendo.
+  - `pluginRows` del detail pane: stesso gate, plugin diventano
+    grigi con detail "proxy non attivo". Inoltre per ogni plugin
+    verifica anche l'aliveness specifica (`alivePluginMap[ip][p.id]`):
+    se il proxy pinga ma il plugin singolo no, il pallino diventa
+    warn con detail "plugin silente — possibile kill" (coerente:
+    il watchdog di quel plugin e' stato killato mentre il proxy
+    sopravvive).
+
 ## [v2.9.20] — 2026-05-06
 
 ### Modificato

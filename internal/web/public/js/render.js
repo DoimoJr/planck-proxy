@@ -452,8 +452,18 @@ function statoPlugins(ip) {
     if (enabledPlugins.length === 0) {
         return { classe: 'grigio', titolo: 'Nessun watchdog abilitato' };
     }
-    const inner = state.alivePluginMap.get(ip);
+    // Se il proxy non sta pingando (proxy grigio o rosso), lo stato dei
+    // plugin e' "sconosciuto", non "killato". Coerente col server-side
+    // checkHeartbeats che skippa gli IP non-alive. Senza questo gate,
+    // dopo Remove proxy avevamo plugin "rosso" (mappa vuota → alive=0)
+    // che e' fuorviante: lo studente e' offline, non sta evadendo.
+    const aliveTs = state.aliveMap.get(ip) || 0;
     const now = Date.now();
+    const proxyFresh = aliveTs > 0 && (now - aliveTs) < ALIVE_FRESH_MS;
+    if (!proxyFresh) {
+        return { classe: 'grigio', titolo: 'Proxy non attivo: stato plugin sconosciuto' };
+    }
+    const inner = state.alivePluginMap.get(ip);
     let alive = 0, missingNames = [];
     for (const p of enabledPlugins) {
         const ts = inner ? inner.get(p.id) : 0;
@@ -2025,8 +2035,17 @@ export function renderDetailPane() {
     };
     const plugins = state.watchdogPlugins || [];
     const wdRecentCutoff = ora - ALERT_WD_CUTOFF_MS;
+    // Se il proxy non sta pingando, non sappiamo nulla dello stato dei
+    // plugin (lo studente potrebbe essere offline / proxy rimosso).
+    // Coerente con statoPlugins lato card: tutti grigi, niente verde
+    // fittizio.
+    const proxyAliveTs = state.aliveMap.get(ip) || 0;
+    const proxyFresh = proxyAliveTs > 0 && (ora - proxyAliveTs) < ALIVE_FRESH_MS;
     const pluginRows = plugins.map(p => {
         const meta = PLUGIN_META[p.id] || { label: p.name || p.id, okDetail: 'ok' };
+        if (!proxyFresh) {
+            return { name: meta.label, state: 'muted', detail: 'proxy non attivo' };
+        }
         // Eventi recenti: sia eventi originati dal plugin (es. "USB inserita")
         // sia meta-eventi "watchdog-<plugin>" (stopped) emessi dal server
         // quando il plugin va silente. Cosi' il pallino riflette anche il
@@ -2039,6 +2058,16 @@ export function renderDetailPane() {
         const v = valutaWdPlugin(ip, p.id, wdEvts, wdRecentCutoff, state.eventiIgnoredIds);
         let st = 'ok';
         let detail = meta.okDetail;
+        // Verifico anche aliveness del singolo plugin: se il proxy pinga
+        // ma il plugin specifico non manda heartbeat, il pallino del
+        // detail pane diventa warn (coerente: il plugin e' stato killato
+        // mentre il proxy sopravvive).
+        const pluginAliveTs = (state.alivePluginMap.get(ip) || new Map()).get(p.id) || 0;
+        const pluginFresh = pluginAliveTs > 0 && (ora - pluginAliveTs) < ALIVE_FRESH_MS;
+        if (!pluginFresh) {
+            st = 'warn';
+            detail = 'plugin silente — possibile kill';
+        }
         if (v.topEv && !v.resolved) {
             if (v.severity === 'critical') st = 'alert';
             else if (v.severity === 'warning') st = 'warn';

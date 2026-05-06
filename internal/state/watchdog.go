@@ -10,14 +10,19 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 )
 
-// Soglie heartbeat watchdog (Phase 5.x)
+// Soglie heartbeat watchdog (Phase 5.x — tuning v2.9.9 per detection
+// quasi in tempo reale: con plugin che pingano ogni 5s, un timeout di
+// 15s = 3 ping mancati consecutivi = solido segnale di kill / crash).
+//
+// Latency totale dal kill alla detection: 5s (heartbeat freshness) +
+// 15s (timeout) + 5s (checker) = max 25s tipico, target ~10-15s.
 const (
 	// HeartbeatTimeout: dopo questo tempo senza heartbeat di un plugin
 	// ENABLED, se l'IP e' ancora "alive" (proxy ping), Planck
 	// considera lo studente abbia killato il watchdog.
-	HeartbeatTimeout = 90 * time.Second
+	HeartbeatTimeout = 15 * time.Second
 	// HeartbeatCheckInterval: periodo del controllo server-side.
-	HeartbeatCheckInterval = 30 * time.Second
+	HeartbeatCheckInterval = 5 * time.Second
 )
 
 // SetWatchdogRegistry collega un Registry watchdog allo state. Va
@@ -56,6 +61,11 @@ func (s *State) RegistraWatchdogHeartbeat(ip, plugin string) {
 		wasStopped = true
 		delete(s.watchdogStoppedAlerted[ip], plugin)
 	}
+	// Se almeno un plugin di quell'IP torna a pingare, l'all-stopped
+	// non e' piu' "tutti silenti" → riarma il flag per future detection.
+	if s.watchdogAllStoppedAlerted[ip] {
+		delete(s.watchdogAllStoppedAlerted, ip)
+	}
 	nome := s.studenti[ip]
 	sessID := s.sessioneID
 	s.mu.Unlock()
@@ -90,9 +100,16 @@ func (s *State) checkHeartbeats() {
 		ip, plugin, nome string
 		sessID, ts       int64
 	}
+	type allStoppedAlert struct {
+		ip, nome   string
+		sessID, ts int64
+		nPlugins   int
+	}
 	var alerts []alert
+	var allStopped []allStoppedAlert
 
 	s.mu.Lock()
+	// Pass 1: marca i singoli plugin che sono andati silenti.
 	for ip, plugins := range s.watchdogHeartbeats {
 		// Skip se l'IP non e' "alive" recente (studente offline ->
 		// watchdog assente e' atteso).
@@ -121,6 +138,32 @@ func (s *State) checkHeartbeats() {
 			})
 		}
 	}
+
+	// Pass 2: per ogni IP "alive", se TUTTI i plugin noti sono stopped
+	// (e non abbiamo gia' alertato all-stopped), emetti un evento critical
+	// aggregato. Soglia minima: 2 plugin (un solo plugin caduto e' gia'
+	// coperto dal warning singolo, niente promozione). Quando arriva un
+	// resumed (RegistraWatchdogHeartbeat), il flag viene resettato.
+	for ip, plugins := range s.watchdogHeartbeats {
+		if s.aliveMap[ip] < aliveCutoff {
+			continue
+		}
+		if s.watchdogAllStoppedAlerted[ip] {
+			continue
+		}
+		nKnown := len(plugins)
+		nStopped := len(s.watchdogStoppedAlerted[ip])
+		if nKnown >= 2 && nStopped >= nKnown {
+			s.watchdogAllStoppedAlerted[ip] = true
+			allStopped = append(allStopped, allStoppedAlert{
+				ip:       ip,
+				nome:     s.studenti[ip],
+				sessID:   s.sessioneID,
+				ts:       now,
+				nPlugins: nKnown,
+			})
+		}
+	}
 	s.mu.Unlock()
 
 	for _, a := range alerts {
@@ -128,6 +171,12 @@ func (s *State) checkHeartbeats() {
 			"stopped", a.ts, "warning",
 			"Watchdog "+a.plugin+" silente da >"+
 				HeartbeatTimeout.String()+" (probabilmente killato)")
+	}
+	for _, a := range allStopped {
+		s.emitWatchdogMetaEvent(a.ip, "all", a.nome, a.sessID,
+			"all-stopped", a.ts, "critical",
+			fmt.Sprintf("Tutti i %d plugin watchdog silenti: probabile kill manuale dei processi PowerShell sullo studente",
+				a.nPlugins))
 	}
 }
 

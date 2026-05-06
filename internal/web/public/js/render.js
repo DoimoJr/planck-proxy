@@ -592,10 +592,11 @@ const ALERT_WD_CUTOFF_MS = 5 * 60 * 1000;  // 5 min
  * "Mai navigato" rientra in idle: la card e' grigio chiaro (proxy ok)
  * fino al primo traffico utente.
  *
- * Il watchdog VBS pinga ogni 5s; 60s di silenzio = 12 ping persi =
- * proxy quasi certamente spento.
+ * Il watchdog VBS pinga ogni 5s. 15s = 3 ping mancati = solido segnale
+ * di proxy killato (no glitch transitori). Coerente col timeout dei
+ * plugin watchdog (anch'esso 15s in v2.9.9).
  */
-const OFFLINE_PING_MS = 60 * 1000;        // 60s
+const OFFLINE_PING_MS = 15 * 1000;        // 15s
 const IDLE_TRAFFIC_MS = 3 * 60 * 1000;    // 3 min
 
 /** Ritorna true se l'IP ha una entry AI nelle ultime ALERT_AI_CUTOFF_MS. */

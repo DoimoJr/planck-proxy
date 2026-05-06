@@ -37,7 +37,7 @@ yiyan.baidu.com
 ernie.baidu.com
 chatglm.cn
 bigmodel.cn
-kimi.com
+.kimi.com
 kimi.moonshot.cn
 moonshot.ai
 qwen.ai

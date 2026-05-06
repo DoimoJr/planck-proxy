@@ -62,7 +62,7 @@ foreach ($p in Get-Process) {
     if (Test-Suspect $p.Name) { $baseline[$p.Id] = $p }
 }
 
-$heartbeatEvery = 6
+$heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
 $tick = 0
 while ($true) {
     Start-Sleep -Seconds 5

@@ -92,6 +92,11 @@ type State struct {
 	// gia' emesso l'evento "stopped" e stiamo aspettando un
 	// nuovo heartbeat per "resumed" (evita flooding).
 	watchdogStoppedAlerted map[string]map[string]bool
+	// watchdogAllStoppedAlerted[ip] = true se abbiamo gia' emesso
+	// l'evento aggregato "all-stopped" (severity critical) per quel
+	// IP. Evita duplicati nel ciclo checkHeartbeats. Resettato al
+	// primo resumed ricevuto da quell'IP.
+	watchdogAllStoppedAlerted map[string]bool
 
 	// --- Liste ---
 	bloccati       map[string]struct{}
@@ -156,8 +161,9 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		discoverVeyonOnly:   true,
 		storia:              make([]Entry, 0, 256),
 		aliveMap:               map[string]int64{},
-		watchdogHeartbeats:     map[string]map[string]int64{},
-		watchdogStoppedAlerted: map[string]map[string]bool{},
+		watchdogHeartbeats:        map[string]map[string]int64{},
+		watchdogStoppedAlerted:    map[string]map[string]bool{},
+		watchdogAllStoppedAlerted: map[string]bool{},
 	}
 
 	// Carica config persistita (se esiste).

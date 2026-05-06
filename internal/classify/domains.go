@@ -53,7 +53,7 @@ var dominiAILegacyHardcoded = []string{
 	"doubao.com",
 	"yiyan.baidu.com", "ernie.baidu.com",
 	"chatglm.cn", "bigmodel.cn",
-	"kimi.com", "kimi.moonshot.cn", "moonshot.ai",
+	".kimi.com", "kimi.moonshot.cn", "moonshot.ai",
 	"qwen.ai", "tongyi.aliyun.com",
 	"minimax.io", "minimaxi.com", "hailuoai.com",
 	"baichuan-ai.com",
@@ -197,7 +197,7 @@ var PatternSistema = []string{
 	"analytics.", "telemetry.", "metrics.", "stats.",
 	"logs.", "logger.", "tracker.", "tracking.",
 	".hotjar.com", ".segment.com", ".mixpanel.com", ".amplitude.com",
-	".sprig.com", ".imrworldwide.com",
+	".sprig.com", ".imrworldwide.com", "kinesis.",
 	".newrelic.com", ".nr-data.net",
 	"datadoghq.com", ".datadoghq-browser-agent.com",
 	".signalfx.com", ".sentry.io",
@@ -235,6 +235,15 @@ var PatternSistema = []string{
 	".platinumai.net", ".vistarsagency.com", ".company-target.com",
 	".rfihub.com", ".ctnsnet.com",
 	".yahoo.com", "ad-delivery.net",
+	// Header bidding / RTB / publisher services scoperti da analizza-sessione
+	".yieldmo.com", ".pub.network", ".primis.tech", ".gumgum.com",
+	".ccgateway.net", ".doubleverify.com", "floors.dev", ".yellowblue.io",
+	".2mdn.net", ".ingage.tech", ".quantserve.com", ".admanmedia.com",
+	"measureadv.com", ".tiktokw.us", "publisher-services.amazon.dev",
+	".monetixads.com", ".betweendigital.com", ".avads.net",
+	"adx.opera.com", "oa.opera.com",
+	"ads.linkedin.com", "ads.unity3d.com", "config.uca.cloud.unity3d.com",
+	".astra.dell.com",
 
 	// ---------- Adobe check-ins / DTM (Reader, Acrobat, Experience Platform) ----------
 	"acroipm", "armmf.adobe.com", "ardownload", ".adobedtm.com",

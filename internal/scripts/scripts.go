@@ -54,10 +54,17 @@ ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Pr
 ' --- Step 2: kill watchdog precedenti (proxy + plugin) via PowerShell ---
 ' WMIC e' deprecato/rimosso in Windows 11 24H2+; usiamo Get-CimInstance
 ' che e' disponibile ovunque PowerShell e' presente (sempre, su Win 7+).
+'
+' IMPORTANTE: il PID-self filter ($_.ProcessId -ne $PID) e OBBLIGATORIO
+' perche la CommandLine di QUESTO stesso powershell contiene letteralmente
+' la stringa planck_.*_watchdog.ps1 come parametro -Command. Senza
+' il filtro, il PowerShell di kill si AUTO-UCCIDE a meta iterazione e
+' alcuni plugin precedenti sopravvivono → i powershell si accumulano
+' a ogni redistribuzione su PC studente.
 On Error Resume Next
 ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & _
     "Get-CimInstance Win32_Process -Filter ""Name='wscript.exe' OR Name='powershell.exe'"" | " & _
-    "Where-Object { $_.CommandLine -match 'proxy_watchdog.vbs|planck_.*_watchdog.ps1' } | " & _
+    "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'proxy_watchdog\.vbs|planck_(usb|process|network)_watchdog\.ps1' } | " & _
     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""", 0, True
 fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
@@ -184,10 +191,11 @@ On Error Goto 0
 ' --- Step 4: kill defensivo via PowerShell (sostituisce WMIC deprecato) ---
 ' Targetting per CommandLine: ammazza solo i processi che eseguono
 ' proxy_watchdog.vbs o planck_*_watchdog.ps1, NON proxy_off.vbs (noi).
+' Skip self via $PID (vedi commento in proxy_on.vbs Step 2).
 On Error Resume Next
 ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & _
     "Get-CimInstance Win32_Process -Filter ""Name='wscript.exe' OR Name='powershell.exe'"" | " & _
-    "Where-Object { $_.CommandLine -match 'proxy_watchdog.vbs|planck_.*_watchdog.ps1' } | " & _
+    "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'proxy_watchdog\.vbs|planck_(usb|process|network)_watchdog\.ps1' } | " & _
     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""", 0, True
 On Error Goto 0
 

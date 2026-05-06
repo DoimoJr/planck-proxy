@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -44,11 +46,13 @@ func main() {
 	}
 	defer dst.Close()
 
-	// Sessioni archiviate dal source.
+	// Tutte le sessioni del source (anche quelle con sessione_fine NULL,
+	// es. crash o "planck.exe chiuso senza Stop"). Per quelle si stima la
+	// durata dall'ultima entry e si chiude col timestamp dell'ultima.
 	rows, err := src.Query(`SELECT id, sessione_inizio, COALESCE(sessione_fine, ''), COALESCE(durata_sec, 0),
 		COALESCE(classe, ''), COALESCE(lab, ''), COALESCE(titolo, ''), modo,
 		studenti_snapshot, bloccati_snapshot, archiviata_at
-		FROM sessioni WHERE sessione_fine IS NOT NULL ORDER BY id`)
+		FROM sessioni ORDER BY id`)
 	if err != nil {
 		log.Fatalf("query sessioni: %v", err)
 	}
@@ -63,6 +67,30 @@ func main() {
 		if err := rows.Scan(&oldID, &inizio, &fine, &durata, &classe, &lab, &titolo, &modo, &stud, &blocc, &archiviataAt); err != nil {
 			log.Printf("skip riga sessione: %v", err)
 			continue
+		}
+		// Sessione orfana (chiusura mai avvenuta): chiudila a importazione,
+		// stimando durata + fine dall'ultima entry.
+		if fine == "" || durata == 0 {
+			var lastTs int64
+			var lastOra string
+			if err := src.QueryRow(`SELECT COALESCE(MAX(ts),0), COALESCE(MAX(ora),'') FROM entries WHERE sessione_id = ?`, oldID).Scan(&lastTs, &lastOra); err == nil && lastTs > 0 {
+				if fine == "" && lastOra != "" {
+					// ora e' "YYYY-MM-DD HH:MM:SS" UTC; convertila in RFC3339 minimal.
+					fine = strings.Replace(lastOra, " ", "T", 1) + "Z"
+				}
+				if durata == 0 {
+					if t0, err := time.Parse(time.RFC3339, inizio); err == nil {
+						durata = int64((time.UnixMilli(lastTs).Sub(t0)).Seconds())
+						if durata < 0 {
+							durata = 0
+						}
+					}
+				}
+				if archiviataAt == 0 {
+					archiviataAt = lastTs
+				}
+				log.Printf("[orfana] sessione %d: stima fine=%s durata=%ds da ultima entry", oldID, fine, durata)
+			}
 		}
 		res, err := dst.Exec(`INSERT INTO sessioni
 			(sessione_inizio, sessione_fine, durata_sec, classe, lab, titolo, modo,

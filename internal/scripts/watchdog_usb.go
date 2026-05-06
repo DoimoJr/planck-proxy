@@ -75,7 +75,7 @@ foreach ($d in Get-InterestingPnp) {
     $baseline[$d.InstanceId] = $d
 }
 
-$heartbeatEvery = 6  # ogni 6 iterazioni da 5s -> heartbeat ogni 30s
+$heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
 $tick = 0
 while ($true) {
     Start-Sleep -Seconds 5

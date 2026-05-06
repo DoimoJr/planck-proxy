@@ -5,6 +5,87 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.9] — 2026-05-06
+
+Patch focus: detection real-time degli stati studente, fix bug kill
+processi PowerShell che si accumulavano a ogni redistribuzione,
+arricchimento liste classificazione domini.
+
+### Aggiunto
+
+- **Detection "all-stopped" critical**: quando TUTTI i plugin watchdog
+  di uno stesso IP vanno silenti entro la finestra di check, Planck
+  emette un evento aggregato `watchdog-all/all-stopped` con severity
+  **critical** (oltre ai warning singoli per ogni plugin). Segnala
+  con alta probabilita' un kill manuale dei processi PowerShell sullo
+  studente (Task Manager → End Task globale). Implementato in
+  `state/watchdog.go` `checkHeartbeats()` Pass 2 + nuovo flag
+  `watchdogAllStoppedAlerted` per evitare doppi alert. Reset al primo
+  heartbeat ricevuto da quell'IP.
+
+- **Tools di debug** sotto `tools/`:
+  - `analizzaeventi`: dump eventi watchdog di una sessione, breakdown
+    per plugin/severity + tipi di evento + per IP. Usato per capire
+    cosa è rumore (VolumeSnapshot Windows) vs azione studente.
+  - `checkstudente`: dump dei domini di un IP specifico in una
+    sessione, classificati con `classify.Classifica` + euristica
+    candidati AI nei "utente".
+  - `ultimirichieste`: ultime N richieste di un IP in una sessione.
+  - `inspectsession`: dump della tabella sessioni di un planck.db.
+  - `rmsession`: cancella una sessione dal DB (CASCADE su entries
+    + watchdog_events).
+
+### Cambiato
+
+- **Heartbeat real-time**: detection silent-plugin ridotta da ~2.5min
+  worst case a ~10-15s tipico (max 25s):
+  - Plugin watchdog (USB/process/network) ora pingano ogni **5s**
+    invece di ogni 30s (`heartbeatEvery = 1` invece di 6).
+  - `HeartbeatTimeout` ridotto da **90s** a **15s** (3 ping mancati
+    consecutivi = solido segnale di kill, no glitch transitori).
+  - `HeartbeatCheckInterval` ridotto da **30s** a **5s**.
+
+- **Card "offline" real-time**: `OFFLINE_PING_MS` lato client ridotto
+  da 60s a **15s** (3 ping mancati). Coerente coi plugin: se uno
+  studente killa il proxy_on.vbs o spegne il PC, la card diventa grigia
+  entro 15-20s anziche' 60s.
+
+- **Pattern AI `kimi.com` → `.kimi.com`**: il bare `kimi.com` matchava
+  come substring `eskimi.com` (Eskimi e' una DSP ad-tech, non AI). Fix
+  in `embedded_ai_domains.txt`, `data/ai-domains.txt`, cache locale.
+  L'aggiunta del leading dot vincola il match al suffisso di sottodominio.
+
+- **`classify.PatternSistema`** arricchita con 23 nuovi pattern adtech
+  scoperti dall'analisi della sessione 12 (`Test 4DII Grafici`):
+  `.yieldmo.com`, `.pub.network`, `.primis.tech`, `.gumgum.com`,
+  `.ccgateway.net`, `.doubleverify.com`, `floors.dev`, `.yellowblue.io`,
+  `.2mdn.net`, `.ingage.tech`, `.quantserve.com`, `.admanmedia.com`,
+  `measureadv.com`, `.tiktokw.us`, `publisher-services.amazon.dev`,
+  `.monetixads.com`, `.betweendigital.com`, `.avads.net`,
+  `adx.opera.com`, `oa.opera.com`, `ads.linkedin.com`,
+  `ads.unity3d.com`, `config.uca.cloud.unity3d.com`, `.astra.dell.com`,
+  `kinesis.` (AWS data streaming).
+
+- **`tools/importsession`**: ora importa anche sessioni "orfane"
+  (`sessione_fine NULL`, es. crash o `planck.exe` chiuso senza Stop).
+  Per quelle stima fine + durata dall'ultima entry registrata.
+
+### Risolto
+
+- **Processi PowerShell si accumulano a ogni Send proxy**: nello script
+  `proxy_on.vbs` Step 2, il PowerShell di kill aveva un filtro
+  `Where-Object { $_.CommandLine -match 'planck_.*_watchdog.ps1' }`
+  che matchava **se stesso** (la sua CommandLine contiene
+  letteralmente quella regex come parametro `-Command`) e si
+  auto-uccideva a meta' iterazione → i plugin precedenti
+  sopravvivevano. Stessa cosa in `proxy_off.vbs` Step 4. Fix:
+  aggiunto `$_.ProcessId -ne $PID` come prima condizione + irrigidita
+  la regex con `(usb|process|network)` esplicito e `\.` literal.
+
+- **Banner AI alert legacy** rimosso in v2.9.8: ora il banner alert
+  unificato in alto e' l'unica notifica AI visiva (oltre a beep +
+  notifica desktop).
+
 ## [v2.9.8] — 2026-05-06
 
 ### Aggiunto

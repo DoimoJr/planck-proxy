@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/store"
 )
@@ -109,6 +110,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	// Download script studenti (Phase 1.7)
 	mux.HandleFunc("/api/scripts/proxy_on.vbs", auth(a.handleScriptProxyOn))
 	mux.HandleFunc("/api/scripts/proxy_off.vbs", auth(a.handleScriptProxyOff))
+	mux.HandleFunc("/api/scripts/firefox-policies.json", auth(a.handleScriptFirefoxPolicies))
+	mux.HandleFunc("/api/scripts/firefox-lockdown.vbs", auth(a.handleScriptFirefoxLockdown))
 
 	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
 	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
@@ -629,6 +632,31 @@ func (a *API) handleScriptProxyOff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.serveScriptDownload(w, "proxy_off.vbs")
+}
+
+// handleScriptFirefoxPolicies serve il policies.json di Firefox da
+// installare in C:\Program Files\Mozilla Firefox\distribution\ (one-time
+// al setup laboratorio). Forza Mode=system, Locked=true → l'utente non
+// puo' disattivare il proxy dalle Preferenze Firefox.
+func (a *API) handleScriptFirefoxPolicies(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="policies.json"`)
+	_, _ = w.Write([]byte(scripts.FirefoxPoliciesJSON))
+}
+
+// handleScriptFirefoxLockdown serve un VBS che, eseguito con UAC,
+// scrive policies.json nelle distribution dir di Firefox installato
+// (Program Files / Program Files (x86)). One-shot per setup laboratorio.
+func (a *API) handleScriptFirefoxLockdown(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/vbscript; charset=UTF-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="firefox_lockdown.vbs"`)
+	_, _ = w.Write([]byte(scripts.FirefoxLockdownVBS()))
 }
 
 // serveScriptDownload manda il file .vbs come download

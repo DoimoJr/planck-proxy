@@ -475,6 +475,33 @@
                 </div>
                 <div id="veyon-test-result" class="settings-hint" style="margin-top:6px"></div>
             </div>
+
+            <div class="settings-section">
+                <div class="settings-section-head">LOCKDOWN FIREFOX</div>
+                <p class="settings-hint">
+                    Firefox usa impostazioni proxy proprie, non eredita Windows. Senza
+                    questo lockdown lo studente puo' bypassare il proxy di sistema in
+                    3 click ("Impostazioni di rete" → Nessun proxy). I file qui sotto
+                    forzano <code>Mode: system, Locked: true</code> via
+                    <code>policies.json</code> (Mozilla Enterprise Policy).
+                </p>
+                <p class="settings-hint">
+                    <strong>Setup laboratorio (one-time)</strong>: distribuire una sola
+                    volta per PC, durante l'imaging o via GPO. Richiede privilegi admin.
+                </p>
+                <ul class="link-list">
+                    <li>
+                        <a href="/api/scripts/firefox-policies.json" target="_blank">policies.json</a>
+                        — file da copiare manualmente in
+                        <code>C:\Program Files\Mozilla Firefox\distribution\</code>
+                    </li>
+                    <li>
+                        <a href="/api/scripts/firefox-lockdown.vbs" target="_blank">firefox_lockdown.vbs</a>
+                        — script auto-elevante (UAC) che fa la copia. Eseguire una volta
+                        come admin sul PC studente.
+                    </li>
+                </ul>
+            </div>
         </div>
 
         <!-- ============== SISTEMA ============== -->

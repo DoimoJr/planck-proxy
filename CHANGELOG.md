@@ -5,6 +5,32 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.24] — 2026-05-06
+
+### Aggiunto
+
+- **Lockdown Firefox via `policies.json`**: chiude il bypass piu'
+  banale di Planck. Firefox NON eredita le impostazioni proxy di
+  Windows quando l'utente le sovrascrive in "Impostazioni di rete"
+  → si poteva bypassare il proxy in 3 click. Il file `policies.json`
+  Mozilla Enterprise Policy con `Mode: system, Locked: true` rende
+  la voce non modificabile (grayed out + "configurato dall'organizzazione").
+  Due endpoint nuovi:
+  - `GET /api/scripts/firefox-policies.json` → file pronto per copia
+    manuale o GPO in `C:\Program Files\Mozilla Firefox\distribution\`
+  - `GET /api/scripts/firefox-lockdown.vbs` → script auto-elevante
+    (UAC prompt) che fa la copia in entrambe le distribution dir
+    (Program Files + Program Files (x86))
+  Sezione UI in Impostazioni → Veyon → "Lockdown Firefox" con i due
+  link e istruzioni di setup.
+
+- **Watchdog Process default include `firefox.exe`**: rilevazione
+  rumorosa ma utile per il caso "Firefox portable lanciato da USB".
+  Quel binario non legge `distribution/`, quindi il lockdown
+  policies non lo protegge — l'alert del watchdog process e' la
+  difesa secondaria. Toglibile dalle Impostazioni → Watchdog se
+  Firefox e' uso legittimo del laboratorio.
+
 ## [v2.9.23] — 2026-05-06
 
 ### Modificato

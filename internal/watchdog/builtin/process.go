@@ -33,6 +33,13 @@ func (ProcessPlugin) DefaultConfig() any {
 			"cmd.exe", "powershell.exe", "powershell_ise.exe", "pwsh.exe",
 			"regedit.exe", "taskmgr.exe", "mmc.exe", "gpedit.msc",
 			"perfmon.exe", "resmon.exe", "msconfig.exe",
+			// Firefox in denylist perche' puo' bypassare il proxy di sistema
+			// disattivandolo dalle proprie Preferenze (a differenza di
+			// Chrome/Edge che ereditano sempre da Windows). Il policies.json
+			// distribuito al setup chiude la falla, ma il watchdog process
+			// genera comunque un alert quando lo studente lancia Firefox
+			// portable (USB) — quel binario non legge la distribution dir.
+			"firefox.exe",
 		},
 	}
 }

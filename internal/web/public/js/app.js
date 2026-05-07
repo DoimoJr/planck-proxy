@@ -216,6 +216,7 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-classe-reboot': actions.veyonClasseReboot(); break;
         case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
+        case 'veyon-firefox-lockdown': actions.veyonFirefoxLockdown(); break;
         case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
         case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
         case 'ai-refresh': actions.aiRefresh(); break;

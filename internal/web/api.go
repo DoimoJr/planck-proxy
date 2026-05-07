@@ -124,6 +124,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/veyon/feature", auth(a.handleVeyonFeature))
 	mux.HandleFunc("/api/veyon/distribuisci-proxy", auth(a.handleVeyonDistribuisciProxy))
 	mux.HandleFunc("/api/veyon/disinstalla-proxy", auth(a.handleVeyonDisinstallaProxy))
+	mux.HandleFunc("/api/veyon/distribuisci-firefox-lockdown", auth(a.handleVeyonDistribuisciFirefoxLockdown))
 
 	// AI list management (Phase 6)
 	mux.HandleFunc("/api/ai/status", auth(a.handleAIStatus))
@@ -656,7 +657,9 @@ func (a *API) handleScriptFirefoxLockdown(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "text/vbscript; charset=UTF-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="firefox_lockdown.vbs"`)
-	_, _ = w.Write([]byte(scripts.FirefoxLockdownVBS()))
+	// Variant non-silent: download manuale, msgbox di feedback per
+	// admin che lancia lo script da locale.
+	_, _ = w.Write([]byte(scripts.FirefoxLockdownVBS(false)))
 }
 
 // serveScriptDownload manda il file .vbs come download

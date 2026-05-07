@@ -980,6 +980,19 @@ export async function veyonDisinstallaProxy() {
     await veyonDistribuisciHelper('/api/veyon/disinstalla-proxy', 'Disinstallazione proxy');
 }
 
+/**
+ * Distribuisce firefox_lockdown.vbs sui target: scrive policies.json
+ * nelle distribution dir di Firefox (Mode: system, Locked: true) per
+ * impedire allo studente di disattivare il proxy dalle Preferenze
+ * Firefox. Setup one-shot per laboratorio — il policies persiste
+ * finche' qualcuno non lo cancella manualmente.
+ */
+export async function veyonFirefoxLockdown() {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Distribuire il lockdown Firefox a tutti gli studenti?\n\nLo script scrivera\' policies.json in Program Files\\Mozilla Firefox\\distribution\\.\nE\' un\'operazione one-shot per il setup del laboratorio.')) return;
+    await veyonDistribuisciHelper('/api/veyon/distribuisci-firefox-lockdown', 'Lockdown Firefox');
+}
+
 /** Helper interno: chiama un endpoint distribuzione bat con i target attuali. */
 async function veyonDistribuisciHelper(endpoint, label) {
     const { ips, desc } = targetIps();

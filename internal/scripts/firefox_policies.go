@@ -46,15 +46,29 @@ Dim ws, fso, args, i
 Set ws = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 
-' Self-elevate via UAC: se non gia' admin, riavvia con verb "runas".
-' Il flag "/elevated" segnala alla seconda invocazione di non rilanciare.
+' Detect privilegi: tenta di scrivere un file probe in Program Files.
+' Se ci riesce siamo gia' admin/SYSTEM (caso Veyon Service che gira
+' come SYSTEM su Windows → niente UAC, scrive direttamente). Se fail
+' E non e' un re-launch (/elevated), self-elevate via UAC.
+Dim isAdmin : isAdmin = False
+On Error Resume Next
+Dim probePath : probePath = "C:\Program Files\.planck_admin_probe"
+Dim probeF : Set probeF = fso.CreateTextFile(probePath, True)
+If Err.Number = 0 And Not probeF Is Nothing Then
+    probeF.Close
+    fso.DeleteFile probePath, True
+    isAdmin = True
+End If
+Err.Clear
+On Error Goto 0
+
 Set args = WScript.Arguments
 Dim alreadyElevated : alreadyElevated = False
 For i = 0 To args.Count - 1
     If LCase(args(i)) = "/elevated" Then alreadyElevated = True
 Next
 
-If Not alreadyElevated Then
+If Not isAdmin And Not alreadyElevated Then
     Dim shellApp : Set shellApp = CreateObject("Shell.Application")
     shellApp.ShellExecute "wscript.exe", _
         Chr(34) & WScript.ScriptFullName & Chr(34) & " /elevated", _
@@ -62,7 +76,7 @@ If Not alreadyElevated Then
     WScript.Quit 0
 End If
 
-' --- da qui in poi gira come admin ---
+' --- da qui in poi gira come admin (o SYSTEM via Veyon Service) ---
 
 Dim policiesContent
 policiesContent = "__POLICIES_JSON__"
@@ -88,23 +102,38 @@ For i = 0 To UBound(candidates)
     End If
 Next
 
-If writtenCount > 0 Then
+__SILENT_HOOK__
+
+WScript.Quit 0
+`
+
+// firefoxPoliciesMsgboxBlock e' lo snippet con MsgBox di feedback.
+// Inserito solo nella variant non-silent (download manuale).
+const firefoxPoliciesMsgboxBlock = `If writtenCount > 0 Then
     MsgBox "Planck: lockdown Firefox completato (" & writtenCount & " installazione/i).", _
         64, "Planck Proxy"
 Else
     MsgBox "Planck: nessuna installazione Firefox trovata in Program Files.", _
         48, "Planck Proxy"
-End If
-
-WScript.Quit 0
-`
+End If`
 
 // FirefoxLockdownVBS ritorna il VBS pronto per la distribuzione, con il
 // policies.json incorporato come literal VBScript (escape `"` -> `""`,
 // newline -> `" & vbCrLf & "`).
-func FirefoxLockdownVBS() string {
+//
+// Se silent==true, niente MsgBox di feedback finale: utile quando
+// distribuito via Veyon FileTransfer su molti PC contemporaneamente
+// (un MsgBox per PC sarebbe rumoroso, e in sessione SYSTEM bloccherebbe
+// lo script invisibilmente attendendo un click che non arrivera').
+func FirefoxLockdownVBS(silent bool) string {
 	encoded := vbsEscapeLiteral(FirefoxPoliciesJSON)
-	return strings.ReplaceAll(firefoxPoliciesDeployTemplate, "__POLICIES_JSON__", encoded)
+	hook := firefoxPoliciesMsgboxBlock
+	if silent {
+		hook = "' silent: niente MsgBox di feedback (distribuzione Veyon)"
+	}
+	out := strings.ReplaceAll(firefoxPoliciesDeployTemplate, "__POLICIES_JSON__", encoded)
+	out = strings.ReplaceAll(out, "__SILENT_HOOK__", hook)
+	return out
 }
 
 // vbsEscapeLiteral converte una stringa Go in un literal VBScript-safe.

@@ -5,6 +5,36 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.25] — 2026-05-07
+
+### Aggiunto
+
+- **Bottone "Firefox fix" nella toolbar Live**: distribuisce
+  `firefox_lockdown.vbs` a tutti gli studenti via Veyon
+  FileTransfer in un click, come "Send proxy". Endpoint nuovo
+  `POST /api/veyon/distribuisci-firefox-lockdown`. One-shot per
+  PC: il policies.json scritto in `Program Files\Mozilla Firefox\
+  distribution\` persiste finche' non viene cancellato manualmente.
+
+### Modificato
+
+- **VBS lockdown ora rileva privilegi prima di chiedere UAC**:
+  tenta di scrivere un file probe in Program Files; se ci riesce
+  (Veyon Service gira come SYSTEM su Windows) skippa l'auto-elevate
+  e procede direttamente. Niente UAC prompt sulle 30 macchine
+  studenti quando si distribuisce via Veyon.
+
+- **Variant `silent` del VBS**: niente MsgBox di feedback finale
+  quando il VBS gira in sessione SYSTEM (Session 0 isolation
+  bloccherebbe lo script attendendo un click che non arrivera').
+  La variant non-silent viene servita solo dal download manuale
+  (`/api/scripts/firefox-lockdown.vbs`), per il debug admin.
+
+- **`distributeBat` refactor**: estratto `distributeBytes(ips,
+  filename, content)` che accetta contenuto in-memory anziche'
+  leggere dal disco. Riusato dal nuovo handler firefox-lockdown
+  che genera il VBS al volo via `scripts.FirefoxLockdownVBS(silent)`.
+
 ## [v2.9.24] — 2026-05-06
 
 ### Aggiunto

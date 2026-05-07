@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/veyon"
 	"github.com/DoimoJr/planck-proxy/internal/veyon/qds"
 )
@@ -214,8 +215,8 @@ func (a *API) handleVeyonDisinstallaProxy(w http.ResponseWriter, r *http.Request
 	a.distributeBat(w, r, "proxy_off.vbs")
 }
 
-// distributeBat e' il flow comune: legge il file dal data dir, itera sui
-// target IPs, invia via VeyonSendFile, raccoglie ok/fail.
+// distributeBat e' il flow comune che legge il file dal data dir, e
+// delega a distributeBytes per la trasmissione.
 func (a *API) distributeBat(w http.ResponseWriter, r *http.Request, filename string) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -239,15 +240,24 @@ func (a *API) distributeBat(w http.ResponseWriter, r *http.Request, filename str
 		return
 	}
 
+	a.distributeBytes(w, body.IPs, filename, content)
+}
+
+// distributeBytes invia content come file `filename` a tutti gli IPs
+// in parallelo via Veyon FileTransfer (OpenFileInApplication=true,
+// overwrite=true). Risponde con il riassunto ok/fail per ogni target.
+// Estratto da distributeBat per riusare il flow con contenuto generato
+// in-memory (es. firefox_lockdown.vbs).
+func (a *API) distributeBytes(w http.ResponseWriter, ips []string, filename string, content []byte) {
 	// Invia in parallelo, raccogli risultati.
 	type result struct {
 		IP    string `json:"ip"`
 		OK    bool   `json:"ok"`
 		Error string `json:"error,omitempty"`
 	}
-	results := make([]result, len(body.IPs))
-	done := make(chan int, len(body.IPs))
-	for i, ip := range body.IPs {
+	results := make([]result, len(ips))
+	done := make(chan int, len(ips))
+	for i, ip := range ips {
 		go func(i int, ip string) {
 			err := a.state.VeyonSendFile(ip, filename, content, true, true)
 			r := result{IP: ip, OK: err == nil}
@@ -258,7 +268,7 @@ func (a *API) distributeBat(w http.ResponseWriter, r *http.Request, filename str
 			done <- i
 		}(i, ip)
 	}
-	for range body.IPs {
+	for range ips {
 		<-done
 	}
 
@@ -272,11 +282,33 @@ func (a *API) distributeBat(w http.ResponseWriter, r *http.Request, filename str
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      fail == 0,
-		"total":   len(body.IPs),
+		"total":   len(ips),
 		"success": ok,
 		"failed":  fail,
 		"results": results,
 	})
+}
+
+// handleVeyonDistribuisciFirefoxLockdown genera al volo un VBS silent
+// (no MsgBox di feedback) che scrive policies.json nelle distribution
+// dir di Firefox e lo distribuisce ai target via Veyon FileTransfer.
+// One-time per PC: dopo la prima esecuzione il policies resta finche'
+// qualcuno non lo cancella.
+func (a *API) handleVeyonDistribuisciFirefoxLockdown(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body distributeBatBody
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body deve essere {ips:[...]}", "BAD_BODY")
+		return
+	}
+	if len(body.IPs) == 0 {
+		writeError(w, http.StatusBadRequest, "Lista IPs vuota", "BAD_BODY")
+		return
+	}
+	content := []byte(scripts.FirefoxLockdownVBS(true))
+	a.distributeBytes(w, body.IPs, "firefox_lockdown.vbs", content)
 }
 
 // jsonToVariant converte un valore decodato da encoding/json in un tipo

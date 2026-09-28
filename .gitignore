@@ -48,6 +48,9 @@ planck.pid
 sessioni/*.json
 sessioni/*.ndjson
 sessioni/_archivio_privato/
+# La migrazione v1 -> v2 rinomina gli archivi importati in *.json.v1.bak:
+# stessi dati sensibili (IP + domini per studente), stessa esclusione.
+sessioni/*.v1.bak
 
 # Mappe classi salvate (contengono nomi studenti reali)
 classi/*.json

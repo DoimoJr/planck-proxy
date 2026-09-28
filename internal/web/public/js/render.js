@@ -1556,6 +1556,66 @@ function renderIgnorati() {
  * Card "Lista AI auto-aggiornata" nelle Impostazioni: mostra count +
  * source (embedded/cache/remote) + timestamp ultimo update.
  */
+export function renderUpdate() {
+    const badge = $('topbar-update');
+    const info = state.update.info;
+    const fase = state.update.fase;
+    const disponibile = !!info?.disponibile;
+
+    // Guardia lastKey: la card e il badge contengono bottoni cliccabili,
+    // e senza questo verrebbero ricreati a ogni renderAll.
+    const key = [info?.corrente, info?.ultima, disponibile, fase,
+        state.update.errore, state.sessioneAttiva].join('|');
+    const card = $('update-stato');
+    const ancora = card || badge;
+    if (!ancora) return;
+    if (ancora.dataset.lastKey === key) return;
+    ancora.dataset.lastKey = key;
+
+    if (badge) {
+        badge.classList.toggle('hidden', !disponibile);
+        const t = $('topbar-update-testo');
+        if (t && info) t.textContent = 'v' + info.ultima + ' disponibile';
+    }
+
+    if (!card) return;
+    const ver = $('update-versione');
+    if (ver) ver.textContent = 'v' + (info?.corrente || state.versione || '—');
+
+    const btnCheck = $('btn-update-check');
+    const btnApply = $('btn-update-apply');
+    const avviso = $('update-avviso');
+
+    let testo;
+    switch (fase) {
+        case 'controllo': testo = 'Controllo in corso…'; break;
+        case 'download':  testo = 'Scaricamento e installazione in corso…'; break;
+        case 'riavvio':   testo = 'Installato. Riavvio in corso, la pagina si riaggancia da sola…'; break;
+        case 'errore':    testo = 'Errore: ' + escapeHtml(state.update.errore); break;
+        default:
+            if (!info) testo = 'Nessun controllo effettuato.';
+            else if (disponibile) testo = 'Disponibile la v' + escapeHtml(info.ultima) + '.';
+            else if (info.asset) testo = 'Sei all\'ultima versione.';
+            else testo = 'Nessun binario pubblicato per questo sistema operativo.';
+    }
+    card.innerHTML = testo;
+
+    const occupato = fase === 'controllo' || fase === 'download' || fase === 'riavvio';
+    if (btnCheck) btnCheck.disabled = occupato;
+
+    if (btnApply) {
+        btnApply.classList.toggle('hidden', !disponibile);
+        // Il riavvio stacca il proxy per qualche secondo: a sessione
+        // attiva non si aggiorna. Stesso vincolo lato server (409).
+        btnApply.disabled = occupato || state.sessioneAttiva;
+    }
+    if (avviso) {
+        const bloccato = disponibile && state.sessioneAttiva;
+        avviso.classList.toggle('hidden', !bloccato);
+        if (bloccato) avviso.textContent = "C'e' una sessione in corso: fermala prima di aggiornare, il riavvio interrompe il proxy per qualche secondo.";
+    }
+}
+
 export function renderAIListStatus() {
     const el = $('ai-list-status-value');
     if (!el) return;
@@ -2296,6 +2356,7 @@ function _renderAllSync() {
     safe('renderImpostazioni', renderImpostazioni);
     safe('renderWatchdogPluginsList', renderWatchdogPluginsList);
     safe('renderAIListStatus', renderAIListStatus);
+    safe('renderUpdate', renderUpdate);
     safe('renderCountdown', renderCountdown);
     safe('aggiornaTopbarCount', aggiornaTopbarCount);
     safe('aggiornaToggleArrows', aggiornaToggleArrows);

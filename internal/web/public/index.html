@@ -31,6 +31,13 @@
                 <span class="dot ok"></span>
                 <span id="topbar-active-count">0</span> attivi
             </span>
+            <button id="topbar-update" class="topbar-update hidden" data-action="update-vai"
+                    title="E' disponibile una versione nuova">
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9.5V2.5M3 5.5L6 2.5l3 3"/><path d="M2 10h8"/>
+                </svg>
+                <span id="topbar-update-testo">Aggiornamento</span>
+            </button>
             <span id="topbar-clock" class="topbar-clock">--:--</span>
             <button data-action="darkmode" id="btn-darkmode" class="btn btn-icon" title="Tema chiaro/scuro" aria-label="Tema">
                 <svg id="icon-sun" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="display:none">
@@ -510,6 +517,22 @@
 
         <!-- ============== SISTEMA ============== -->
         <div class="settings-tab-panel" data-subtab="sistema">
+            <div class="settings-section">
+                <div class="settings-section-head">AGGIORNAMENTI</div>
+                <p class="settings-hint">Scarica e installa l'ultima versione pubblicata su GitHub, poi riavvia da solo. La finestra resta aperta e si riaggancia da sola.</p>
+                <div class="settings-grid">
+                    <label>Versione in uso</label>
+                    <div id="update-versione">—</div>
+                    <label>Stato</label>
+                    <div id="update-stato">Nessun controllo effettuato.</div>
+                </div>
+                <div class="settings-add-row" style="margin-top:8px">
+                    <button data-action="update-check" id="btn-update-check" class="btn">Controlla ora</button>
+                    <button data-action="update-apply" id="btn-update-apply" class="btn btn-primary hidden">Aggiorna e riavvia</button>
+                </div>
+                <p id="update-avviso" class="settings-hint hidden"></p>
+            </div>
+
             <div class="settings-section">
                 <div class="settings-section-head">ENDPOINT API · DEBUG</div>
                 <ul class="link-list">

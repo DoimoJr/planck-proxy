@@ -36,6 +36,7 @@ type API struct {
 	broker  *Broker
 	version string
 	fase    string
+	update  statoUpdate
 }
 
 // NewAPI costruisce l'oggetto API con le dipendenze necessarie.
@@ -115,6 +116,10 @@ func (a *API) Register(mux *http.ServeMux) {
 
 	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
 	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
+
+	// Auto-aggiornamento (v2.9.29)
+	mux.HandleFunc("/api/update/check", auth(a.handleUpdateCheck))
+	mux.HandleFunc("/api/update/apply", auth(a.handleUpdateApply))
 
 	// Veyon (Phase 3e)
 	mux.HandleFunc("/api/veyon/status", auth(a.handleVeyonStatus))

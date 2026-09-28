@@ -116,6 +116,46 @@ func TestConfigSnapshot(t *testing.T) {
 	}
 }
 
+// TestSetStudentiIPs copre cio' che ha sostituito le API
+// /api/students/{set,delete,clear}, rimosse in v2.6.0 insieme al setup
+// manuale della classe: la mappa non e' piu' editabile ne' persistita, viene
+// rigenerata a ogni boot dal /24 del PC docente corrente.
+func TestSetStudentiIPs(t *testing.T) {
+	b := &mockBroker{}
+	s := New(b)
+
+	s.SetStudentiIPs([]string{"192.168.1.1", " 192.168.1.2 ", "", "   "})
+
+	got := s.ConfigSnapshotData().Studenti
+	if len(got) != 2 {
+		t.Fatalf("studenti = %d, attesi 2 (vuoti e spazi scartati): %+v", len(got), got)
+	}
+	// Gli IP sono trimmati e il nome e' sempre vuoto: la UI mostra l'IP.
+	for _, ip := range []string{"192.168.1.1", "192.168.1.2"} {
+		nome, ok := got[ip]
+		if !ok {
+			t.Errorf("IP %q assente dalla mappa: %+v", ip, got)
+		}
+		if nome != "" {
+			t.Errorf("nome per %q = %q, atteso vuoto", ip, nome)
+		}
+	}
+
+	// Sostituzione in blocco: la chiamata successiva non fa merge.
+	s.SetStudentiIPs([]string{"10.0.0.7"})
+	got = s.ConfigSnapshotData().Studenti
+	if len(got) != 1 {
+		t.Errorf("dopo sostituzione studenti = %d, atteso 1: %+v", len(got), got)
+	}
+	if _, ok := got["192.168.1.1"]; ok {
+		t.Errorf("IP della lista precedente ancora presente: %+v", got)
+	}
+
+	if b.Count() == 0 {
+		t.Errorf("SetStudentiIPs deve broadcastare la nuova mappa")
+	}
+}
+
 func TestHistorySnapshot(t *testing.T) {
 	b := &mockBroker{}
 	s := New(b)

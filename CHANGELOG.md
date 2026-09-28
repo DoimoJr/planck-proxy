@@ -5,6 +5,31 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.27] — 2026-09-28
+
+### Risolto
+
+- **`go test ./...` non compilava su `internal/web`**: `TestStudentCRUD`
+  esercitava `/api/students/{set,delete,clear}`, rimosse in v2.6.0
+  insieme al setup manuale della classe (commit `06a1ca7`). Gli handler
+  erano spariti, il test no: da allora `go vet` e `go test` fallivano
+  con `api.handleStudentSet undefined`. Test rimosso — quel
+  comportamento non deve piu' esistere, quindi non andava riparato.
+
+### Aggiunto
+
+- **`TestSetStudentiIPs`** in `internal/state`: copre cio' che ha
+  sostituito quelle API ed era senza test. Verifica le tre promesse
+  della funzione — IP trimmati con vuoti scartati, nome sempre stringa
+  vuota (la UI mostra l'IP come label), sostituzione in blocco senza
+  merge con la lista precedente — piu' il broadcast.
+
+### Note
+
+- `gofmt -l` segnala `internal/web/api.go`, `internal/state/mutations.go`,
+  `internal/state/snapshots.go` e `internal/state/state.go` come non
+  formattati. Preesistente e non toccato qui, per tenere il diff leggibile.
+
 ## [v2.9.26] — 2026-09-28
 
 ### Risolto

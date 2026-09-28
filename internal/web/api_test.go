@@ -212,11 +212,11 @@ func TestDeadlineSetBadFormat(t *testing.T) {
 func TestSettingsUpdateMixed(t *testing.T) {
 	api, s := newTestAPI()
 	rec := post(api, "/api/settings/update", map[string]any{
-		"titolo":   "Verifica 4DII",
-		"modo":     "allowlist",
-		"chiaveSconosciuta": "x",        // rejected
-		"inattivitaSogliaSec": 120,      // updated
-		"proxy.port": 9091,              // richiedeRiavvio
+		"titolo":              "Verifica 4DII",
+		"modo":                "allowlist",
+		"chiaveSconosciuta":   "x",  // rejected
+		"inattivitaSogliaSec": 120,  // updated
+		"proxy.port":          9091, // richiedeRiavvio
 	}, api.handleSettingsUpdate)
 
 	if rec.Code != http.StatusOK {
@@ -243,37 +243,6 @@ func TestSettingsUpdateMixed(t *testing.T) {
 	cfg := s.ConfigSnapshotData()
 	if cfg.Titolo != "Verifica 4DII" || cfg.Modo != "allowlist" || cfg.InattivitaSogliaSec != 120 {
 		t.Errorf("state non mutato: %+v", cfg)
-	}
-}
-
-func TestStudentCRUD(t *testing.T) {
-	api, s := newTestAPI()
-
-	// Helper: legge la mappa studenti correntemente in state via snapshot.
-	// Evita di passare per /api/config + json.Unmarshal (che farebbe merge
-	// in mappa preesistente, comportamento standard di encoding/json).
-	studenti := func() map[string]string {
-		return s.ConfigSnapshotData().Studenti
-	}
-
-	// Add
-	post(api, "/api/students/set", map[string]any{"ip": "192.168.1.50", "nome": "Mario"}, api.handleStudentSet)
-	post(api, "/api/students/set", map[string]any{"ip": "192.168.1.51", "nome": "Luca"}, api.handleStudentSet)
-
-	if got := studenti(); got["192.168.1.50"] != "Mario" || got["192.168.1.51"] != "Luca" {
-		t.Errorf("studenti dopo SET: %+v", got)
-	}
-
-	// Delete
-	post(api, "/api/students/delete", map[string]any{"ip": "192.168.1.50"}, api.handleStudentDelete)
-	if _, ok := studenti()["192.168.1.50"]; ok {
-		t.Errorf("dopo delete, Mario ancora presente: %+v", studenti())
-	}
-
-	// Clear
-	post(api, "/api/students/clear", nil, api.handleStudentClear)
-	if got := studenti(); len(got) != 0 {
-		t.Errorf("dopo clear, studenti = %d, atteso 0: %+v", len(got), got)
 	}
 }
 

@@ -5,6 +5,27 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.30] — 2026-09-28
+
+### Note
+
+Release di verifica, **senza modifiche funzionali**: esiste per dare alla
+v2.9.29 qualcosa verso cui aggiornarsi.
+
+La v2.9.29 e' la prima versione capace di aggiornarsi da sola, ma il suo
+meccanismo non era dimostrabile sul campo: senza una release piu' recente il
+pulsante puo' solo rispondere "sei all'ultima versione". Il passaggio
+critico — rinominare l'eseguibile mentre e' in esecuzione — e' un
+comportamento specifico di Windows, ed era stato verificato solo su macOS,
+dove il filesystem e' piu' permissivo.
+
+Aggiornando dalla 2.9.29 a questa si esercita il ciclo completo (scarica,
+verifica, sostituisce, riavvia, ricarica la pagina) su una macchina reale,
+prima di doverci contare durante una verifica.
+
+Un fallimento e' innocuo per costruzione: ogni passo si interrompe prima del
+punto di non ritorno e lascia la 2.9.29 funzionante.
+
 ## [v2.9.29] — 2026-09-28
 
 ### Aggiunto

@@ -10,17 +10,29 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 )
 
-// Soglie heartbeat watchdog (Phase 5.x — tuning v2.9.9 per detection
-// quasi in tempo reale: con plugin che pingano ogni 5s, un timeout di
-// 15s = 3 ping mancati consecutivi = solido segnale di kill / crash).
+// Soglie heartbeat watchdog.
 //
-// Latency totale dal kill alla detection: 5s (heartbeat freshness) +
-// 15s (timeout) + 5s (checker) = max 25s tipico, target ~10-15s.
+// Il tuning v2.9.9 puntava alla detection quasi in tempo reale: plugin che
+// pingano ogni 5s e timeout 15s, cioe' 3 ping mancati consecutivi.
+// Sul campo si e' rivelato troppo stretto. Nella sessione 5BII del
+// 2026-09-28 (26 macchine, 89 minuti) ha prodotto 1126 eventi
+// stopped/resumed, meta' di tutti gli eventi watchdog, piu' 72 allarmi
+// `critical` "all-stopped": l'allarme piu' grave del sistema che scattava
+// quasi una volta al minuto senza che nessuno avesse killato niente.
+//
+// Distribuzione misurata dei 521 cicli stopped -> resumed completati:
+// mediana 20s, 75° percentile 35s, 90° 64s, massimo 248s. Con 60s l'88%
+// di quei cicli rientra prima di far scattare l'allarme.
+//
+// Nota: questo abbassa il rumore, NON risolve la causa. Una coda lunga di
+// plugin fermi per minuti interi resta, e va indagata a parte (PowerShell
+// descheduled? Deep Freeze? riavvii?). Il timeout piu' largo serve a far
+// tornare significativo l'allarme, non a nasconderlo.
 const (
 	// HeartbeatTimeout: dopo questo tempo senza heartbeat di un plugin
 	// ENABLED, se l'IP e' ancora "alive" (proxy ping), Planck
 	// considera lo studente abbia killato il watchdog.
-	HeartbeatTimeout = 15 * time.Second
+	HeartbeatTimeout = 60 * time.Second
 	// HeartbeatCheckInterval: periodo del controllo server-side.
 	HeartbeatCheckInterval = 5 * time.Second
 	// ProxyRemovedGrace: finestra silenzio post Remove proxy. In questa

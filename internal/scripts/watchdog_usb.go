@@ -29,6 +29,23 @@ $ignoredClasses = @(__IGNORED_CLASSES__)
 # Allowlist VID:PID (formato "1234:5678") per device legittimi.
 $allowVidPid = @(__ALLOW_VID_PID__)
 
+# Prefissi di InstanceId segnalati SEMPRE, anche se la loro classe PnP e'
+# fra quelle ignorate.
+#
+# Serve perche' su Windows una chiavetta USB si presenta con classe
+# 'DiskDrive', la stessa del disco interno: ignorare la classe (come
+# facciamo, giustamente, per non urlare a ogni boot) rendeva impossibile
+# rilevare una chiavetta. L'unico discriminante affidabile e'
+# l'enumeratore: le unita' rimovibili USB stanno sotto USBSTOR\.
+$forcePrefixes = @('USBSTOR\')
+
+function Test-Forzato([string]$instanceId) {
+    foreach ($p in $forcePrefixes) {
+        if ($instanceId -like "$p*") { return $true }
+    }
+    return $false
+}
+
 function Get-VidPid([string]$instanceId) {
     if ($instanceId -match 'VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})') {
         return ($matches[1] + ':' + $matches[2]).ToLower()
@@ -38,7 +55,7 @@ function Get-VidPid([string]$instanceId) {
 
 function Get-InterestingPnp {
     Get-PnpDevice -PresentOnly -Status OK 2>$null |
-        Where-Object { $_.Class -and ($_.Class -notin $ignoredClasses) } |
+        Where-Object { (Test-Forzato $_.InstanceId) -or ($_.Class -and ($_.Class -notin $ignoredClasses)) } |
         Where-Object { $vp = Get-VidPid $_.InstanceId; $vp -eq '' -or $allowVidPid -notcontains $vp } |
         Select-Object InstanceId, Class, FriendlyName
 }
@@ -61,7 +78,7 @@ function Send-Event($action, $device) {
 }
 
 # Heartbeat: ogni iterazione del loop principale segnala a Planck
-# che siamo vivi. Soglia server-side: HeartbeatTimeout (~90s).
+# che siamo vivi. Soglia server-side: HeartbeatTimeout (60s).
 $heartbeatUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/heartbeat"
 function Send-Heartbeat {
     try {

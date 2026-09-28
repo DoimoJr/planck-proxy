@@ -5,6 +5,81 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.31] — 2026-09-28
+
+Tarature dalla prima sessione reale analizzata a fondo: 5BII del 2026-09-28,
+26 macchine, 89 minuti, 2135 richieste e 2121 eventi watchdog. Effetto
+complessivo misurato su quei dati: **2121 eventi watchdog -> 350, -83%**.
+
+### Risolto
+
+- **Heartbeat troppo stretto: 1126 eventi su 2121 erano falsi positivi.**
+  `HeartbeatTimeout` passa da 15s a 60s. Il valore viene dai dati, non a
+  intuito: sui 521 cicli stopped -> resumed completati la mediana e' 20s e il
+  90° percentile 64s, quindi a 60s l'88% rientra prima dell'allarme. Prima
+  bastavano tre battiti persi (PowerShell descheduled, POST lento) per
+  dichiarare morto un plugin, e scattavano 72 allarmi `critical`
+  "all-stopped" — l'allarme piu' grave del sistema, quasi una volta al
+  minuto, senza che nessuno avesse killato niente.
+
+  Non risolve la causa: il massimo misurato e' 248s, quindi una coda di
+  plugin davvero fermi per minuti resta e va indagata a parte. Il timeout
+  piu' largo serve a rendere di nuovo significativo l'allarme.
+
+- **Process watchdog: 988 eventi su 1000 erano Firefox.** I browser moderni
+  sono multi-processo, ogni scheda e' un `firefox.exe` distinto, e il
+  tracking per PID produceva una raffica a ogni apertura. Ora il conteggio e'
+  per nome: comparsa = un evento, scomparsa dell'ultima istanza = un altro.
+  Il segnale utile sepolto sotto quel rumore era cmd (6) e Taskmgr (4).
+
+- **Il plugin USB non poteva rilevare una chiavetta.** `DiskDrive` e' nella
+  lista di classi ignorate — giustamente, e' anche il disco interno — ma su
+  Windows una chiavetta USB si presenta con la stessa classe. Aggiunta
+  un'eccezione sull'enumeratore: tutto cio' che sta sotto `USBSTOR\` viene
+  segnalato comunque. Nei 277 eventi USB della sessione non c'era una sola
+  chiavetta: erano stampanti di rete Kyocera (76), volumi e copie shadow
+  (38), miniport WAN e schede virtuali (16), code di stampa (12). Quelle
+  classi ora sono escluse.
+
+- **PizzaGPT passava come traffico qualunque.** `pizzagpt.it` e' un frontend
+  italiano di ChatGPT senza registrazione — esattamente cio' che uno studente
+  trova cercando "chatgpt gratis" — e non era in lista. Aggiunto insieme a
+  `chatgpt-italia.it` e `chatgptitaliano.net`. Essendo in `data/ai-domains.txt`
+  arriva a tutte le installazioni al prossimo boot, senza aggiornare il binario.
+
+- **Il 38% del traffico era infrastruttura scolastica contata come attivita'
+  dello studente.** Nessuna richiesta era classificata `sistema`: i ~180
+  pattern sono tarati su ad tech consumer, mentre il rumore reale era il
+  firewall d'istituto (243 richieste), Deep Freeze (150), la telemetria di
+  VS Code (108), la CDN Azure (132), i link `aka.ms` (87). Aggiunti ai domini
+  ignorati.
+
+- **Eskimi classificato come possibile AI.** L'euristica di
+  `analizzasessione` lo proponeva per via del nome, ma e' una DSP
+  pubblicitaria. Finito in `PatternSistema` con le altre reti viste sul campo.
+
+### Note
+
+- **Le migration servivano, i default non bastavano.** Sia i domini ignorati
+  sia la config dei plugin sono persistiti nel DB e **vincono sui default del
+  codice**: sulle installazioni gia' avviate, cambiare solo `DefaultConfig`
+  non avrebbe avuto alcun effetto. Da qui la migration v4 (inserisce i domini
+  con `INSERT OR IGNORE`) e la v5 (cancella la riga `watchdog_config` di usb
+  perche' riparta dai default nuovi). Essendo versionate girano una volta
+  sola, quindi rimuovere in seguito un dominio dalla UI resta definitivo.
+
+- La migration v5 riporta il plugin USB al suo stato di default, cioe'
+  disabilitato. Chi lo vuole attivo deve riattivarlo e ridistribuire il proxy.
+
+- Le modifiche agli script studente hanno effetto solo alla prossima
+  **Distribuisci proxy**: gli script gia' sui PC continuano con la logica
+  precedente.
+
+- Gli script PowerShell non sono eseguibili dalla toolchain Go, quindi il
+  nuovo `watchdog_test.go` verifica staticamente cio' che si puo': segnaposto
+  sostituiti, funzioni chiave presenti, parentesi e graffe bilanciate. Uno
+  script rotto non e' rumoroso — i plugin semplicemente smettono di riportare.
+
 ## [v2.9.30] — 2026-09-28
 
 ### Note

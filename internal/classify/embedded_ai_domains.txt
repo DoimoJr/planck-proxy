@@ -154,3 +154,13 @@ elicit.com
 elicit.org
 scite.ai
 researchrabbit.ai
+
+# === Frontend/proxy italiani di ChatGPT (niente registrazione) ===
+# Trovati sul campo: nella sessione 5BII del 2026-09-28 pizzagpt.it e'
+# passato come traffico utente qualunque perche' non era in lista. Sono
+# gateway che girano le domande a un modello OpenAI senza account, quindi
+# esattamente cio' che uno studente trova cercando "chatgpt senza
+# registrazione".
+pizzagpt.it
+chatgpt-italia.it
+chatgptitaliano.net

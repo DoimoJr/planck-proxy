@@ -56,6 +56,19 @@ var dominiIgnoratiDefault = []string{
 	"activity.windows.com",
 	"edge.microsoft.com",
 	"msedge.api.cdp.microsoft.com",
+	// Rumore di infrastruttura scolastica misurato sulla sessione reale
+	// del 2026-09-28: 38% delle richieste. Per le installazioni gia'
+	// esistenti gli stessi domini arrivano dalla migration v4 (il DB
+	// salvato vince sui default, quindi questi da soli non basterebbero).
+	"vo.msecnd.net",
+	"api.faronics.com",
+	"upd.faronicslabs.com",
+	"dc.services.visualstudio.com",
+	"aka.ms",
+	"targetednotifications-tm.trafficmanager.net",
+	"firefox-portal-detection.com",
+	"vscode-unpkg.net",
+	"dl.google.com",
 }
 
 // State e' lo stato condiviso del processo Planck.

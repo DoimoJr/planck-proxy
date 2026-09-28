@@ -44,8 +44,16 @@ func (UsbPlugin) DefaultConfig() any {
 			"USB", // root hub
 			"Bluetooth",
 			"AudioEndpoint", "MEDIA",
-			"System", "DiskDrive", // disco interno
+			"System", "DiskDrive", // disco interno — ma vedi USBSTOR sotto
 			"Battery", "Processor", "Computer",
+			// Aggiunte dopo la sessione 5BII del 2026-09-28: 277 eventi
+			// USB, zero chiavette. Erano stampanti di rete Kyocera (76),
+			// volumi e copie shadow (38), miniport WAN e schede virtuali
+			// (16), code di stampa (12).
+			"SoftwareDevice", "SoftwareComponent",
+			"Volume", "VolumeSnapshot",
+			"Printer", "PrintQueue", "WSDPrintDevice",
+			"Net", "NetTrans", "NetService", "NetClient",
 		},
 		AllowVidPid: []string{},
 	}

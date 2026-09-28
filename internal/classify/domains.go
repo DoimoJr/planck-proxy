@@ -244,6 +244,11 @@ var PatternSistema = []string{
 	"adx.opera.com", "oa.opera.com",
 	"ads.linkedin.com", "ads.unity3d.com", "config.uca.cloud.unity3d.com",
 	".astra.dell.com",
+	// Scoperti nella sessione 5BII del 2026-09-28. eskimi.com e' una DSP
+	// lituana: l'euristica di analizzasessione la proponeva come candidato
+	// AI per via del pattern nel nome, ma e' ad tech.
+	".eskimi.com", ".e-planning.net", ".stickyadstv.com",
+	".creative-serving.com", ".indexww.com",
 
 	// ---------- Adobe check-ins / DTM (Reader, Acrobat, Experience Platform) ----------
 	"acroipm", "armmf.adobe.com", "ardownload", ".adobedtm.com",

@@ -2,6 +2,33 @@ package classify
 
 import "testing"
 
+// TestClassificaTrovateSulCampo blocca le regressioni sui domini emersi da
+// sessioni reali, dove erano sfuggiti alla classificazione.
+//
+// Sessione 5BII del 2026-09-28: pizzagpt.it (frontend italiano di ChatGPT
+// senza registrazione) era passato come traffico utente qualunque, mentre
+// eskimi.com — una rete pubblicitaria — veniva proposto come candidato AI
+// dall'euristica di analizzasessione.
+func TestClassificaTrovateSulCampo(t *testing.T) {
+	ai := []string{"pizzagpt.it", "t.pizzagpt.it", "www.pizzagpt.it"}
+	for _, d := range ai {
+		if got := Classifica(d); got != TipoAI {
+			t.Errorf("Classifica(%q) = %q, atteso %q", d, got, TipoAI)
+		}
+	}
+	// Ad tech: rumore, non AI e non attivita' dello studente.
+	sistema := []string{"ittpx.eskimi.com", "dsp-ap.eskimi.com"}
+	for _, d := range sistema {
+		if got := Classifica(d); got != TipoSistema {
+			t.Errorf("Classifica(%q) = %q, atteso %q", d, got, TipoSistema)
+		}
+	}
+	// La piattaforma didattica dell'istituto resta attivita' legittima.
+	if got := Classifica("moodle.maxplanck.edu.it"); got != TipoUtente {
+		t.Errorf("Classifica(moodle) = %q, atteso %q", got, TipoUtente)
+	}
+}
+
 // TestClassificaAI verifica che i domini noti AI (substring match) siano
 // classificati come TipoAI.
 func TestClassificaAI(t *testing.T) {

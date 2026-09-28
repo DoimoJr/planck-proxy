@@ -147,4 +147,57 @@ CREATE TABLE bloccati_per_ip (
 CREATE INDEX idx_bloccati_per_ip_ip ON bloccati_per_ip(ip);
 `,
 	},
+	{
+		Version: 4,
+		Name:    "ignorati_infrastruttura_scolastica",
+		SQL: `
+-- ==========================================================
+-- Rumore di infrastruttura scolastica, dalla sessione reale del
+-- 2026-09-28 (5BII, 89 minuti, 2135 richieste): questi domini pesavano
+-- 817 richieste, il 38% del traffico, e finivano tutti nei conteggi
+-- per studente perche' nessun PATTERN_SISTEMA li intercettava.
+--
+-- INSERT OR IGNORE + migration versionata: gira una volta sola, quindi
+-- se in futuro rimuovi uno di questi dalla UI non te lo ritrovi al
+-- riavvio successivo.
+--
+-- Nota: firewall.maxplanck.* e' specifico di questo istituto. Resta qui
+-- perche' il binario nasce per quella scuola; su un'altra installazione
+-- e' semplicemente un dominio che non comparira' mai.
+-- ==========================================================
+INSERT OR IGNORE INTO domini_ignorati (dominio) VALUES
+    ('firewall.maxplanck.edu.it'),      -- firewall/captive portal d'istituto (199 richieste)
+    ('firewall.maxplanck.it'),          -- stesso, secondo hostname (44)
+    ('vo.msecnd.net'),                  -- CDN Azure, match per sottostringa (132)
+    ('api.faronics.com'),               -- Deep Freeze, gestione laboratorio (75)
+    ('upd.faronicslabs.com'),           -- Deep Freeze, canale aggiornamenti (75)
+    ('dc.services.visualstudio.com'),   -- telemetria Application Insights di VS Code (108)
+    ('aka.ms'),                         -- short link Microsoft, usati da VS Code (87)
+    ('targetednotifications-tm.trafficmanager.net'), -- notifiche Microsoft (46)
+    ('firefox-portal-detection.com'),   -- captive portal detection di Firefox (23)
+    ('vscode-unpkg.net'),               -- CDN estensioni VS Code (18)
+    ('dl.google.com');                  -- aggiornamenti Chrome/Google (10)
+`,
+	},
+	{
+		Version: 5,
+		Name:    "usb_classi_rumorose",
+		SQL: `
+-- ==========================================================
+-- Stessa sessione: il plugin USB ha prodotto 277 eventi e rilevato zero
+-- chiavette. Erano stampanti di rete, volumi, copie shadow, miniport WAN
+-- e code di stampa — classi PnP che non erano nella lista di esclusione.
+--
+-- Serve una migration e non basta cambiare DefaultConfig: la config
+-- salvata in watchdog_config vince sui default, quindi sulle
+-- installazioni gia' avviate i nuovi valori non arriverebbero mai.
+--
+-- Cancelliamo la riga invece di riscriverne il JSON: al prossimo
+-- LoadWatchdogConfig il plugin riparte dal DefaultConfig aggiornato, che
+-- include anche l'eccezione USBSTOR per le chiavette vere. Si perde una
+-- eventuale allowlist VID:PID personalizzata, che nella pratica e' vuota.
+-- ==========================================================
+DELETE FROM watchdog_config WHERE plugin = 'usb';
+`,
+	},
 }

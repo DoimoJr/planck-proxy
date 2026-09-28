@@ -16,10 +16,17 @@ import (
 const processWatchdogTemplate = `# ============================================================
 # Planck watchdog Process - PowerShell 5.1 polling 5s
 # ============================================================
-# Genera un evento "started" la prima volta che un processo della
-# denylist appare nei processi attivi (e "stopped" alla scomparsa).
-# La denylist e' hardcoded — la versione configurabile arrivera'
-# quando il plugin avra' una sezione Settings UI dedicata.
+# Genera un evento "started" quando un processo della denylist compare,
+# e "stopped" quando l'ultima sua istanza sparisce.
+#
+# Il conteggio e' per NOME, non per PID. I browser moderni sono
+# multi-processo: ogni scheda di Firefox e' un firefox.exe distinto, e
+# tracciare i PID produceva una raffica di eventi per ogni apertura.
+# Misurato nella sessione 5BII del 2026-09-28: 988 eventi su 1000 erano
+# firefox, con tre PID avviati nello stesso secondo e due terminati un
+# minuto dopo. Il segnale utile in mezzo era cmd (6) e Taskmgr (4).
+#
+# Contando per nome, aprire il browser = un evento, chiuderlo = un altro.
 # ============================================================
 
 $plancUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/event"
@@ -46,13 +53,14 @@ function Test-Suspect($procName) {
     return $denyListNorm -contains $clean
 }
 
-function Send-Event($action, $proc) {
+function Send-Event($action, $nome, $istanze, $primoPid) {
     $payload = @{
         plugin  = 'process'
         payload = @{
-            action = $action
-            name   = $proc.Name
-            pid    = $proc.Id
+            action  = $action
+            name    = $nome
+            pid     = $primoPid
+            istanze = $istanze
         }
     } | ConvertTo-Json -Compress -Depth 4
     try {
@@ -67,12 +75,33 @@ function Send-Heartbeat {
     } catch {}
 }
 
-# Snapshot iniziale: i processi gia' presenti al boot (eg cmd lanciato
-# dal docente per debug) non sono "started".
-$baseline = @{}
-foreach ($p in Get-Process) {
-    if (Test-Suspect $p.Name) { $baseline[$p.Id] = $p }
+# Conta le istanze per nome sospetto:
+#   @{ 'firefox' = @{ n = 3; primoPid = 1284; nome = 'firefox' } }
+#
+# La chiave si chiama primoPid e non pid perche' $PID e' una variabile
+# automatica di PowerShell (il processo corrente): un nome diverso evita
+# ogni ambiguita' per chi legge. L'incremento passa da una variabile
+# intermedia invece di $mappa[$k].n++, che su un hashtable annidato e'
+# corretto ma si legge male e si rompe in silenzio se qualcuno lo tocca.
+function Get-SospettiPerNome {
+    $mappa = @{}
+    foreach ($p in Get-Process) {
+        if (Test-Suspect $p.Name) {
+            $k = Strip-Exe $p.Name
+            if ($mappa.ContainsKey($k)) {
+                $voce = $mappa[$k]
+                $voce.n = $voce.n + 1
+            } else {
+                $mappa[$k] = @{ n = 1; primoPid = $p.Id; nome = $p.Name }
+            }
+        }
+    }
+    return $mappa
 }
+
+# Snapshot iniziale: quello che gia' gira al boot (es. un cmd aperto dal
+# docente) non conta come "started".
+$baseline = Get-SospettiPerNome
 
 $heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
 $stopFlag = Join-Path $env:TEMP 'planck_stop.flag'
@@ -81,18 +110,17 @@ while ($true) {
     if (Test-Path $stopFlag) { exit 0 }
     Start-Sleep -Seconds 5
     if (Test-Path $stopFlag) { exit 0 }
-    $current = @{}
-    foreach ($p in Get-Process) {
-        if (Test-Suspect $p.Name) {
-            $current[$p.Id] = $p
-            if (-not $baseline.ContainsKey($p.Id)) {
-                Send-Event 'started' $p
-            }
+    $current = Get-SospettiPerNome
+    # Comparsa: il nome non c'era e ora c'e' (0 -> N istanze).
+    foreach ($k in @($current.Keys)) {
+        if (-not $baseline.ContainsKey($k)) {
+            Send-Event 'started' $current[$k].nome $current[$k].n $current[$k].primoPid
         }
     }
-    foreach ($key in @($baseline.Keys)) {
-        if (-not $current.ContainsKey($key)) {
-            Send-Event 'stopped' $baseline[$key]
+    # Scomparsa: era presente e ora non c'e' piu' nessuna istanza (N -> 0).
+    foreach ($k in @($baseline.Keys)) {
+        if (-not $current.ContainsKey($k)) {
+            Send-Event 'stopped' $baseline[$k].nome 0 $baseline[$k].primoPid
         }
     }
     $baseline = $current

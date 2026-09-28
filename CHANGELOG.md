@@ -5,6 +5,60 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.26] — 2026-09-28
+
+### Risolto
+
+- **Editor config watchdog inutilizzabile**: `renderWatchdogPluginsList`
+  faceva `root.textContent = ''` e ricostruiva ogni blocco da zero a
+  ogni `renderAll`. Un `<details>` ricreato nasce chiuso, quindi
+  "Modifica configurazione (JSON)" si richiudeva da solo — anche a
+  sistema fermo, perche' `app.js` ha un `setInterval(renderAll, 5000)`.
+  Il testo in corso di modifica veniva sovrascritto col valore del
+  server e il focus tornava al body.
+
+  Ora i nodi vengono riusati per `plugin.id` via `syncChildren` (lo
+  stesso idioma gia' usato nella Live tab), spezzando la funzione in
+  `creaBloccoPlugin` (costruisce una volta) e `aggiornaBloccoPlugin`
+  (tocca solo cio' che cambia). Tre invarianti: lo stato aperto/chiuso
+  del `<details>` non viene mai toccato, la checkbox non viene toccata
+  mentre ha il focus, la textarea non viene sovrascritta se contiene
+  modifiche non salvate (`dataset.serverValue` ricorda l'ultimo JSON
+  del server e risincronizza solo se combacia ancora).
+
+- **Click perso sul bottone "Apri log"**: `renderAlertBanner` riscriveva
+  `innerHTML` a ogni render, distruggendo e ricreando il bottone. Un
+  click il cui mousedown/mouseup cade a cavallo del rebuild non genera
+  mai l'evento `click`. Aggiunta guardia `dataset.lastKey` sulla firma
+  del contenuto, come gia' fatto per selection-bar, detail-pane e
+  log-pane in v2.9.7/v2.9.13.
+
+- **Edit della config perso fra il blur e il click su Salva**:
+  `watchdogSaveConfig` legge `ta.value` dentro l'handler del click, ma
+  un render capitato dopo il blur della textarea azzerava il contenuto
+  prima che l'handler potesse leggerlo. La guardia sulle modifiche non
+  salvate copre anche questo caso; dopo un salvataggio riuscito il
+  marcatore viene sganciato cosi' il render successivo puo' riallineare
+  la textarea al JSON canonico del server.
+
+### Cambiato
+
+- Guardie `dataset.lastKey` estese agli altri renderer che ricostruivano
+  liste cliccabili a ogni `renderAll`: domini ignorati (bottoni X),
+  archivio sessioni (voci "Apri" + bottoni "Elimina"), select
+  dell'archivio (ricostruirlo sotto il cursore chiude il dropdown) e
+  stato della lista AI.
+
+### Note
+
+- `renderFocus` risulta codice morto: `panel-ip-titolo` non esiste piu'
+  nell'HTML dopo il redesign, quindi la funzione esce sempre subito.
+  Lasciata invariata, da valutare se rimuoverla.
+
+- `internal/web/api_test.go:260` non compila (`api.handleStudentSet`
+  non esiste piu'): `go test ./...` fallisce su quel package gia' da
+  prima di questa release. Non toccato.
+
 ## [v2.9.25] — 2026-05-07
 
 ### Aggiunto

@@ -1480,6 +1480,12 @@ export function renderImpostazioni() {
 
     aggiornaSelectSessioniArchivio();
     const sessioniEl = $('sessioni-list');
+    // Guardia lastKey: ogni voce e' cliccabile ("Apri") e porta un bottone
+    // "Elimina"; senza, venivano ricreati a ogni renderAll mentre si e' sul
+    // tab Impostazioni, e il click si perdeva.
+    const keySess = state.sessioniArchivio.map(s => sessInfo(s).filename).join('|');
+    if (sessioniEl.dataset.lastKey === keySess) return;
+    sessioniEl.dataset.lastKey = keySess;
     sessioniEl.innerHTML = state.sessioniArchivio.length > 0
         ? state.sessioniArchivio.map(s => {
             const i = sessInfo(s);
@@ -1517,6 +1523,11 @@ function sessInfo(s) {
 function aggiornaSelectSessioniArchivio() {
     const select = $('report-sessione-select');
     if (!select) return;
+    // Guardia lastKey: ricostruire un <select> sotto il cursore chiude il
+    // dropdown se e' aperto e fa perdere il click sull'opzione.
+    const key = state.sessioniArchivio.map(s => sessInfo(s).filename).join('|');
+    if (select.dataset.lastKey === key) return;
+    select.dataset.lastKey = key;
     const valSel = select.value;
     select.innerHTML = '<option value="">-- Sessione corrente --</option>'
         + state.sessioniArchivio.map(s => {
@@ -1531,6 +1542,11 @@ function renderIgnorati() {
     const el = $('ignorati-list');
     if (!el) return;
     const lista = state.settings?.dominiIgnorati || [];
+    // Guardia lastKey: la lista cambia solo su azione esplicita, ma senza
+    // questo veniva ricostruita a ogni renderAll insieme ai bottoni X.
+    const key = lista.join('|');
+    if (el.dataset.lastKey === key) return;
+    el.dataset.lastKey = key;
     el.innerHTML = lista.length > 0
         ? lista.map(d => `<li>
             <span class="dominio">${escapeHtml(d)}</span>
@@ -1562,8 +1578,12 @@ export function renderAIListStatus() {
     const a = state.aiList || {};
     if (!a.count) {
         el.textContent = 'caricamento...';
+        delete el.dataset.lastKey;
         return;
     }
+    const key = [a.count, a.source, a.updatedAt].join('|');
+    if (el.dataset.lastKey === key) return;
+    el.dataset.lastKey = key;
     const sourceLabel = {
         embedded: 'integrata nel binario',
         cache:    'cache locale',
@@ -1585,74 +1605,144 @@ export function renderAIListStatus() {
 export function renderWatchdogPluginsList() {
     const root = $('watchdog-plugins-list');
     if (!root) return;
-    root.textContent = '';
-    if (!state.watchdogPlugins.length) {
-        const p = document.createElement('p'); p.className = 'hint';
-        p.textContent = 'Nessun plugin registrato.';
-        root.appendChild(p);
+
+    const plugins = state.watchdogPlugins || [];
+
+    if (!plugins.length) {
+        if (root.dataset.vuoto !== '1') {
+            root.textContent = '';
+            const p = document.createElement('p');
+            p.className = 'hint';
+            p.textContent = 'Nessun plugin registrato.';
+            root.appendChild(p);
+            root.dataset.vuoto = '1';
+        }
         return;
     }
-    for (const plugin of state.watchdogPlugins) {
-        const wrap = document.createElement('div');
-        wrap.className = 'watchdog-plugin' + (plugin.enabled ? ' enabled' : '');
-        const head = document.createElement('div');
-        head.className = 'watchdog-plugin-head';
-        const toggle = document.createElement('label');
-        toggle.className = 'watchdog-toggle';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!plugin.enabled;
-        cb.dataset.action = 'watchdog-toggle';
-        cb.dataset.plugin = plugin.id;
-        const span = document.createElement('span');
-        span.textContent = plugin.name;
-        toggle.appendChild(cb);
-        toggle.appendChild(span);
-        head.appendChild(toggle);
-        const status = document.createElement('span');
-        status.className = 'watchdog-status';
-        status.textContent = plugin.enabled ? 'attivo' : 'inattivo';
-        head.appendChild(status);
-        wrap.appendChild(head);
-        const desc = document.createElement('p');
-        desc.className = 'hint';
-        desc.textContent = plugin.description;
-        wrap.appendChild(desc);
-
-        // Config editor (collapsable). Le modifiche entrano in vigore
-        // alla prossima Distribuisci proxy_on (gli studenti riscaricano
-        // lo script con la nuova config).
-        const det = document.createElement('details');
-        det.className = 'watchdog-config-editor';
-        const sum = document.createElement('summary');
-        sum.textContent = 'Modifica configurazione (JSON)';
-        det.appendChild(sum);
-        const ta = document.createElement('textarea');
-        ta.className = 'watchdog-config-json';
-        ta.dataset.plugin = plugin.id;
-        ta.spellcheck = false;
-        ta.rows = 6;
-        ta.value = JSON.stringify(plugin.config || {}, null, 2);
-        det.appendChild(ta);
-        const btnRow = document.createElement('div');
-        btnRow.className = 'toolbar-group';
-        const btnSave = document.createElement('button');
-        btnSave.className = 'btn btn-primary';
-        btnSave.dataset.action = 'watchdog-save-config';
-        btnSave.dataset.plugin = plugin.id;
-        btnSave.textContent = 'Salva configurazione';
-        const btnReset = document.createElement('button');
-        btnReset.className = 'btn';
-        btnReset.dataset.action = 'watchdog-reset-config';
-        btnReset.dataset.plugin = plugin.id;
-        btnReset.textContent = 'Ripristina default';
-        btnRow.appendChild(btnSave);
-        btnRow.appendChild(btnReset);
-        det.appendChild(btnRow);
-        wrap.appendChild(det);
-
-        root.appendChild(wrap);
+    if (root.dataset.vuoto === '1') {
+        root.textContent = '';
+        delete root.dataset.vuoto;
     }
+
+    // Nodi riusati per `plugin.id` invece di `root.textContent = ''` + rebuild.
+    // Questo blocco contiene stato dell'UTENTE che un rebuild distruggeva a
+    // ogni render (ogni 5s anche a sistema fermo): il <details> aperto si
+    // richiudeva da solo, il JSON in corso di modifica veniva sovrascritto e
+    // il focus tornava al body. Vedi `aggiornaBloccoPlugin` per le regole di
+    // aggiornamento che rispettano l'editing in corso.
+    syncChildren(root, plugins, p => p.id, creaBloccoPlugin, aggiornaBloccoPlugin);
+}
+
+/**
+ * Costruisce (una sola volta per plugin) il blocco DOM: toggle, stato,
+ * descrizione e l'editor di configurazione collassabile.
+ * I valori variabili li riempie `aggiornaBloccoPlugin`.
+ * @param {Object} plugin
+ * @returns {HTMLElement}
+ */
+function creaBloccoPlugin(plugin) {
+    const wrap = document.createElement('div');
+    wrap.className = 'watchdog-plugin';
+
+    const head = document.createElement('div');
+    head.className = 'watchdog-plugin-head';
+
+    const toggle = document.createElement('label');
+    toggle.className = 'watchdog-toggle';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.action = 'watchdog-toggle';
+    cb.dataset.plugin = plugin.id;
+    const span = document.createElement('span');
+    toggle.appendChild(cb);
+    toggle.appendChild(span);
+    head.appendChild(toggle);
+
+    const status = document.createElement('span');
+    status.className = 'watchdog-status';
+    head.appendChild(status);
+    wrap.appendChild(head);
+
+    const desc = document.createElement('p');
+    desc.className = 'hint';
+    wrap.appendChild(desc);
+
+    // Config editor (collapsable). Le modifiche entrano in vigore
+    // alla prossima Distribuisci proxy_on (gli studenti riscaricano
+    // lo script con la nuova config).
+    const det = document.createElement('details');
+    det.className = 'watchdog-config-editor';
+    const sum = document.createElement('summary');
+    sum.textContent = 'Modifica configurazione (JSON)';
+    det.appendChild(sum);
+
+    const ta = document.createElement('textarea');
+    ta.className = 'watchdog-config-json';
+    ta.dataset.plugin = plugin.id;
+    ta.spellcheck = false;
+    ta.rows = 6;
+    det.appendChild(ta);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'toolbar-group';
+    const btnSave = document.createElement('button');
+    btnSave.className = 'btn btn-primary';
+    btnSave.dataset.action = 'watchdog-save-config';
+    btnSave.dataset.plugin = plugin.id;
+    btnSave.textContent = 'Salva configurazione';
+    const btnReset = document.createElement('button');
+    btnReset.className = 'btn';
+    btnReset.dataset.action = 'watchdog-reset-config';
+    btnReset.dataset.plugin = plugin.id;
+    btnReset.textContent = 'Ripristina default';
+    btnRow.appendChild(btnSave);
+    btnRow.appendChild(btnReset);
+    det.appendChild(btnRow);
+    wrap.appendChild(det);
+
+    return wrap;
+}
+
+/**
+ * Aggiorna in place un blocco plugin gia' montato. Tocca solo cio' che e'
+ * davvero cambiato, e in particolare NON tocca:
+ * - lo stato aperto/chiuso del <details> (e' una scelta dell'utente);
+ * - la checkbox mentre ha il focus;
+ * - la textarea se contiene modifiche non salvate.
+ *
+ * `dataset.serverValue` ricorda l'ultimo JSON arrivato dal server: la
+ * textarea viene risincronizzata solo se il suo contenuto combacia ancora,
+ * cioe' se l'utente non ci ha messo mano. Senza questo, un render capitato
+ * fra il blur della textarea e il click su "Salva configurazione" azzerava
+ * l'edit prima che l'handler potesse leggerlo.
+ *
+ * @param {HTMLElement} wrap
+ * @param {Object} plugin
+ */
+function aggiornaBloccoPlugin(wrap, plugin) {
+    wrap.classList.toggle('enabled', !!plugin.enabled);
+
+    const cb = wrap.querySelector('input[data-action="watchdog-toggle"]');
+    if (cb && document.activeElement !== cb && cb.checked !== !!plugin.enabled) {
+        cb.checked = !!plugin.enabled;
+    }
+
+    const span = wrap.querySelector('.watchdog-toggle span');
+    if (span && span.textContent !== plugin.name) span.textContent = plugin.name;
+
+    const status = wrap.querySelector('.watchdog-status');
+    const testoStato = plugin.enabled ? 'attivo' : 'inattivo';
+    if (status && status.textContent !== testoStato) status.textContent = testoStato;
+
+    const desc = wrap.querySelector('p.hint');
+    if (desc && desc.textContent !== plugin.description) desc.textContent = plugin.description;
+
+    const ta = wrap.querySelector('textarea.watchdog-config-json');
+    if (!ta) return;
+    const valoreServer = JSON.stringify(plugin.config || {}, null, 2);
+    const intatta = ta.dataset.serverValue === undefined || ta.value === ta.dataset.serverValue;
+    if (intatta && ta.value !== valoreServer) ta.value = valoreServer;
+    ta.dataset.serverValue = valoreServer;
 }
 
 /**
@@ -1738,6 +1828,7 @@ export function renderAlertBanner() {
     if (agg.total === 0 || state.bannerDismissed) {
         el.classList.add('hidden');
         el.textContent = '';
+        delete el.dataset.lastKey;   // al ritorno del banner va ricostruito
         return;
     }
     el.classList.remove('hidden');
@@ -1755,6 +1846,16 @@ export function renderAlertBanner() {
     const sampleTxt = sample0
         ? `· ${escapeHtml(sample0.who)} → ${escapeHtml(sample0.what)}`
         : '';
+
+    // Firma del contenuto renderizzato. Senza questa guardia `el.innerHTML`
+    // veniva riscritto a OGNI renderAll (ogni 5s da `setInterval` in app.js,
+    // piu' a ogni flush SSE del traffico): il bottone "Apri log" veniva
+    // distrutto e ricreato di continuo, e un click il cui mousedown/mouseup
+    // cade a cavallo del rebuild non genera mai l'evento `click`.
+    const renderKey = [agg.total, agg.aiCount, agg.wdCount, dominant, kind,
+        sample0 ? sample0.id : '', headline].join('|');
+    if (el.dataset.lastKey === renderKey) return;
+    el.dataset.lastKey = renderKey;
 
     const pulseCls = (kind === 'pulse') ? 'pulse' : '';
     const pillAi = agg.aiCount > 0 ? `<span class="pill ${pulseCls}">AI</span>` : '';

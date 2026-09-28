@@ -1104,6 +1104,10 @@ export async function watchdogSaveConfig(pluginId) {
     });
     if (r.ok) {
         plugin.config = cfg;
+        // Sgancia il marcatore "modifiche non salvate": il prossimo render
+        // puo' risincronizzare la textarea col JSON canonico del server.
+        // Vedi `aggiornaBloccoPlugin` in render.js.
+        delete ta.dataset.serverValue;
         toast.success('Config salvata. Per propagarla agli studenti gia\' attivi, ridistribuisci il proxy.');
         renderAll();
     } else {

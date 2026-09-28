@@ -51,22 +51,49 @@ ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Pr
 ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer", ipProf & ":" & portaProxy, "REG_SZ"
 ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyOverride", ipProf & ";localhost;127.0.0.1;<local>", "REG_SZ"
 
-' --- Step 2: kill watchdog precedenti (proxy + plugin) ---
+' --- Step 2: ferma watchdog precedenti via flag self-stop ---
+' Strategia a due livelli:
+'   A) Crea planck_stop.flag → tutti i watchdog (proxy_watchdog.vbs +
+'      i 3 plugin .ps1) lo controllano ad ogni iterazione e EXITano da
+'      soli. Affidabile, indipendente da CommandLine parsing / regex.
+'   B) Aspetta 7s (un ciclo loop dei watchdog = 5s + margine).
+'   C) Kill PowerShell defensivo come backup, per i casi edge in cui
+'      un plugin abbia ignorato il flag (es. sleep lungo). Skippa se
+'      stesso ($_.ProcessId -ne $PID) o si auto-uccide a meta'.
+'   D) Cancella flag prima di lanciare i nuovi watchdog (altrimenti
+'      i nuovi escono subito al primo controllo).
 On Error Resume Next
-ws.Run "wmic process where ""commandline like '%%proxy_watchdog.vbs%%'"" delete", 0, True
-ws.Run "wmic process where ""commandline like '%%planck_%%_watchdog.ps1%%'"" delete", 0, True
+Dim stopF : Set stopF = fso.CreateTextFile(tmpDir & "\planck_stop.flag", True)
+If Not stopF Is Nothing Then stopF.Close
+WScript.Sleep 7000  ' attendi che i watchdog vivi vedano il flag e exit
+ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & _
+    "Get-CimInstance Win32_Process -Filter ""Name='wscript.exe' OR Name='powershell.exe'"" | " & _
+    "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'proxy_watchdog\.vbs|planck_(usb|process|network)_watchdog\.ps1' } | " & _
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""", 0, True
 fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_network_watchdog.ps1", True
+' Cancella il flag DOPO il kill cosi' i nuovi watchdog non lo trovano.
+fso.DeleteFile tmpDir & "\planck_stop.flag", True
 On Error Goto 0
 
 ' --- Step 3: crea + lancia il watchdog VBS proxy/alive ---
+' Il watchdog controlla un flag file (planck_stop.flag) ad ogni iterazione:
+' se proxy_off lo crea, il watchdog ESCE invece di riapplicare il proxy —
+' kill "gentile" che funziona sempre, indipendente dal kill PowerShell
+' che potrebbe fallire su edge case.
 watchdogPath = tmpDir & "\proxy_watchdog.vbs"
 Dim f
 Set f = fso.CreateTextFile(watchdogPath, True)
 f.WriteLine "Set ws = CreateObject(""WScript.Shell"")"
+f.WriteLine "Set fso = CreateObject(""Scripting.FileSystemObject"")"
+f.WriteLine "Dim stopFlag : stopFlag = ws.ExpandEnvironmentStrings(""%TEMP%\planck_stop.flag"")"
 f.WriteLine "Do"
+f.WriteLine "  If fso.FileExists(stopFlag) Then"
+f.WriteLine "    ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable"", 0, ""REG_DWORD"""
+f.WriteLine "    WScript.Quit 0"
+f.WriteLine "  End If"
 f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable"", 1, ""REG_DWORD"""
 f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer"", """ & ipProf & ":" & portaProxy & """, ""REG_SZ"""
 f.WriteLine "  ws.RegWrite ""HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyOverride"", """ & ipProf & ";localhost;127.0.0.1;<local>"", ""REG_SZ"""
@@ -123,41 +150,65 @@ End Sub
 `
 
 // proxyOffTemplate e' il contenuto di proxy_off.vbs.
-// VBScript invece di .bat per essere invisibile sullo studente
-// (subsystem GUI). Uccide il watchdog VBS proxy + i watchdog ps1
-// plugin, disattiva il proxy in HKCU, fa pulizia del temp, self-delete.
+//
+// Sequenza (importante l'ordine):
+//  1. Crea il flag file `planck_stop.flag`. Il watchdog VBS lo controlla
+//     ad ogni iterazione e si auto-termina quando lo trova (kill "gentile",
+//     sempre affidabile, non dipende da WMIC ne' privilegi).
+//  2. Aspetta 6 secondi (un ciclo intero del watchdog = 5s + margine).
+//  3. Disabilita ProxyEnable in HKCU.
+//  4. Kill defensivo via PowerShell (`Get-CimInstance` + `Stop-Process`)
+//     di eventuali processi residui — sostituisce WMIC che e' deprecato/
+//     rimosso in Windows 11 24H2+ e causa il bug "il proxy non si toglie
+//     davvero" perche' il watchdog continuava a girare.
+//  5. Cleanup temp + self-delete.
 const proxyOffTemplate = `' ============================================================
 ' Planck Proxy v__VERSIONE__ - proxy_off.vbs
 ' Disattiva il proxy + ferma tutti i watchdog. Invisibile.
 ' ============================================================
 
 Option Explicit
-Dim ws, fso, tmpDir
+Dim ws, fso, tmpDir, stopFlag
 Set ws = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 tmpDir = ws.ExpandEnvironmentStrings("%TEMP%")
+stopFlag = tmpDir & "\planck_stop.flag"
 
-' --- Step 1: kill watchdog proxy (VBS) ---
-' WMIC filter su CommandLine: kill solo i wscript che girano
-' proxy_watchdog.vbs (NON proxy_off.vbs che siamo noi).
+' --- Step 1: crea flag stop (kill gentile dei watchdog) ---
+' Il watchdog VBS controlla questo file ad ogni loop (~5s) e si auto-
+' termina quando lo trova. Funziona sempre, indipendente da WMIC/
+' PowerShell e da privilegi.
 On Error Resume Next
-ws.Run "wmic process where ""commandline like '%%proxy_watchdog.vbs%%'"" delete", 0, True
-ws.Run "wmic process where ""commandline like '%%planck_%%_watchdog.ps1%%'"" delete", 0, True
+Dim flagF : Set flagF = fso.CreateTextFile(stopFlag, True)
+If Not flagF Is Nothing Then flagF.Close
 On Error Goto 0
 
-' --- Step 2: cleanup temp ---
+' --- Step 2: aspetta che il watchdog veda il flag (1 ciclo + margine) ---
+WScript.Sleep 6000
+
+' --- Step 3: disabilita proxy in HKCU ---
+On Error Resume Next
+ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 0, "REG_DWORD"
+On Error Goto 0
+
+' --- Step 4: kill defensivo via PowerShell (sostituisce WMIC deprecato) ---
+' Targetting per CommandLine: ammazza solo i processi che eseguono
+' proxy_watchdog.vbs o planck_*_watchdog.ps1, NON proxy_off.vbs (noi).
+' Skip self via $PID (vedi commento in proxy_on.vbs Step 2).
+On Error Resume Next
+ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & _
+    "Get-CimInstance Win32_Process -Filter ""Name='wscript.exe' OR Name='powershell.exe'"" | " & _
+    "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'proxy_watchdog\.vbs|planck_(usb|process|network)_watchdog\.ps1' } | " & _
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""", 0, True
+On Error Goto 0
+
+' --- Step 5: cleanup temp + flag stop + self-delete ---
 On Error Resume Next
 fso.DeleteFile tmpDir & "\proxy_watchdog.vbs", True
 fso.DeleteFile tmpDir & "\planck_usb_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_process_watchdog.ps1", True
 fso.DeleteFile tmpDir & "\planck_network_watchdog.ps1", True
-On Error Goto 0
-
-' --- Step 3: disabilita proxy ---
-ws.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 0, "REG_DWORD"
-
-' --- Step 4: self-delete ---
-On Error Resume Next
+fso.DeleteFile stopFlag, True
 fso.DeleteFile WScript.ScriptFullName, True
 On Error Goto 0
 

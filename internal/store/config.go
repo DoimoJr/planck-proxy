@@ -24,20 +24,22 @@ type ConfigFile struct {
 	AuthUser            string   `json:"authUser"`
 	AuthPasswordHash    string   `json:"authPasswordHash"`
 	DominiIgnorati      []string `json:"dominiIgnorati"`
-	// VeyonKeyName e' il nome della master key importata dal docente
-	// via Settings UI (Phase 3e). Vuoto = Veyon non configurato. La
-	// chiave privata vive su disco in `<dataDir>/veyon-master.pem`,
-	// non in DB (per separare segreti da config).
-	VeyonKeyName string `json:"veyonKeyName"`
 	// VeyonPort e' la porta TCP dei veyon-server studente. 0 = default 11100.
 	VeyonPort int `json:"veyonPort"`
+	// DiscoverVeyonOnly: se true, lo scan LAN considera vivi SOLO i PC
+	// con :11100 aperto (Veyon Service installato). Se false, accetta
+	// anche :445 e :135. Default true (lab scolastici).
+	DiscoverVeyonOnly bool `json:"discoverVeyonOnly"`
+	// NOTE: VeyonKeyName non e' piu' persistita (era kvKeys.VeyonKeyName).
+	// La chiave master e' importata da veyon-cli ad ogni boot, in-memory.
 }
 
 // kvKeys e' la lista dei campi mappata su chiavi `kv`.
 var kvKeys = struct {
 	Titolo, Classe, Modo, InattivitaSogliaSec,
 	ProxyPort, WebPort, AuthEnabled, AuthUser,
-	AuthPasswordHash, VeyonKeyName, VeyonPort string
+	AuthPasswordHash, VeyonPort, DiscoverVeyonOnly,
+	DiscoverVeyonOnlySet string
 }{
 	Titolo:              "titolo",
 	Classe:              "classe",
@@ -48,8 +50,11 @@ var kvKeys = struct {
 	AuthEnabled:         "authEnabled",
 	AuthUser:            "authUser",
 	AuthPasswordHash:    "authPasswordHash",
-	VeyonKeyName:        "veyonKeyName",
 	VeyonPort:           "veyonPort",
+	DiscoverVeyonOnly:   "discoverVeyonOnly",
+	// Marker per distinguere "esplicitamente false" da "mai impostato"
+	// (utile dato che il default applicato e' true).
+	DiscoverVeyonOnlySet: "discoverVeyonOnlySet",
 }
 
 // LoadConfig legge tutti i campi config da kv + dominiIgnorati dalla
@@ -81,8 +86,14 @@ func (s *Store) LoadConfig() (ConfigFile, bool, error) {
 	cfg.AuthEnabled, _ = s.kvGetBool(kvKeys.AuthEnabled)
 	cfg.AuthUser, _ = s.kvGetString(kvKeys.AuthUser)
 	cfg.AuthPasswordHash, _ = s.kvGetString(kvKeys.AuthPasswordHash)
-	cfg.VeyonKeyName, _ = s.kvGetString(kvKeys.VeyonKeyName)
 	cfg.VeyonPort, _ = s.kvGetInt(kvKeys.VeyonPort)
+	// DiscoverVeyonOnly: se mai impostato (Set marker false) lascia il default
+	// applicato dal caller (true). Se Set = true, usa il valore salvato.
+	if set, _ := s.kvGetBool(kvKeys.DiscoverVeyonOnlySet); set {
+		cfg.DiscoverVeyonOnly, _ = s.kvGetBool(kvKeys.DiscoverVeyonOnly)
+	} else {
+		cfg.DiscoverVeyonOnly = true // default
+	}
 
 	// Domini ignorati dalla tabella dedicata.
 	rows, err := s.db.Query(`SELECT dominio FROM domini_ignorati ORDER BY dominio`)
@@ -127,8 +138,9 @@ func (s *Store) SaveConfig(cfg ConfigFile) error {
 		{kvKeys.AuthEnabled, cfg.AuthEnabled},
 		{kvKeys.AuthUser, cfg.AuthUser},
 		{kvKeys.AuthPasswordHash, cfg.AuthPasswordHash},
-		{kvKeys.VeyonKeyName, cfg.VeyonKeyName},
 		{kvKeys.VeyonPort, cfg.VeyonPort},
+		{kvKeys.DiscoverVeyonOnly, cfg.DiscoverVeyonOnly},
+		{kvKeys.DiscoverVeyonOnlySet, true},
 	}
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)`)
 	if err != nil {

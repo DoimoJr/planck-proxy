@@ -69,10 +69,13 @@ foreach ($a in Get-UpAdapters) {
     $baseline[$a.ifIndex] = $a
 }
 
-$heartbeatEvery = 6
+$heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
+$stopFlag = Join-Path $env:TEMP 'planck_stop.flag'
 $tick = 0
 while ($true) {
+    if (Test-Path $stopFlag) { exit 0 }
     Start-Sleep -Seconds 5
+    if (Test-Path $stopFlag) { exit 0 }
     $current = @{}
     foreach ($a in Get-UpAdapters) {
         $current[$a.ifIndex] = $a

@@ -24,10 +24,12 @@ type SessionMeta struct {
 	ArchiviataAt    int64             `json:"archiviataAt"`
 }
 
-// SessionWithEntries e' SessionMeta + le entries della sessione.
+// SessionWithEntries e' SessionMeta + le entries (richieste HTTP) + gli
+// eventi watchdog accaduti durante la sessione.
 type SessionWithEntries struct {
 	SessionMeta
-	Entries []json.RawMessage `json:"entries"`
+	Entries        []json.RawMessage `json:"entries"`
+	WatchdogEvents []json.RawMessage `json:"watchdogEvents"`
 }
 
 // SessionStart apre una nuova riga nella tabella sessioni e ritorna l'id.
@@ -88,6 +90,21 @@ func (s *Store) SessionClose(sessionID int64, fineISO string, durataSec int64, a
 	_, err := s.db.Exec(
 		`UPDATE sessioni SET sessione_fine = ?, durata_sec = ?, archiviata_at = ? WHERE id = ?`,
 		fineISO, durataSec, archiviataAt, sessionID,
+	)
+	return err
+}
+
+// SessionRename aggiorna il titolo (nome custom) di una sessione esistente.
+// Usato dopo Stop quando l'utente da' un nome alla sessione appena archiviata.
+func (s *Store) SessionRename(sessionID int64, titolo string) error {
+	if s.disabled {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`UPDATE sessioni SET titolo = ? WHERE id = ?`,
+		titolo, sessionID,
 	)
 	return err
 }
@@ -213,7 +230,43 @@ func (s *Store) SessionLoad(sessionID int64) (SessionWithEntries, error) {
 		raw, _ := json.Marshal(entry)
 		out.Entries = append(out.Entries, raw)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	// Watchdog events della sessione (USB / process / network).
+	wdRows, err := s.db.Query(
+		`SELECT plugin, ip, COALESCE(nome_studente, ''), ts, severity, payload_json
+		 FROM watchdog_events WHERE sessione_id = ? ORDER BY ts ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return out, err
+	}
+	defer wdRows.Close()
+	out.WatchdogEvents = []json.RawMessage{}
+	for wdRows.Next() {
+		var plugin, ip, nome, severity, payloadJSON string
+		var ts int64
+		if err := wdRows.Scan(&plugin, &ip, &nome, &ts, &severity, &payloadJSON); err != nil {
+			return out, err
+		}
+		var payload any
+		_ = json.Unmarshal([]byte(payloadJSON), &payload)
+		ev := map[string]any{
+			"plugin":   plugin,
+			"ip":       ip,
+			"ts":       ts,
+			"severity": severity,
+			"payload":  payload,
+		}
+		if nome != "" {
+			ev["nome"] = nome
+		}
+		raw, _ := json.Marshal(ev)
+		out.WatchdogEvents = append(out.WatchdogEvents, raw)
+	}
+	return out, wdRows.Err()
 }
 
 // SessionDelete elimina una sessione (e le sue entries via CASCADE).

@@ -28,10 +28,22 @@ $plancUrl = "http://__IP_DOCENTE__:__PORTA_WEB__/api/watchdog/event"
 # anche con .exe.
 $denyList = @(__DENY_LIST__)
 
+function Strip-Exe([string]$s) {
+    $x = $s.ToLower()
+    if ($x.EndsWith('.exe')) { return $x.Substring(0, $x.Length - 4) }
+    return $x
+}
+
+# Pre-normalizziamo la denylist UNA VOLTA: Get-Process restituisce Name
+# senza .exe (es. "cmd", "powershell"), mentre la denylist puo' avere
+# .exe ("cmd.exe"). Senza questa normalizzazione il -contains falliva
+# sempre e nessun evento "started" veniva mai inviato.
+$denyListNorm = @()
+foreach ($d in $denyList) { $denyListNorm += Strip-Exe $d }
+
 function Test-Suspect($procName) {
-    $clean = $procName.ToLower()
-    if ($clean.EndsWith('.exe')) { $clean = $clean.Substring(0, $clean.Length - 4) }
-    return $denyList -contains $clean
+    $clean = Strip-Exe $procName
+    return $denyListNorm -contains $clean
 }
 
 function Send-Event($action, $proc) {
@@ -62,10 +74,13 @@ foreach ($p in Get-Process) {
     if (Test-Suspect $p.Name) { $baseline[$p.Id] = $p }
 }
 
-$heartbeatEvery = 6
+$heartbeatEvery = 1  # ogni tick da 5s -> heartbeat ogni 5s (tempo reale)
+$stopFlag = Join-Path $env:TEMP 'planck_stop.flag'
 $tick = 0
 while ($true) {
+    if (Test-Path $stopFlag) { exit 0 }
     Start-Sleep -Seconds 5
+    if (Test-Path $stopFlag) { exit 0 }
     $current = @{}
     foreach ($p in Get-Process) {
         if (Test-Suspect $p.Name) {

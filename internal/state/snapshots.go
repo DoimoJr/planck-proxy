@@ -22,7 +22,6 @@ type ConfigSnapshot struct {
 	PatternSistema      []string          `json:"patternSistema"`
 	Studenti            map[string]string `json:"studenti"`
 	Presets             []string          `json:"presets"`
-	Classi              []Combo           `json:"classi"`
 	// LanIP e' l'IP del PC docente che gli studenti usano per raggiungere
 	// Planck (set a boot via PLANCK_LAN_IP o auto-detected). Stesso valore
 	// embeddato nel proxy_on.bat. La UI lo usa per "Distribuisci" senza
@@ -47,7 +46,6 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 		PatternSistema:      classify.PatternSistema,
 		Studenti:            studCopy,
 		Presets:             []string{},
-		Classi:              []Combo{},
 		LanIP:               s.lanIP,
 	}
 	s.mu.RUnlock()
@@ -56,26 +54,24 @@ func (s *State) ConfigSnapshotData() ConfigSnapshot {
 	if presets, err := s.store.ListaPresets(); err == nil {
 		snap.Presets = presets
 	}
-	if combo, err := s.store.ListaClassi(); err == nil {
-		out := make([]Combo, len(combo))
-		for i, c := range combo {
-			out[i] = Combo{Classe: c.Classe, Lab: c.Lab, File: c.File}
-		}
-		snap.Classi = out
-	}
 	return snap
 }
 
 // HistorySnapshot e' il payload di /api/history per l'idratazione UI.
 type HistorySnapshot struct {
-	Entries         []Entry          `json:"entries"`
-	Bloccati        []string         `json:"bloccati"`
-	SessioneAttiva  bool             `json:"sessioneAttiva"`
-	SessioneInizio  string           `json:"sessioneInizio,omitempty"`
-	SessioneFineISO string           `json:"sessioneFineISO,omitempty"`
-	Pausato         bool             `json:"pausato"`
-	DeadlineISO     string           `json:"deadlineISO,omitempty"`
-	Alive           map[string]int64 `json:"alive"`
+	Entries         []Entry             `json:"entries"`
+	Bloccati        []string            `json:"bloccati"`
+	BlocchiPerIp    map[string][]string `json:"blocchiPerIp"`
+	SessioneAttiva  bool                `json:"sessioneAttiva"`
+	SessioneInizio  string              `json:"sessioneInizio,omitempty"`
+	SessioneFineISO string              `json:"sessioneFineISO,omitempty"`
+	Pausato         bool                `json:"pausato"`
+	DeadlineISO     string              `json:"deadlineISO,omitempty"`
+	Alive           map[string]int64    `json:"alive"`
+	// AlivePlugins[ip][plugin] = ms epoch dell'ultimo heartbeat ricevuto
+	// per quella tupla. Usato dalla UI per colorare il pallino "stato
+	// plugin" della card studente al boot prima che arrivino SSE.
+	AlivePlugins map[string]map[string]int64 `json:"alivePlugins"`
 }
 
 // HistorySnapshotData ritorna il payload per /api/history.
@@ -88,15 +84,25 @@ func (s *State) HistorySnapshotData() HistorySnapshot {
 	for k, v := range s.aliveMap {
 		aliveCopy[k] = v
 	}
+	alivePluginsCopy := make(map[string]map[string]int64, len(s.watchdogHeartbeats))
+	for ip, plugins := range s.watchdogHeartbeats {
+		inner := make(map[string]int64, len(plugins))
+		for p, ts := range plugins {
+			inner[p] = ts
+		}
+		alivePluginsCopy[ip] = inner
+	}
 	return HistorySnapshot{
 		Entries:         storiaCopy,
 		Bloccati:        s.bloccatiSortedLocked(),
+		BlocchiPerIp:    s.blocchiPerIpSnapshotLocked(),
 		SessioneAttiva:  s.sessioneAttiva,
 		SessioneInizio:  s.sessioneInizio,
 		SessioneFineISO: s.sessioneFineISO,
 		Pausato:         s.pausato,
 		DeadlineISO:     s.deadlineISO,
 		Alive:           aliveCopy,
+		AlivePlugins:    alivePluginsCopy,
 	}
 }
 
@@ -164,6 +170,7 @@ type SettingsSnapshot struct {
 	Classe              string        `json:"classe"`
 	InattivitaSogliaSec int           `json:"inattivitaSogliaSec"`
 	DominiIgnorati      []string      `json:"dominiIgnorati"`
+	DiscoverVeyonOnly   bool          `json:"discoverVeyonOnly"`
 }
 
 type ProxySettings struct {
@@ -211,6 +218,7 @@ func (s *State) settingsSnapshotLocked() SettingsSnapshot {
 		Classe:              s.classe,
 		InattivitaSogliaSec: s.inattivitaSogliaSec,
 		DominiIgnorati:      ignoratiCopy,
+		DiscoverVeyonOnly:   s.discoverVeyonOnly,
 	}
 }
 

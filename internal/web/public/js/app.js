@@ -22,7 +22,7 @@
  */
 
 import { state, assorbiEntry } from './state.js';
-import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown } from './render.js';
+import { renderAll, renderAllSync, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs, renderCountdown, avviaTopbarClock, avviaRecTimer } from './render.js';
 import { avviaSSE } from './sse.js';
 import * as actions from './actions.js';
 
@@ -34,27 +34,47 @@ import * as actions from './actions.js';
  *   relativi che dipendono da `Date.now()`).
  */
 async function init() {
+    console.log('[planck] init() start');
     const [cfgRes, histRes, sesRes, setRes] = await Promise.all([
         fetch('/api/config').then(r => r.json()),
         fetch('/api/history').then(r => r.json()),
         fetch('/api/sessioni').then(r => r.json()).catch(() => ({ sessioni: [] })),
-        fetch('/api/settings').then(r => r.json()).catch(() => ({ settings: null })),
+        fetch('/api/settings').then(r => r.json()).catch(() => null),
     ]);
+    console.log('[planck] init fetch done. studenti=', Object.keys(cfgRes.studenti||{}).length,
+        'entries=', (histRes.entries||[]).length,
+        'bloccati=', (histRes.bloccati||[]).length,
+        'dominiAI=', (cfgRes.dominiAI||[]).length);
 
     state.cfg = cfgRes;
     document.title = cfgRes.titolo + (cfgRes.classe ? ' - ' + cfgRes.classe : '');
 
     state.bloccati = new Set(histRes.bloccati);
+    state.blocchiPerIp = new Map();
+    if (histRes.blocchiPerIp) {
+        for (const [ip, doms] of Object.entries(histRes.blocchiPerIp)) {
+            state.blocchiPerIp.set(ip, new Set(doms));
+        }
+    }
     state.sessioneAttiva = !!histRes.sessioneAttiva;
     state.sessioneInizio = histRes.sessioneInizio || null;
     state.sessioneFineISO = histRes.sessioneFineISO || null;
     state.pausato = !!histRes.pausato;
     state.deadlineISO = histRes.deadlineISO || null;
     state.sessioniArchivio = sesRes.sessioni || [];
-    state.settings = setRes.settings || null;
+    // /api/settings ritorna l'oggetto piatto (proxy, web, modo, dominiIgnorati, ...).
+    // L'SSE settings invece wrappa in {type, settings}, gestito separatamente in sse.js.
+    state.settings = setRes;
 
     if (histRes.alive) {
         for (const [ip, ts] of Object.entries(histRes.alive)) state.aliveMap.set(ip, ts);
+    }
+    if (histRes.alivePlugins) {
+        for (const [ip, plugins] of Object.entries(histRes.alivePlugins)) {
+            const inner = new Map();
+            for (const [p, ts] of Object.entries(plugins)) inner.set(p, ts);
+            state.alivePluginMap.set(ip, inner);
+        }
     }
 
     for (const e of histRes.entries) assorbiEntry(e);
@@ -64,7 +84,29 @@ async function init() {
     aggiornaInputDeadline();
     renderTabs();
     actions.applicaCollassi();
-    renderAll();
+    actions.cambiaSubtabImpostazioni(state.settingsSubtab);
+    avviaTopbarClock();
+    avviaRecTimer();
+    // Primo render SINCRONO (no RAF): garantisce che la grid IP sia
+    // popolata immediatamente al boot. Lo eseguiamo TRE volte:
+    //   1. subito (popola DOM)
+    //   2. setTimeout(0) — dopo che il browser ha finalizzato il layout
+    //   3. RAF — dopo il prossimo paint
+    // Brutale ma elimina race con DOMContentLoaded/layout/paint che
+    // lasciava la Live tab vuota fino al primo toggle/cambio tab.
+    renderAllSync();
+    const grid = document.getElementById('ip-container');
+    console.log('[planck] post-renderAllSync grid children=', grid ? grid.querySelectorAll('.ip-card').length : 'no-container');
+    setTimeout(() => {
+        renderAllSync();
+        const g = document.getElementById('ip-container');
+        console.log('[planck] post-setTimeout(0) grid children=', g ? g.querySelectorAll('.ip-card').length : 'no-container');
+    }, 0);
+    requestAnimationFrame(() => {
+        renderAllSync();
+        const g = document.getElementById('ip-container');
+        console.log('[planck] post-RAF grid children=', g ? g.querySelectorAll('.ip-card').length : 'no-container');
+    });
     avviaSSE();
 
     // Veyon: status (sapere se mostrare i bottoni inline + classe).
@@ -104,6 +146,7 @@ document.body.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (!el) return;
     const action = el.dataset.action;
+    console.log('[planck] click action=', action, 'target=', el.id || el.className);
     const d = el.dataset.dominio;
     const ip = el.dataset.ip;
     const nome = el.dataset.nome;
@@ -120,16 +163,33 @@ document.body.addEventListener('click', (e) => {
         case 'reset-nascosti': actions.resetNascosti(); break;
         case 'focus-ip': actions.handleCardClick(ip, e); break;
         case 'clear-selection': actions.clearSelection(); break;
-        case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
+        case 'multi-blocca-dominio': actions.bloccaDominioSelezione(); break;
+        case 'detail-close': e.stopPropagation(); actions.chiudiDetail(); break;
+        case 'log-open': e.stopPropagation(); actions.apriLogEventi(); break;
+        case 'log-close': e.stopPropagation(); actions.chiudiLogEventi(); break;
+        case 'log-toggle': e.stopPropagation(); actions.toggleLogEventi(); break;
+        case 'log-filter': e.stopPropagation(); actions.setLogFilter(el.dataset.filter); break;
+        case 'banner-dismiss': e.stopPropagation(); actions.dismissBanner(); break;
+        case 'evento-apri-studente': e.stopPropagation(); actions.eventoApriStudente(el.dataset.ip); break;
+        case 'evento-ignora': e.stopPropagation(); actions.ignoraEvento(el.dataset.id); break;
+        case 'ignora-tutti': e.stopPropagation(); actions.ignoraTuttiEventi(); break;
+        case 'evento-blocca-dominio': e.stopPropagation(); actions.bloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
+        case 'detail-blocca-dominio': e.stopPropagation(); actions.detailBloccaDominio(); break;
+        case 'unblock-per-ip': e.stopPropagation(); actions.sbloccaPerIp(el.dataset.ip, el.dataset.dominio); break;
         case 'toggle-sezione': actions.toggleSezione(el.dataset.sezione); break;
         case 'vista-griglia': actions.cambiaVistaIp('griglia'); break;
         case 'vista-lista': actions.cambiaVistaIp('lista'); break;
         case 'toggle-sidebar': actions.toggleSidebar(); break;
         case 'toggle-richieste': actions.toggleRichieste(); break;
+        case 'toggle-stream': actions.toggleRichieste(); break;
         case 'session-toggle': actions.toggleSessione(); break;
+        case 'session-start': actions.startSessione(); break;
+        case 'session-stop': actions.stopSessione(); break;
         case 'export': actions.esportaSessione(); break;
         case 'block-all-ai': actions.bloccaAI(); break;
         case 'unblock-all-ai': actions.sbloccaAI(); break;
+        case 'block-ai-toggle': actions.toggleBloccaAI(); break;
+        case 'reset-tutto': actions.resetTutto(); break;
         case 'clear-blocklist': actions.svuotaBlocklist(); break;
         case 'preset-save': actions.salvaPreset(); break;
         case 'darkmode': actions.toggleDarkmode(); break;
@@ -138,13 +198,7 @@ document.body.addEventListener('click', (e) => {
         case 'pausa-toggle': actions.togglePausa(); break;
         case 'clear-deadline': actions.annullaDeadline(); break;
         case 'tab': actions.cambiaTab(el.dataset.tab); break;
-        case 'reload-studenti': actions.ricaricaStudenti(); break;
-        case 'elimina-studente': actions.eliminaStudente(el.dataset.ip); break;
-        case 'aggiungi-studente': actions.aggiungiStudente(); break;
-        case 'svuota-studenti': actions.svuotaMappaStudenti(); break;
-        case 'combo-load': actions.caricaCombo(); break;
-        case 'combo-save': actions.salvaCombo(); break;
-        case 'combo-delete': actions.eliminaCombo(); break;
+        case 'settings-subtab': actions.cambiaSubtabImpostazioni(el.dataset.subtab); break;
         case 'aggiungi-ignorato': actions.aggiungiIgnorato(); break;
         case 'rimuovi-ignorato': actions.rimuoviIgnorato(el.dataset.dominio); break;
         case 'veyon-configure': actions.veyonConfigura(); break;
@@ -153,12 +207,15 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-card-lock': e.stopPropagation(); actions.veyonCardLock(el.dataset.ip); break;
         case 'veyon-card-unlock': e.stopPropagation(); actions.veyonCardUnlock(el.dataset.ip); break;
         case 'veyon-card-msg': e.stopPropagation(); actions.veyonCardMsg(el.dataset.ip); break;
+        case 'veyon-card-distribuisci-proxy': e.stopPropagation(); actions.veyonCardDistribuisciProxy(el.dataset.ip); break;
+        case 'veyon-card-disinstalla-proxy': e.stopPropagation(); actions.veyonCardDisinstallaProxy(el.dataset.ip); break;
         case 'veyon-classe-lock': actions.veyonClasseLock(); break;
         case 'veyon-classe-unlock': actions.veyonClasseUnlock(); break;
         case 'veyon-classe-msg': actions.veyonClasseMsg(); break;
         case 'veyon-classe-reboot': actions.veyonClasseReboot(); break;
         case 'veyon-classe-poweroff': actions.veyonClassePowerDown(); break;
         case 'veyon-distribuisci-proxy': actions.veyonDistribuisciProxy(); break;
+        case 'veyon-firefox-lockdown': actions.veyonFirefoxLockdown(); break;
         case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
         case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
         case 'ai-refresh': actions.aiRefresh(); break;
@@ -190,10 +247,15 @@ function isInputFocused() {
     return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 document.addEventListener('keydown', (e) => {
-    // ESC: clear selezione + focus IP, sempre attivo.
+    // ESC chain (priorita' decrescente):
+    //   multi-sel > detail pane > log pane > focus IP > sidebar dx > sidebar sx.
     if (e.key === 'Escape') {
         if (state.selectedIps.size > 0) { actions.clearSelection(); e.preventDefault(); return; }
+        if (state.detailIp) { actions.chiudiDetail(); e.preventDefault(); return; }
+        if (state.logPanelOpen) { actions.chiudiLogEventi(); e.preventDefault(); return; }
         if (state.focusIp) { actions.clearFocus(); e.preventDefault(); return; }
+        if (!state.richiesteCollassate) { actions.toggleRichieste(); e.preventDefault(); return; }
+        if (!state.sidebarCollassata) { actions.toggleSidebar(); e.preventDefault(); return; }
     }
     // Shortcut con Ctrl/Cmd
     const mod = e.ctrlKey || e.metaKey;
@@ -241,22 +303,15 @@ document.body.addEventListener('change', (e) => {
         actions.impostaDeadline(el.value);
     } else if (el.dataset.action === 'report-sessione-select') {
         actions.apriSessioneArchiviata(el.value);
-    } else if (el.dataset.action === 'sel-combo') {
-        actions.aggiornaStatoCombo();
-    } else if (el.dataset.action === 'edit-studente') {
-        actions.modificaStudente(el.dataset.ip, el.value);
     } else if (el.dataset.action === 'settings-field') {
         actions.settingsCampoModificato(el);
     }
 });
 
-// Invio nei campi di aggiunta studente = aggiungi
+// Invio nei campi del tab Impostazioni
 document.body.addEventListener('keydown', (e) => {
     const el = e.target;
-    if (e.key === 'Enter' && el.dataset.action === 'nuovo-studente-key') {
-        e.preventDefault();
-        actions.aggiungiStudente();
-    } else if (e.key === 'Enter' && el.dataset.action === 'nuovo-ignorato-key') {
+    if (e.key === 'Enter' && el.dataset.action === 'nuovo-ignorato-key') {
         e.preventDefault();
         actions.aggiungiIgnorato();
     }

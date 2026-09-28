@@ -15,6 +15,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DoimoJr/planck-proxy/internal/scripts"
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/store"
 )
@@ -61,6 +63,14 @@ func (a *API) Register(mux *http.ServeMux) {
 		staticH.ServeHTTP(w, r)
 	}))
 
+	// Health check NON autenticato — usato da WaitForHTTP a boot per
+	// sapere quando il server e' davvero pronto a rispondere prima di
+	// lanciare il browser. Niente body, solo 200 OK.
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
 	// Read-only (Phase 1.4)
 	mux.HandleFunc("/api/version", auth(a.handleVersion))
 	mux.HandleFunc("/api/config", auth(a.handleConfig))
@@ -69,7 +79,6 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings", auth(a.handleSettings))
 	mux.HandleFunc("/api/sessioni", auth(a.handleSessioni))
 	mux.HandleFunc("/api/presets", auth(a.handlePresets))
-	mux.HandleFunc("/api/classi", auth(a.handleClassi))
 	mux.HandleFunc("/api/stream", auth(a.broker.HandleStream))
 
 	// Mutations (Phase 1.5)
@@ -78,9 +87,14 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/block-all-ai", auth(a.handleBlockAllAI))
 	mux.HandleFunc("/api/unblock-all-ai", auth(a.handleUnblockAllAI))
 	mux.HandleFunc("/api/clear-blocklist", auth(a.handleClearBlocklist))
+	mux.HandleFunc("/api/block-per-ip", auth(a.handleBlockForIp))
+	mux.HandleFunc("/api/unblock-per-ip", auth(a.handleUnblockForIp))
+	mux.HandleFunc("/api/clear-blocks-for-ip", auth(a.handleClearBlocksForIp))
+	mux.HandleFunc("/api/reset-runtime", auth(a.handleResetRuntime))
 
 	mux.HandleFunc("/api/session/start", auth(a.handleSessionStart))
 	mux.HandleFunc("/api/session/stop", auth(a.handleSessionStop))
+	mux.HandleFunc("/api/session/rename", auth(a.handleSessionRename))
 
 	mux.HandleFunc("/api/pause/toggle", auth(a.handlePauseToggle))
 	mux.HandleFunc("/api/pause/on", auth(a.handlePauseOn))
@@ -93,13 +107,11 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/ignorati/add", auth(a.handleIgnoratiAdd))
 	mux.HandleFunc("/api/settings/ignorati/remove", auth(a.handleIgnoratiRemove))
 
-	mux.HandleFunc("/api/students/set", auth(a.handleStudentSet))
-	mux.HandleFunc("/api/students/delete", auth(a.handleStudentDelete))
-	mux.HandleFunc("/api/students/clear", auth(a.handleStudentClear))
-
 	// Download script studenti (Phase 1.7)
 	mux.HandleFunc("/api/scripts/proxy_on.vbs", auth(a.handleScriptProxyOn))
 	mux.HandleFunc("/api/scripts/proxy_off.vbs", auth(a.handleScriptProxyOff))
+	mux.HandleFunc("/api/scripts/firefox-policies.json", auth(a.handleScriptFirefoxPolicies))
+	mux.HandleFunc("/api/scripts/firefox-lockdown.vbs", auth(a.handleScriptFirefoxLockdown))
 
 	// Shutdown (Phase 1.7+): consente di spegnere il server dalla UI
 	mux.HandleFunc("/api/shutdown", auth(a.handleShutdown))
@@ -112,6 +124,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/veyon/feature", auth(a.handleVeyonFeature))
 	mux.HandleFunc("/api/veyon/distribuisci-proxy", auth(a.handleVeyonDistribuisciProxy))
 	mux.HandleFunc("/api/veyon/disinstalla-proxy", auth(a.handleVeyonDisinstallaProxy))
+	mux.HandleFunc("/api/veyon/distribuisci-firefox-lockdown", auth(a.handleVeyonDistribuisciFirefoxLockdown))
 
 	// AI list management (Phase 6)
 	mux.HandleFunc("/api/ai/status", auth(a.handleAIStatus))
@@ -134,9 +147,6 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/preset/save", auth(a.handlePresetSave))
 	mux.HandleFunc("/api/preset/load", auth(a.handlePresetLoad))
 	mux.HandleFunc("/api/preset/delete", auth(a.handlePresetDelete))
-	mux.HandleFunc("/api/classi/save", auth(a.handleClassiSave))
-	mux.HandleFunc("/api/classi/load", auth(a.handleClassiLoad))
-	mux.HandleFunc("/api/classi/delete", auth(a.handleClassiDelete))
 	mux.HandleFunc("/api/sessioni/archivia", auth(a.handleSessioniArchivia))
 	mux.HandleFunc("/api/sessioni/load", auth(a.handleSessioniLoad))
 	mux.HandleFunc("/api/sessioni/delete", auth(a.handleSessioniDelete))
@@ -237,12 +247,42 @@ func (a *API) handleSessioni(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	lista, err := a.state.Store().SessionListFilenames()
+	metas, err := a.state.Store().SessionList()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Errore lettura archivio: "+err.Error(), "STORE_ERROR")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessioni": lista})
+	// Risposta arricchita: per ogni sessione filename + titolo + inizio +
+	// durata. Cosi' il client puo' mostrare il nome custom dato dall'utente
+	// dopo Stop, oltre alla data/ora storiche.
+	type Item struct {
+		Filename  string `json:"filename"`
+		Titolo    string `json:"titolo"`
+		Inizio    string `json:"inizio"`
+		Fine      string `json:"fine,omitempty"`
+		DurataSec int64  `json:"durataSec"`
+	}
+	out := make([]Item, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, Item{
+			Filename:  sessionFilenameForMeta(m.ID, m.SessioneInizio),
+			Titolo:    m.Titolo,
+			Inizio:    m.SessioneInizio,
+			Fine:      m.SessioneFineISO,
+			DurataSec: m.DurataSec,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessioni": out})
+}
+
+// sessionFilenameForMeta replica state.sessionFilename per il livello API
+// (lo state e' opaco qui). Stesso formato "<id>-<inizio>.json".
+func sessionFilenameForMeta(id int64, inizio string) string {
+	clean := strings.NewReplacer(":", "-", "T", "-", ".", "-").Replace(inizio)
+	if len(clean) > 19 {
+		clean = clean[:19]
+	}
+	return fmt.Sprintf("%d-%s.json", id, clean)
 }
 
 func (a *API) handlePresets(w http.ResponseWriter, r *http.Request) {
@@ -255,18 +295,6 @@ func (a *API) handlePresets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"presets": lista})
-}
-
-func (a *API) handleClassi(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	combo, err := a.state.Store().ListaClassi()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Errore lettura classi: "+err.Error(), "STORE_ERROR")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"classi": combo})
 }
 
 // ============================================================
@@ -304,18 +332,22 @@ func (a *API) handleUnblock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleBlockAllAI(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleBlockAllAI method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	a.state.BlockAllAI()
+	log.Printf("[api] BlockAllAI done")
 	writeOK(w, nil)
 }
 
 func (a *API) handleUnblockAllAI(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleUnblockAllAI method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	a.state.UnblockAllAI()
+	log.Printf("[api] UnblockAllAI done")
 	writeOK(w, nil)
 }
 
@@ -324,6 +356,82 @@ func (a *API) handleClearBlocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.state.ClearBlocklist()
+	writeOK(w, nil)
+}
+
+// handleResetRuntime svuota la storia traffic + tracking watchdog
+// alert-state. Non tocca il DB persistito (sessioni, eventi storici).
+// Trigger del bottone Reset dell'UI: la coda alert/feed si pulisce
+// senza distruggere i dati di sessione.
+func (a *API) handleResetRuntime(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	a.state.ResetRuntime()
+	writeOK(w, nil)
+}
+
+// handleBlockForIp aggiunge `dominio` ai blocchi di `ip`.
+// Body: {"ip": "...", "dominio": "..."}.
+func (a *API) handleBlockForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleBlockForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP      string `json:"ip"`
+		Dominio string `json:"dominio"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" || body.Dominio == "" {
+		writeError(w, http.StatusBadRequest, "ip e dominio richiesti", "BAD_REQUEST")
+		return
+	}
+	a.state.BlockForIp(body.IP, body.Dominio)
+	writeOK(w, nil)
+}
+
+func (a *API) handleUnblockForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleUnblockForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP      string `json:"ip"`
+		Dominio string `json:"dominio"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" || body.Dominio == "" {
+		writeError(w, http.StatusBadRequest, "ip e dominio richiesti", "BAD_REQUEST")
+		return
+	}
+	a.state.UnblockForIp(body.IP, body.Dominio)
+	writeOK(w, nil)
+}
+
+func (a *API) handleClearBlocksForIp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handleClearBlocksForIp method=%s", r.Method)
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		IP string `json:"ip"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "Body JSON invalido", "BAD_REQUEST")
+		return
+	}
+	if body.IP == "" {
+		writeError(w, http.StatusBadRequest, "ip richiesto", "BAD_REQUEST")
+		return
+	}
+	a.state.ClearBlocksForIp(body.IP)
 	writeOK(w, nil)
 }
 
@@ -353,11 +461,33 @@ func (a *API) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSessionRename aggiorna il titolo di una sessione archiviata.
+// Body: {"id": 5, "titolo": "Verifica Storia 5B"}.
+func (a *API) handleSessionRename(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		ID     int64  `json:"id"`
+		Titolo string `json:"titolo"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil || body.ID <= 0 {
+		writeError(w, http.StatusBadRequest, "Body deve essere {id: int, titolo: string}", "BAD_BODY")
+		return
+	}
+	if err := a.state.RenameSession(body.ID, body.Titolo); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "RENAME_FAIL")
+		return
+	}
+	writeOK(w, nil)
+}
+
 // ============================================================
 // POST handlers — Pausa
 // ============================================================
 
 func (a *API) handlePauseToggle(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[api] handlePauseToggle method=%s", r.Method)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
@@ -463,49 +593,6 @@ func (a *API) handleIgnoratiRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
-// POST handlers — Studenti
-// ============================================================
-
-type studentBody struct {
-	IP   string `json:"ip"`
-	Nome string `json:"nome"`
-}
-
-func (a *API) handleStudentSet(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body studentBody
-	if err := decodeJSONBody(r, &body); err != nil || body.IP == "" || body.Nome == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {ip, nome}", "BAD_BODY")
-		return
-	}
-	a.state.SetStudent(body.IP, body.Nome)
-	writeOK(w, nil)
-}
-
-func (a *API) handleStudentDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body studentBody
-	if err := decodeJSONBody(r, &body); err != nil || body.IP == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {ip}", "BAD_BODY")
-		return
-	}
-	a.state.DeleteStudent(body.IP)
-	writeOK(w, nil)
-}
-
-func (a *API) handleStudentClear(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	a.state.ClearStudents()
-	writeOK(w, nil)
-}
-
-// ============================================================
 // Shutdown (Phase 1.7+)
 // ============================================================
 
@@ -546,6 +633,33 @@ func (a *API) handleScriptProxyOff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.serveScriptDownload(w, "proxy_off.vbs")
+}
+
+// handleScriptFirefoxPolicies serve il policies.json di Firefox da
+// installare in C:\Program Files\Mozilla Firefox\distribution\ (one-time
+// al setup laboratorio). Forza Mode=system, Locked=true → l'utente non
+// puo' disattivare il proxy dalle Preferenze Firefox.
+func (a *API) handleScriptFirefoxPolicies(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="policies.json"`)
+	_, _ = w.Write([]byte(scripts.FirefoxPoliciesJSON))
+}
+
+// handleScriptFirefoxLockdown serve un VBS che, eseguito con UAC,
+// scrive policies.json nelle distribution dir di Firefox installato
+// (Program Files / Program Files (x86)). One-shot per setup laboratorio.
+func (a *API) handleScriptFirefoxLockdown(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/vbscript; charset=UTF-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="firefox_lockdown.vbs"`)
+	// Variant non-silent: download manuale, msgbox di feedback per
+	// admin che lancia lo script da locale.
+	_, _ = w.Write([]byte(scripts.FirefoxLockdownVBS(false)))
 }
 
 // serveScriptDownload manda il file .vbs come download
@@ -640,77 +754,6 @@ func (a *API) handlePresetDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.state.Store().DeletePreset(body.Nome); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	writeOK(w, nil)
-}
-
-// ============================================================
-// POST handlers — Classi (Phase 1.6, persistence-backed)
-// ============================================================
-
-type classeBody struct {
-	Classe string `json:"classe"`
-	Lab    string `json:"lab"`
-}
-
-func (a *API) handleClassiSave(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	// Salva la mappa studenti corrente come snapshot per quella combo.
-	cfg := a.state.ConfigSnapshotData()
-	c := store.ClasseFile{
-		Classe:    body.Classe,
-		Lab:       body.Lab,
-		Mappa:     cfg.Studenti,
-		UpdatedAt: time.Now().UnixMilli(),
-	}
-	if err := a.state.Store().SaveClasse(c); err != nil {
-		if err == store.ErrNomeInvalido {
-			writeError(w, http.StatusBadRequest, err.Error(), "BAD_NAME")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	writeOK(w, map[string]any{"classe": body.Classe, "lab": body.Lab})
-}
-
-func (a *API) handleClassiLoad(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	c, err := a.state.Store().LoadClasse(body.Classe, body.Lab)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
-		return
-	}
-	a.state.SetStudenti(c.Mappa)
-	writeOK(w, map[string]any{"caricati": len(c.Mappa)})
-}
-
-func (a *API) handleClassiDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	var body classeBody
-	if err := decodeJSONBody(r, &body); err != nil || body.Classe == "" || body.Lab == "" {
-		writeError(w, http.StatusBadRequest, "Body deve essere {classe, lab}", "BAD_BODY")
-		return
-	}
-	if err := a.state.Store().DeleteClasse(body.Classe, body.Lab); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return
 	}

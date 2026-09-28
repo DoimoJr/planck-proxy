@@ -75,6 +75,31 @@ func (s *State) VeyonConfigure(keyName string, privateKeyPEM []byte) error {
 	return nil
 }
 
+// AutoImportVeyonKey tenta l'auto-import della master key Veyon via
+// `veyon-cli authkeys export`. Eseguito ad ogni boot: il binario Planck
+// e' portatile tra laboratori, e ogni PC docente ha la propria master
+// key configurata nel suo Veyon Configurator → l'auto-import prende
+// SEMPRE la chiave del laboratorio corrente, sovrascrivendo qualunque
+// stato precedente.
+//
+// Errore non-nil = auto-import fallito (es. veyon-cli mancante in un
+// lab senza Veyon installato): Veyon resta disabled per la sessione,
+// il chiamante logga e continua.
+func (s *State) AutoImportVeyonKey() (string, error) {
+	dir := s.store.DataDir()
+	if dir == "" {
+		return "", fmt.Errorf("dataDir non disponibile (NoOp store?)")
+	}
+	res, err := veyon.AutoImport(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := s.VeyonConfigure(res.KeyName, res.PEMBytes); err != nil {
+		return "", fmt.Errorf("configure dopo auto-import: %w", err)
+	}
+	return res.KeyName, nil
+}
+
 // VeyonClear rimuove la configurazione Veyon (file su disco + keyName).
 func (s *State) VeyonClear() error {
 	path := s.veyonKeyPath()

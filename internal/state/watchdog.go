@@ -10,15 +10,53 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 )
 
-// Soglie heartbeat watchdog (Phase 5.x)
+// Soglie heartbeat watchdog (Phase 5.x — tuning v2.9.9 per detection
+// quasi in tempo reale: con plugin che pingano ogni 5s, un timeout di
+// 15s = 3 ping mancati consecutivi = solido segnale di kill / crash).
+//
+// Latency totale dal kill alla detection: 5s (heartbeat freshness) +
+// 15s (timeout) + 5s (checker) = max 25s tipico, target ~10-15s.
 const (
 	// HeartbeatTimeout: dopo questo tempo senza heartbeat di un plugin
 	// ENABLED, se l'IP e' ancora "alive" (proxy ping), Planck
 	// considera lo studente abbia killato il watchdog.
-	HeartbeatTimeout = 90 * time.Second
+	HeartbeatTimeout = 15 * time.Second
 	// HeartbeatCheckInterval: periodo del controllo server-side.
-	HeartbeatCheckInterval = 30 * time.Second
+	HeartbeatCheckInterval = 5 * time.Second
+	// ProxyRemovedGrace: finestra silenzio post Remove proxy. In questa
+	// finestra checkHeartbeats salta gli alert per gli IP marcati con
+	// MarkProxyRemoved: e' atteso che il watchdog vada silente, l'ha
+	// rimosso l'utente. 60s coprono comodamente il tempo di delivery
+	// del file proxy_off via Veyon FileTransfer.
+	ProxyRemovedGrace = 60 * time.Second
 )
+
+// MarkProxyRemoved marca una lista di IP come "proxy appena rimosso
+// dall'utente". Per i prossimi ProxyRemovedGrace secondi non vengono
+// emessi alert "watchdog stopped" per questi IP. Pulisce subito le
+// strutture di tracking heartbeat per partire pulito quando il proxy
+// verra' reinstallato. Usato dal handler /api/veyon/disinstalla-proxy.
+func (s *State) MarkProxyRemoved(ips []string) {
+	now := time.Now().UnixMilli()
+	s.mu.Lock()
+	for _, ip := range ips {
+		s.proxyRemovedAt[ip] = now
+		delete(s.watchdogHeartbeats, ip)
+		delete(s.watchdogStoppedAlerted, ip)
+		delete(s.watchdogAllStoppedAlerted, ip)
+		delete(s.aliveMap, ip)
+	}
+	s.mu.Unlock()
+	// Notifica client: la card si pulisce subito (proxy grigio, plugin
+	// grigio) e l'utente vede l'effetto del suo Remove anche se la
+	// distribuzione del .vbs e' ancora in corso.
+	for _, ip := range ips {
+		s.broker.Broadcast(struct {
+			Type string `json:"type"`
+			IP   string `json:"ip"`
+		}{Type: "proxy-removed", IP: ip})
+	}
+}
 
 // SetWatchdogRegistry collega un Registry watchdog allo state. Va
 // chiamato a boot da main.go dopo aver registrato i plugin built-in.
@@ -56,6 +94,14 @@ func (s *State) RegistraWatchdogHeartbeat(ip, plugin string) {
 		wasStopped = true
 		delete(s.watchdogStoppedAlerted[ip], plugin)
 	}
+	// Heartbeat che torna = proxy non e' piu' "rimosso": il marker scade
+	// in anticipo, cosi' future detection riprendono normalmente.
+	delete(s.proxyRemovedAt, ip)
+	// Se almeno un plugin di quell'IP torna a pingare, l'all-stopped
+	// non e' piu' "tutti silenti" → riarma il flag per future detection.
+	if s.watchdogAllStoppedAlerted[ip] {
+		delete(s.watchdogAllStoppedAlerted, ip)
+	}
 	nome := s.studenti[ip]
 	sessID := s.sessioneID
 	s.mu.Unlock()
@@ -64,6 +110,16 @@ func (s *State) RegistraWatchdogHeartbeat(ip, plugin string) {
 		s.emitWatchdogMetaEvent(ip, plugin, nome, sessID, "resumed", now,
 			"info", "Watchdog "+plugin+" ricomparso (era silente)")
 	}
+
+	// Broadcast SSE a ogni heartbeat: la UI mantiene una mappa
+	// alivePluginMap[ip][plugin] = ts e la usa per colorare il
+	// pallino "stato plugin" nel piede della card studente.
+	s.broker.Broadcast(struct {
+		Type   string `json:"type"`
+		IP     string `json:"ip"`
+		Plugin string `json:"plugin"`
+		TS     int64  `json:"ts"`
+	}{Type: "plugin-alive", IP: ip, Plugin: plugin, TS: now})
 }
 
 // heartbeatChecker e' una goroutine eseguita dopo SetWatchdogRegistry.
@@ -85,18 +141,37 @@ func (s *State) checkHeartbeats() {
 	now := time.Now().UnixMilli()
 	cutoff := now - HeartbeatTimeout.Milliseconds()
 	aliveCutoff := now - HeartbeatTimeout.Milliseconds() // stessa soglia per "studente attivo"
+	graceCutoff := now - ProxyRemovedGrace.Milliseconds()
 
 	type alert struct {
 		ip, plugin, nome string
 		sessID, ts       int64
 	}
+	type allStoppedAlert struct {
+		ip, nome   string
+		sessID, ts int64
+		nPlugins   int
+	}
 	var alerts []alert
+	var allStopped []allStoppedAlert
 
 	s.mu.Lock()
+	// Cleanup marker proxy-removed scaduti.
+	for ip, ts := range s.proxyRemovedAt {
+		if ts < graceCutoff {
+			delete(s.proxyRemovedAt, ip)
+		}
+	}
+	// Pass 1: marca i singoli plugin che sono andati silenti.
 	for ip, plugins := range s.watchdogHeartbeats {
 		// Skip se l'IP non e' "alive" recente (studente offline ->
 		// watchdog assente e' atteso).
 		if s.aliveMap[ip] < aliveCutoff {
+			continue
+		}
+		// Skip se l'utente ha appena chiesto Remove proxy: niente alert
+		// "watchdog killato" — e' atteso che vada silente.
+		if t, ok := s.proxyRemovedAt[ip]; ok && t >= graceCutoff {
 			continue
 		}
 		for plugin, lastSeen := range plugins {
@@ -121,6 +196,35 @@ func (s *State) checkHeartbeats() {
 			})
 		}
 	}
+
+	// Pass 2: per ogni IP "alive", se TUTTI i plugin noti sono stopped
+	// (e non abbiamo gia' alertato all-stopped), emetti un evento critical
+	// aggregato. Soglia minima: 2 plugin (un solo plugin caduto e' gia'
+	// coperto dal warning singolo, niente promozione). Quando arriva un
+	// resumed (RegistraWatchdogHeartbeat), il flag viene resettato.
+	for ip, plugins := range s.watchdogHeartbeats {
+		if s.aliveMap[ip] < aliveCutoff {
+			continue
+		}
+		if t, ok := s.proxyRemovedAt[ip]; ok && t >= graceCutoff {
+			continue
+		}
+		if s.watchdogAllStoppedAlerted[ip] {
+			continue
+		}
+		nKnown := len(plugins)
+		nStopped := len(s.watchdogStoppedAlerted[ip])
+		if nKnown >= 2 && nStopped >= nKnown {
+			s.watchdogAllStoppedAlerted[ip] = true
+			allStopped = append(allStopped, allStoppedAlert{
+				ip:       ip,
+				nome:     s.studenti[ip],
+				sessID:   s.sessioneID,
+				ts:       now,
+				nPlugins: nKnown,
+			})
+		}
+	}
 	s.mu.Unlock()
 
 	for _, a := range alerts {
@@ -128,6 +232,12 @@ func (s *State) checkHeartbeats() {
 			"stopped", a.ts, "warning",
 			"Watchdog "+a.plugin+" silente da >"+
 				HeartbeatTimeout.String()+" (probabilmente killato)")
+	}
+	for _, a := range allStopped {
+		s.emitWatchdogMetaEvent(a.ip, "all", a.nome, a.sessID,
+			"all-stopped", a.ts, "critical",
+			fmt.Sprintf("Tutti i %d plugin watchdog silenti: probabile kill manuale dei processi PowerShell sullo studente",
+				a.nPlugins))
 	}
 }
 

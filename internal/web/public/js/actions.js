@@ -17,6 +17,7 @@
 import { state, salvaNascosti, salvaDarkmode, salvaNotifiche, salvaTab, salvaVistaIp, salvaCollassi } from './state.js';
 import { renderAll, aggiornaToggleButtons, aggiornaSelectPresets, aggiornaInputDeadline, renderTabs } from './render.js';
 import { toast } from './toast.js';
+import { showPromptModal } from './modal.js';
 
 /** Wrapper GET → JSON. */
 async function apiGet(path) {
@@ -26,12 +27,20 @@ async function apiGet(path) {
 
 /** Wrapper POST con body JSON. */
 async function apiPost(path, body) {
-    const r = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body !== undefined ? JSON.stringify(body) : '',
-    });
-    return r.json();
+    console.log('[planck] apiPost ->', path, body || '');
+    try {
+        const r = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body !== undefined ? JSON.stringify(body) : '',
+        });
+        const j = await r.json();
+        console.log('[planck] apiPost <-', path, 'status=', r.status, 'body=', j);
+        return j;
+    } catch (err) {
+        console.error('[planck] apiPost ERROR', path, err);
+        throw err;
+    }
 }
 
 // ========================================================================
@@ -42,33 +51,127 @@ export async function bloccaDominio(d) { await apiPost('/api/block', { dominio: 
 export async function sbloccaDominio(d) { await apiPost('/api/unblock', { dominio: d }); }
 export async function bloccaAI() { await apiPost('/api/block-all-ai'); }
 export async function sbloccaAI() { await apiPost('/api/unblock-all-ai'); }
+/**
+ * Toggle "Blocca AI": leggiamo lo stato DAL BOTTONE (.active = AI bloccate).
+ * Piu' robusto che ricalcolare da state.cfg.dominiAI vs state.bloccati,
+ * che possono divergere se la lista AI lato server include domini non
+ * presenti nel snapshot client. Feedback ottimistico immediato + il render
+ * normale via SSE conferma/corregge.
+ */
+export async function toggleBloccaAI() {
+    const btn = document.getElementById('btn-block-ai');
+    const isActive = btn && btn.classList.contains('active');
+    if (btn) {
+        if (isActive) {
+            btn.classList.remove('active');
+            btn.textContent = 'Blocca AI';
+        } else {
+            btn.classList.add('active');
+            btn.textContent = 'Sblocca AI';
+        }
+    }
+    if (isActive) await apiPost('/api/unblock-all-ai');
+    else await apiPost('/api/block-all-ai');
+}
 
 export async function svuotaBlocklist() {
     if (!confirm('Svuotare completamente la blocklist?')) return;
     await apiPost('/api/clear-blocklist');
 }
 
+/**
+ * Reset completo: rimuove tutti i blocchi domini (generali + per-IP, oggi
+ * tutti convergono nella stessa blocklist), disattiva la pausa globale se
+ * attiva, e sblocca tutti gli schermi via Veyon (se configurato). Una sola
+ * conferma utente, niente prompt nested.
+ */
+export async function resetTutto() {
+    if (!confirm('Reset: svuoto eventi e richieste, rimuovo tutti i blocchi e sblocco i PC. Continuare?')) return;
+    // 1. Svuota la blocklist (cattura sia "Blocca tutto AI" che blocchi puntuali).
+    await apiPost('/api/clear-blocklist');
+    // 2. Disattiva la pausa globale se attiva.
+    if (state.pausato) await apiPost('/api/pause/toggle');
+    // 3. Sblocca schermi su tutti i target Veyon (silenziosamente, no confirm).
+    if (state.veyonConfigured) {
+        const { ips } = targetIps();
+        await Promise.all(ips.map(ip => veyonSendFeature(ip, 'screenUnlock').catch(() => false)));
+        for (const ip of ips) state.lockedIps.delete(ip);
+    }
+    // 4. Svuota runtime server (storia traffic + tracking alert watchdog).
+    //    Il server broadcasta 'reset-runtime' che sull'SSE pulisce le mappe
+    //    aggregate client (entries, perIp, perDominio, watchdogEvents,
+    //    eventiIgnoredIds). Il banner alert si svuota di conseguenza.
+    await apiPost('/api/reset-runtime');
+    toast.success('Reset completato');
+}
+
 // ========================================================================
 // Sessione
 // ========================================================================
 
-export async function toggleSessione() {
+/** Avvia una nuova sessione (no-op se gia' attiva). L'archiviazione
+    avviene SOLO premendo Stop, mai automaticamente in Start. */
+export async function startSessione() {
     if (state.sessioneAttiva) {
-        if (!confirm('Fermare la sessione?\n\nLa registrazione si interrompe e la sessione viene archiviata.\nI dati restano visibili finche\' non avvii una nuova sessione.')) return;
-        const r = await apiPost('/api/session/stop');
-        if (r.archiviata) await ricaricaSessioni();
+        toast.info('Una sessione e\' gia\' in corso. Premi Stop per archiviarla prima di avviarne un\'altra.');
         return;
     }
-    const hadData = state.entries.length > 0 && state.sessioneInizio;
-    const messaggio = hadData
-        ? 'Avviare una nuova sessione?\n\nIl buffer corrente verra\' azzerato (la sessione precedente e\' gia\' archiviata).'
-        : 'Avviare la sessione?\n\nIl monitor inizia a registrare il traffico.';
-    if (!confirm(messaggio)) return;
     const r = await apiPost('/api/session/start');
     state.sessioneInizio = r.sessioneInizio;
     state.sessioneAttiva = true;
     state.sessioneFineISO = null;
-    if (r.archiviata) await ricaricaSessioni();
+    toast.success('Registrazione avviata');
+}
+
+/** Ferma e archivia la sessione corrente (no-op se nessuna attiva). */
+export async function stopSessione() {
+    if (!state.sessioneAttiva) return;
+    // Confirm arricchito con durata HH:MM:SS + count eventi non-sistema —
+    // l'utente sa cosa sta archiviando prima di accettare.
+    let durTxt = '00:00:00';
+    if (state.sessioneInizio) {
+        const start = Date.parse(state.sessioneInizio);
+        if (!isNaN(start)) {
+            const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const s = String(sec % 60).padStart(2, '0');
+            durTxt = `${h}:${m}:${s}`;
+        }
+    }
+    let nEventi = 0;
+    for (const e of state.entries) if (e.tipo !== 'sistema') nEventi++;
+    const r = await apiPost('/api/session/stop');
+    // Dopo lo stop, chiedi all'utente un nome custom (modal in stile app).
+    // Esc / Annulla → mantiene il default. r.archiviata e' "<id>-<inizio>.json".
+    if (r.archiviata) {
+        const m = r.archiviata.match(/^(\d+)-/);
+        const sessionId = m ? parseInt(m[1], 10) : 0;
+        if (sessionId > 0) {
+            const nome = await showPromptModal({
+                title: 'Sessione archiviata',
+                message: `Durata ${durTxt} · ${nEventi} eventi. Dai un nome alla sessione (opzionale, oltre a data e ora).`,
+                placeholder: 'Es. "Verifica Storia 5B"',
+                okLabel: 'Salva',
+                cancelLabel: 'Salta',
+            });
+            if (nome !== null && nome.trim()) {
+                await apiPost('/api/session/rename', { id: sessionId, titolo: nome.trim() });
+            }
+        }
+        await ricaricaSessioni();
+    }
+}
+
+/** Toggle della sessione: delega a stopSessione (con confirm durata+eventi)
+    o startSessione (con toast di conferma). Sostituisce i 2 bottoni
+    Rec/Stop separati con un solo bottone in stile blocca-tutto/blocca-ai. */
+export async function toggleSessione() {
+    if (state.sessioneAttiva) {
+        await stopSessione();
+    } else {
+        await startSessione();
+    }
 }
 
 export async function esportaSessione() {
@@ -131,7 +234,152 @@ export function nascondiDominio(d) { state.nascosti.add(d); salvaNascosti(); ren
 export function mostraDominio(d) { state.nascosti.delete(d); salvaNascosti(); renderAll(); }
 export function resetNascosti() { state.nascosti.clear(); salvaNascosti(); renderAll(); }
 
-export function setFocus(ip) { state.focusIp = state.focusIp === ip ? null : ip; renderAll(); }
+/** Apre il detail pane su `ip`: filtra anche il traffico (focusIp).
+    Mutex: chiude eventuale log panel aperto. */
+export function apriDetail(ip) {
+    state.detailIp = ip;
+    state.focusIp = ip;
+    state.logPanelOpen = false;
+    renderAll();
+}
+/** Chiude il detail pane (torna lo stream a destra) e libera il focus. */
+export function chiudiDetail() {
+    state.detailIp = null;
+    state.focusIp = null;
+    renderAll();
+}
+/** Toggle: stesso ip → chiudi, altrimenti → apri/sposta. */
+export function toggleDetail(ip) {
+    if (state.detailIp === ip) chiudiDetail();
+    else apriDetail(ip);
+}
+/**
+ * Blocca un dominio SOLO per lo studente del detail pane corrente
+ * (blocco per-IP, additivo rispetto alla blocklist globale). Prompt()
+ * pre-popolato con l'ultimo dominio AI rilevato per quell'IP se presente.
+ */
+export async function detailBloccaDominio() {
+    const ip = state.detailIp;
+    if (!ip) return;
+    let suggerito = '';
+    const lista = state.perIp.get(ip) || [];
+    const aiEntry = lista.slice().reverse().find(e => e.tipo === 'ai');
+    if (aiEntry) suggerito = aiEntry.dominio;
+    const d = prompt('Blocca per ' + ip + ':', suggerito);
+    if (d === null) return;
+    const dominio = d.trim().toLowerCase();
+    if (!dominio) return;
+    await apiPost('/api/block-per-ip', { ip, dominio });
+}
+
+/** Blocca un dominio per uno specifico IP (additivo). */
+export async function bloccaPerIp(ip, dominio) {
+    if (!ip || !dominio) return;
+    await apiPost('/api/block-per-ip', { ip, dominio });
+}
+
+/** Sblocca un dominio per uno specifico IP. */
+export async function sbloccaPerIp(ip, dominio) {
+    if (!ip || !dominio) return;
+    await apiPost('/api/unblock-per-ip', { ip, dominio });
+}
+
+/** Rimuove TUTTI i blocchi per-IP per uno specifico IP. */
+export async function clearBlocchiPerIp(ip) {
+    if (!ip) return;
+    await apiPost('/api/clear-blocks-for-ip', { ip });
+}
+
+// ========================================================================
+// Banner alert + Log eventi (Phase 7)
+// ========================================================================
+
+/** Chiude il banner per la sessione UI corrente. Riappare al prossimo evento. */
+export function dismissBanner() {
+    state.bannerDismissed = true;
+    renderAll();
+}
+
+/** Apre il pannello "Log eventi" a destra, mutex con stream/detail. */
+export function apriLogEventi() {
+    state.logPanelOpen = true;
+    state.detailIp = null;
+    state.focusIp = null;
+    renderAll();
+}
+
+/** Chiude il pannello "Log eventi" → torna lo stream. */
+export function chiudiLogEventi() {
+    state.logPanelOpen = false;
+    renderAll();
+}
+
+/** Toggle "Log eventi": apre se chiuso, chiude se aperto. */
+export function toggleLogEventi() {
+    if (state.logPanelOpen) chiudiLogEventi();
+    else apriLogEventi();
+}
+
+/** Imposta il filtro lista log: 'all' | 'ai' | 'wd'. */
+export function setLogFilter(filtro) {
+    if (filtro === 'all' || filtro === 'ai' || filtro === 'wd') {
+        state.logFilter = filtro;
+        renderAll();
+    }
+}
+
+/** Marca un evento come ignorato (sparisce dal feed log + banner). */
+export function ignoraEvento(id) {
+    if (!id) return;
+    state.eventiIgnoredIds.add(id);
+    renderAll();
+}
+
+/** Marca TUTTI gli eventi correntemente in lista come ignorati.
+ *  Equivalente a cliccare "Ignora" su ognuno: spariscono da banner+log
+ *  ma non vengono cancellati dal DB (history). */
+export function ignoraTuttiEventi() {
+    // Itera state.entries (per AI) + state.watchdogEvents (per WD)
+    // costruendo gli stessi id di aggregaEventiAlert.
+    let n = 0;
+    const aiSeen = new Set();
+    for (const e of state.entries) {
+        if (e.tipo !== 'ai') continue;
+        const id = 'ai:' + e.ip + ':' + e.dominio;
+        if (aiSeen.has(id)) continue;
+        aiSeen.add(id);
+        if (!state.eventiIgnoredIds.has(id)) { state.eventiIgnoredIds.add(id); n++; }
+    }
+    for (const ev of state.watchdogEvents || []) {
+        if (ev.severity !== 'warning' && ev.severity !== 'critical') continue;
+        const id = 'wd:' + ev.ip + ':' + ev.plugin + ':' + ev.ts;
+        if (!state.eventiIgnoredIds.has(id)) { state.eventiIgnoredIds.add(id); n++; }
+    }
+    renderAll();
+    if (n > 0) toast.info(`${n} ${n === 1 ? 'evento ignorato' : 'eventi ignorati'}`);
+}
+
+/** Apre lo studente dell'evento e chiude il log. */
+export function eventoApriStudente(ip) {
+    if (!ip) return;
+    state.logPanelOpen = false;
+    apriDetail(ip);
+}
+
+/**
+ * Blocca un dominio per ogni IP attualmente in selezione multipla
+ * (NON globale). Prompt() per chiedere il dominio una sola volta.
+ */
+export async function bloccaDominioSelezione() {
+    const ips = [...state.selectedIps];
+    if (ips.length === 0) return;
+    const d = prompt('Blocca dominio per ' + ips.length + ' studenti:', '');
+    if (d === null) return;
+    const dominio = d.trim().toLowerCase();
+    if (!dominio) return;
+    await Promise.all(ips.map(ip => apiPost('/api/block-per-ip', { ip, dominio })));
+    toast.success('Bloccato per ' + ips.length + ' studenti: ' + dominio);
+}
 export function clearFocus() { state.focusIp = null; renderAll(); }
 
 /** Lista IP nello stesso ordine usato dal render (sortati per IP numerico). */
@@ -145,10 +393,17 @@ function ipsInOrder() {
 }
 
 /**
- * Gestisce il click su una card studente con i modificatori della tastiera:
- *   - plain click       : focus singolo (toggle), clear selezione multipla
- *   - Ctrl/Cmd + click  : aggiunge/rimuove dalla selezione
- *   - Shift + click     : range da selectionAnchor (escluso) fino a `ip` (incluso)
+ * Gestisce il click su una card / riga studente. Tre comportamenti:
+ *   - plain click       : toggle detail pane sull'IP, azzera selezione multi
+ *   - Ctrl/Cmd + click  : toggle dell'IP nella selezione multi.
+ *                         Se c'era un detail aperto, l'IP del detail viene
+ *                         INCORPORATO nella selezione (non perso) prima del
+ *                         toggle. Il detail viene chiuso.
+ *   - Shift + click     : range da anchor a IP (estremi inclusi).
+ *                         Se c'era un detail aperto, il suo IP viene aggiunto
+ *                         al range. Il detail viene chiuso.
+ *
+ * Anchor viene aggiornato sempre all'IP cliccato.
  */
 export function handleCardClick(ip, ev) {
     if (ev && ev.shiftKey && state.selectionAnchor) {
@@ -157,22 +412,36 @@ export function handleCardClick(ip, ev) {
         const i2 = list.indexOf(ip);
         if (i1 >= 0 && i2 >= 0) {
             const [lo, hi] = i1 < i2 ? [i1, i2] : [i2, i1];
-            for (let k = lo; k <= hi; k++) state.selectedIps.add(list[k]);
+            const range = new Set();
+            for (let k = lo; k <= hi; k++) range.add(list[k]);
+            // Conserva l'IP del detail pane se aperto: entra nel range.
+            if (state.detailIp) range.add(state.detailIp);
+            state.selectedIps = range;
+            state.detailIp = null;
+            state.focusIp = null;
+            state.selectionAnchor = ip;
             renderAll();
             return;
         }
     }
     if (ev && (ev.ctrlKey || ev.metaKey)) {
+        // Se c'era un detail aperto e niente in selezione, includilo come
+        // primo elemento prima del toggle dell'IP cliccato.
+        if (state.detailIp && state.selectedIps.size === 0) {
+            state.selectedIps.add(state.detailIp);
+        }
         if (state.selectedIps.has(ip)) state.selectedIps.delete(ip);
         else state.selectedIps.add(ip);
+        state.detailIp = null;
+        state.focusIp = null;
         state.selectionAnchor = ip;
         renderAll();
         return;
     }
-    // plain click: comportamento legacy (toggle focus) + clear selezione
+    // plain click: apre/chiude il detail pane, azzera selezione multi.
     state.selectedIps.clear();
     state.selectionAnchor = ip;
-    setFocus(ip);
+    toggleDetail(ip);
 }
 
 /** Svuota la selezione multipla. */
@@ -185,8 +454,8 @@ export function clearSelection() {
 export function setFiltro(val) { state.filtro = val; renderAll(); }
 
 export function toggleSezione(nome) {
-    const lista = document.getElementById('domini-' + nome + '-list');
-    if (lista) lista.classList.toggle('hidden');
+    const sez = document.getElementById('sezione-' + nome);
+    if (sez) sez.classList.toggle('collapsed');
 }
 
 export function cambiaVistaIp(vista) {
@@ -201,12 +470,14 @@ export function toggleSidebar() {
     state.sidebarCollassata = !state.sidebarCollassata;
     salvaCollassi();
     applicaCollassi();
+    renderAll(); // sync frecce SVG dei toggle in toolbar
 }
 
 export function toggleRichieste() {
     state.richiesteCollassate = !state.richiesteCollassate;
     salvaCollassi();
     applicaCollassi();
+    renderAll();
 }
 
 export function applicaCollassi() {
@@ -214,6 +485,12 @@ export function applicaCollassi() {
     const pr = document.getElementById('panel-richieste');
     if (sb) sb.classList.toggle('collassata', state.sidebarCollassata);
     if (pr) pr.classList.toggle('collassata', state.richiesteCollassate);
+    // Feedback visivo "attivo" sui bottoni quando le rispettive sidebar
+    // sono APERTE (non collassate). Coerente con btn-toggle-log/EVENTI.
+    const btnSb = document.getElementById('btn-toggle-sidebar');
+    const btnSt = document.getElementById('btn-toggle-stream');
+    if (btnSb) btnSb.classList.toggle('attivo', !state.sidebarCollassata);
+    if (btnSt) btnSt.classList.toggle('attivo', !state.richiesteCollassate);
 }
 
 // ========================================================================
@@ -256,105 +533,22 @@ export function cambiaTab(nome) {
     if (nome === 'impostazioni') veyonAggiornaStato();
 }
 
-// ========================================================================
-// Studenti (mappa IP -> nome) — endpoint /api/students/* in v2
-// ========================================================================
-
-export async function modificaStudente(ip, nome) {
-    const val = (nome || '').trim();
-    if (!val) { await eliminaStudente(ip); return; }
-    await apiPost('/api/students/set', { ip, nome: val });
+/** Switch tra i sub-tab di Impostazioni (Generale / Rete / Domini / etc.). */
+export function cambiaSubtabImpostazioni(nome) {
+    if (!nome) return;
+    state.settingsSubtab = nome;
+    localStorage.setItem('settingsSubtab', nome);
+    document.querySelectorAll('.settings-tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.subtab === nome);
+    });
+    document.querySelectorAll('.settings-tab-panel').forEach(p => {
+        p.classList.toggle('active', p.dataset.subtab === nome);
+    });
 }
 
-export async function eliminaStudente(ip) {
-    await apiPost('/api/students/delete', { ip });
-}
-
-export async function aggiungiStudente() {
-    const ipEl = document.getElementById('nuovo-ip');
-    const nomeEl = document.getElementById('nuovo-nome');
-    const ip = (ipEl.value || '').trim();
-    const nome = (nomeEl.value || '').trim();
-    if (!ip || !nome) { toast.error('Inserisci sia IP che nome.'); return; }
-    const r = await apiPost('/api/students/set', { ip, nome });
-    if (r.ok) { ipEl.value = ''; nomeEl.value = ''; ipEl.focus(); }
-    else toast.error('Errore: ' + (r.error || ''));
-}
-
-export async function svuotaMappaStudenti() {
-    if (!confirm('Svuotare completamente la mappa studenti?')) return;
-    await apiPost('/api/students/clear');
-}
-
-/**
- * Legacy: in v1 c'era un endpoint /api/reload-studenti per ri-leggere
- * il file da disco. In v2 la mappa e' caricata al boot e ogni mutazione
- * UI viene persistita; la rilettura non serve in pratica, ma se qualcuno
- * edita studenti.json a mano serve un riavvio. Per ora questa funzione
- * fa solo un GET /api/config che ricarica gli studenti dal server.
- */
-export async function ricaricaStudenti() {
-    const cfg = await apiGet('/api/config');
-    if (cfg && cfg.studenti) {
-        state.cfg.studenti = cfg.studenti;
-        renderAll();
-    }
-}
-
-// ========================================================================
-// Classi (coppia classe + laboratorio)
-// ========================================================================
-
-function leggiSelCombo() {
-    return {
-        classe: (document.getElementById('sel-classe')?.value || '').trim(),
-        lab: (document.getElementById('sel-lab')?.value || '').trim(),
-    };
-}
-
-export async function caricaCombo() {
-    const { classe, lab } = leggiSelCombo();
-    if (!classe || !lab) return;
-    if (!confirm(`Caricare la mappa "${classe}" in "${lab}"?\n\nLa mappa attuale verra' sostituita.`)) return;
-    const r = await apiPost('/api/classi/load', { classe, lab });
-    if (!r.ok) toast.error('Errore caricamento mappa: ' + (r.error || ''));
-}
-
-export async function salvaCombo() {
-    const { classe: precClasse, lab: precLab } = leggiSelCombo();
-    const classe = prompt('Nome classe (lettere, numeri, _ -):\nEsempio: 4dii', precClasse || '');
-    if (!classe) return;
-    const lab = prompt('Nome laboratorio (lettere, numeri, _ -):\nEsempio: lab1', precLab || '');
-    if (!lab) return;
-    const r = await apiPost('/api/classi/save', { classe, lab });
-    if (r.ok) {
-        // Refresh elenco classi
-        const lista = await apiGet('/api/classi');
-        state.cfg.classi = lista.classi || [];
-        toast.success(`Salvata: ${classe} in ${lab}`);
-        const selC = document.getElementById('sel-classe');
-        const selL = document.getElementById('sel-lab');
-        if (selC) selC.value = classe;
-        if (selL) selL.value = lab;
-        renderAll();
-    } else toast.error('Errore salvataggio: ' + (r.error || ''));
-}
-
-export async function eliminaCombo() {
-    const { classe, lab } = leggiSelCombo();
-    if (!classe || !lab) return;
-    if (!confirm(`Eliminare la combinazione "${classe} / ${lab}"?`)) return;
-    const r = await apiPost('/api/classi/delete', { classe, lab });
-    if (r.ok) {
-        const lista = await apiGet('/api/classi');
-        state.cfg.classi = lista.classi || [];
-        renderAll();
-    }
-}
-
-export function aggiornaStatoCombo() {
-    renderAll();
-}
+// (Rimosso in v2.6.0: edit nome studente, classi/lab salvate.)
+// La mappa "studenti" e' ora una semplice lista di IP del /24 corrente,
+// generata server-side al boot. Niente CRUD, niente persistence.
 
 // ========================================================================
 // Settings (config modificabile da UI)
@@ -590,13 +784,38 @@ export async function veyonSendFeature(ip, feature, command, args) {
 /** ScreenLock su un singolo studente. */
 export async function veyonCardLock(ip) {
     if (!state.veyonConfigured) return;
-    await veyonSendFeature(ip, 'screenLock');
+    const ok = await veyonSendFeature(ip, 'screenLock');
+    if (ok) {
+        state.lockedIps.add(ip);
+        renderAll();
+    }
 }
 
 /** Sblocca lo schermo di un singolo studente. */
 export async function veyonCardUnlock(ip) {
     if (!state.veyonConfigured) return;
-    await veyonSendFeature(ip, 'screenUnlock');
+    const ok = await veyonSendFeature(ip, 'screenUnlock');
+    if (ok) {
+        state.lockedIps.delete(ip);
+        renderAll();
+    }
+}
+
+/** Invia il proxy_on.vbs al singolo studente (shortcut dal detail pane). */
+export async function veyonCardDistribuisciProxy(ip) {
+    if (!state.veyonConfigured) return;
+    const r = await apiPost('/api/veyon/distribuisci-proxy', { ips: [ip] });
+    if (r.ok) toast.success('Proxy inviato a ' + ip);
+    else toast.error('Invio fallito: ' + (r.error || ''));
+}
+
+/** Disinstalla il proxy dal singolo studente (chiama proxy_off.vbs). */
+export async function veyonCardDisinstallaProxy(ip) {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Rimuovere il proxy da ' + ip + '?')) return;
+    const r = await apiPost('/api/veyon/disinstalla-proxy', { ips: [ip] });
+    if (r.ok) toast.success('Proxy rimosso da ' + ip);
+    else toast.error('Disinstallazione fallita: ' + (r.error || ''));
 }
 
 /** Apre una prompt e invia un TextMessage modale. */
@@ -646,14 +865,19 @@ function targetIps() {
     return { ips: a, desc: a.length + ' studenti attivi' };
 }
 
-/** Esegue una callback async per ogni IP target, raccoglie ok/fail. */
-async function veyonForEachTarget(label, fn) {
+/**
+ * Esegue una callback async per ogni IP target, raccoglie ok/fail.
+ * `skipConfirm=true` salta il confirm() nativo (usato per azioni
+ * non distruttive: lock/unlock/messaggio/proxy on/off). Le azioni
+ * distruttive (reboot, poweroff) lo lasciano a false di default.
+ */
+async function veyonForEachTarget(label, fn, skipConfirm = false) {
     const { ips, desc } = targetIps();
     if (!ips.length) {
         toast.info('Nessuno studente nel target. Compila la mappa studenti o aspetta che pinghino il watchdog.');
         return;
     }
-    if (!confirm(label + ' su ' + desc + '?')) return;
+    if (!skipConfirm && !confirm(label + ' su ' + desc + '?')) return;
     let ok = 0, fail = 0;
     await Promise.all(ips.map(async ip => {
         try { (await fn(ip)) ? ok++ : fail++; }
@@ -669,22 +893,44 @@ async function veyonForEachTarget(label, fn) {
 /** ScreenLock su tutti i target (selezione/mappa studenti/attivi). */
 export async function veyonClasseLock() {
     if (!state.veyonConfigured) return;
-    await veyonForEachTarget('ScreenLock', ip => veyonSendFeature(ip, 'screenLock'));
+    await veyonForEachTarget('ScreenLock', async (ip) => {
+        const ok = await veyonSendFeature(ip, 'screenLock');
+        if (ok) state.lockedIps.add(ip);
+        return ok;
+    }, /*skipConfirm*/ true);
+    renderAll();
 }
 
 /** ScreenUnlock su tutti i target. */
 export async function veyonClasseUnlock() {
     if (!state.veyonConfigured) return;
-    await veyonForEachTarget('ScreenUnlock', ip => veyonSendFeature(ip, 'screenUnlock'));
+    await veyonForEachTarget('ScreenUnlock', async (ip) => {
+        const ok = await veyonSendFeature(ip, 'screenUnlock');
+        if (ok) state.lockedIps.delete(ip);
+        return ok;
+    }, /*skipConfirm*/ true);
+    renderAll();
 }
 
-/** TextMessage su tutti i target. */
+/** TextMessage su tutti i target — modal in stile app invece di prompt(). */
 export async function veyonClasseMsg() {
     if (!state.veyonConfigured) return;
-    const text = prompt('Messaggio da mostrare:', '');
-    if (!text) return;
+    const { ips, desc } = targetIps();
+    if (!ips.length) {
+        toast.info('Nessuno studente nel target. Compila la mappa studenti o aspetta che pinghino il watchdog.');
+        return;
+    }
+    const text = await showPromptModal({
+        title: 'Invia messaggio a ' + desc,
+        placeholder: 'Scrivi il messaggio da mostrare agli studenti...',
+        okLabel: 'Invia',
+        cancelLabel: 'Annulla',
+    });
+    if (text === null || !text.trim()) return;
     // TextMessage Argument enum: Text=0, Icon=1.
-    await veyonForEachTarget('TextMessage', ip => veyonSendFeature(ip, 'textMsg', 0, { '0': text, '1': 1 }));
+    await veyonForEachTarget('TextMessage',
+        ip => veyonSendFeature(ip, 'textMsg', 0, { '0': text.trim(), '1': 1 }),
+        /*skipConfirm*/ true);
 }
 
 /** Reboot su tutti i target. */
@@ -729,8 +975,20 @@ export async function veyonDistribuisciProxy() {
  */
 export async function veyonDisinstallaProxy() {
     if (!state.veyonConfigured) return;
-    if (!confirm('Rimuovere il proxy da tutti i target?')) return;
     await veyonDistribuisciHelper('/api/veyon/disinstalla-proxy', 'Disinstallazione proxy');
+}
+
+/**
+ * Distribuisce firefox_lockdown.vbs sui target: scrive policies.json
+ * nelle distribution dir di Firefox (Mode: system, Locked: true) per
+ * impedire allo studente di disattivare il proxy dalle Preferenze
+ * Firefox. Setup one-shot per laboratorio — il policies persiste
+ * finche' qualcuno non lo cancella manualmente.
+ */
+export async function veyonFirefoxLockdown() {
+    if (!state.veyonConfigured) return;
+    if (!confirm('Distribuire il lockdown Firefox a tutti gli studenti?\n\nLo script scrivera\' policies.json in Program Files\\Mozilla Firefox\\distribution\\.\nE\' un\'operazione one-shot per il setup del laboratorio.')) return;
+    await veyonDistribuisciHelper('/api/veyon/distribuisci-firefox-lockdown', 'Lockdown Firefox');
 }
 
 /** Helper interno: chiama un endpoint distribuzione bat con i target attuali. */
@@ -740,7 +998,6 @@ async function veyonDistribuisciHelper(endpoint, label) {
         toast.info('Nessuno studente nel target. Compila la mappa studenti.');
         return;
     }
-    if (!confirm(label + ' su ' + desc + '?')) return;
 
     const r = await apiPost(endpoint, { ips });
     if (r.ok) {
@@ -845,6 +1102,10 @@ export async function watchdogSaveConfig(pluginId) {
     });
     if (r.ok) {
         plugin.config = cfg;
+        // Sgancia il marcatore "modifiche non salvate": il prossimo render
+        // puo' risincronizzare la textarea col JSON canonico del server.
+        // Vedi `aggiornaBloccoPlugin` in render.js.
+        delete ta.dataset.serverValue;
         toast.success('Config salvata. Per propagarla agli studenti gia\' attivi, ridistribuisci il proxy.');
         renderAll();
     } else {

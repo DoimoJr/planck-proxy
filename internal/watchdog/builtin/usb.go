@@ -41,7 +41,7 @@ func (UsbPlugin) DefaultConfig() any {
 	return UsbConfig{
 		IgnoredClasses: []string{
 			"HIDClass", "Mouse", "Keyboard",
-			"USB",          // root hub
+			"USB", // root hub
 			"Bluetooth",
 			"AudioEndpoint", "MEDIA",
 			"System", "DiskDrive", // disco interno

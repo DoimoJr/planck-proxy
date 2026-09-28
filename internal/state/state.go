@@ -31,14 +31,6 @@ type Entry struct {
 	Blocked bool          `json:"blocked"`
 }
 
-// Combo identifica una mappa salvata di studenti per coppia (classe, lab).
-// Stub in 1.4-1.5; la persistenza su disco arriva in Phase 1.6.
-type Combo struct {
-	Classe string `json:"classe"`
-	Lab    string `json:"lab"`
-	File   string `json:"file"`
-}
-
 // Broker e' l'interfaccia minima che State usa per emettere eventi SSE.
 type Broker interface {
 	Broadcast(msg any)
@@ -100,9 +92,24 @@ type State struct {
 	// gia' emesso l'evento "stopped" e stiamo aspettando un
 	// nuovo heartbeat per "resumed" (evita flooding).
 	watchdogStoppedAlerted map[string]map[string]bool
+	// watchdogAllStoppedAlerted[ip] = true se abbiamo gia' emesso
+	// l'evento aggregato "all-stopped" (severity critical) per quel
+	// IP. Evita duplicati nel ciclo checkHeartbeats. Resettato al
+	// primo resumed ricevuto da quell'IP.
+	watchdogAllStoppedAlerted map[string]bool
+	// proxyRemovedAt[ip] = ms epoch del momento in cui l'utente ha
+	// chiesto Remove proxy per quell'IP. Per il "grace period" di
+	// ProxyRemovedGrace dopo, checkHeartbeats salta gli alert per
+	// quell'IP (atteso che vada silente, e' l'utente ad averlo
+	// chiesto). Cancellato quando un nuovo heartbeat torna ad
+	// arrivare (proxy reinstallato) o naturalmente decade.
+	proxyRemovedAt map[string]int64
 
 	// --- Liste ---
-	bloccati       map[string]struct{}
+	bloccati map[string]struct{}
+	// blocchiPerIp[ip] = set di domini bloccati SOLO per quell'IP
+	// (additivi rispetto alla blocklist globale). Persistito su DB.
+	blocchiPerIp   map[string]map[string]struct{}
 	dominiIgnorati []string
 	studenti       map[string]string
 
@@ -120,6 +127,11 @@ type State struct {
 	pausato       bool
 	deadlineISO   string
 	deadlineTimer *time.Timer
+
+	// --- Discovery ---
+	// Se true, lo scan LAN considera vivi SOLO i PC con :11100 aperto
+	// (Veyon Service installato). Default true. Toggle dall'UI Impostazioni.
+	discoverVeyonOnly bool
 }
 
 // New costruisce uno State con default sensati e store NoOp (in-memory).
@@ -129,31 +141,37 @@ func New(broker Broker) *State {
 }
 
 // NewWithStore costruisce uno State con un Store SQLite.
-// I dati vengono caricati dal DB al boot (config, studenti, bloccati);
-// se il DB e' fresh si parte coi default.
+// Carica dal DB: config (titolo, modo, soglia, porte, auth, ignorati) e
+// blocklist. NON carica piu' la mappa studenti ne' la chiave Veyon: sono
+// rigenerate ad ogni boot (il binario e' portatile tra laboratori → ogni
+// avvio rigenera lo stato dipendente dalla LAN corrente).
 func NewWithStore(broker Broker, st *store.Store) *State {
 	ignorati := make([]string, len(dominiIgnoratiDefault))
 	copy(ignorati, dominiIgnoratiDefault)
 
 	s := &State{
-		broker:              broker,
-		store:               st,
-		titolo:              "Planck Proxy",
-		classe:              "",
-		modo:                "blocklist",
-		inattivitaSogliaSec: 180,
-		proxyPort:           9090,
-		webPort:             9999,
-		authEnabled:         false,
-		authUser:            "docente",
-		authPasswordHash:    "",
-		bloccati:            map[string]struct{}{},
-		dominiIgnorati:      ignorati,
-		studenti:            map[string]string{},
-		storia:              make([]Entry, 0, 256),
-		aliveMap:               map[string]int64{},
-		watchdogHeartbeats:     map[string]map[string]int64{},
-		watchdogStoppedAlerted: map[string]map[string]bool{},
+		broker:                    broker,
+		store:                     st,
+		titolo:                    "Planck Proxy",
+		classe:                    "",
+		modo:                      "blocklist",
+		inattivitaSogliaSec:       180,
+		proxyPort:                 9090,
+		webPort:                   9999,
+		authEnabled:               false,
+		authUser:                  "docente",
+		authPasswordHash:          "",
+		bloccati:                  map[string]struct{}{},
+		blocchiPerIp:              map[string]map[string]struct{}{},
+		dominiIgnorati:            ignorati,
+		studenti:                  map[string]string{},
+		discoverVeyonOnly:         true,
+		storia:                    make([]Entry, 0, 256),
+		aliveMap:                  map[string]int64{},
+		watchdogHeartbeats:        map[string]map[string]int64{},
+		watchdogStoppedAlerted:    map[string]map[string]bool{},
+		watchdogAllStoppedAlerted: map[string]bool{},
+		proxyRemovedAt:            map[string]int64{},
 	}
 
 	// Carica config persistita (se esiste).
@@ -182,17 +200,13 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		if len(cfg.DominiIgnorati) > 0 {
 			s.dominiIgnorati = cfg.DominiIgnorati
 		}
-		s.veyonKeyName = cfg.VeyonKeyName
+		// veyonKeyName / studenti NON caricati da DB: rigenerati ad ogni
+		// boot (chiave via veyon-cli del PC corrente; mappa via range
+		// /24 del LAN IP corrente).
 		s.veyonPort = cfg.VeyonPort
+		s.discoverVeyonOnly = cfg.DiscoverVeyonOnly
 	} else if err != nil {
 		log.Printf("state: errore lettura config: %v", err)
-	}
-
-	// Carica mappa studenti correnti.
-	if stud, err := st.LoadStudenti(); err == nil {
-		s.studenti = stud
-	} else {
-		log.Printf("state: errore lettura studenti: %v", err)
 	}
 
 	// Carica blocklist.
@@ -202,6 +216,19 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 		}
 	} else {
 		log.Printf("state: errore lettura blocklist: %v", err)
+	}
+
+	// Carica blocchi per-IP.
+	if perIp, err := st.LoadBloccatiPerIp(); err == nil {
+		for ip, doms := range perIp {
+			set := make(map[string]struct{}, len(doms))
+			for _, d := range doms {
+				set[d] = struct{}{}
+			}
+			s.blocchiPerIp[ip] = set
+		}
+	} else {
+		log.Printf("state: errore lettura bloccati_per_ip: %v", err)
 	}
 
 	return s
@@ -225,8 +252,8 @@ func (s *State) saveConfigLocked() {
 		AuthUser:            s.authUser,
 		AuthPasswordHash:    s.authPasswordHash,
 		DominiIgnorati:      append([]string{}, s.dominiIgnorati...),
-		VeyonKeyName:        s.veyonKeyName,
 		VeyonPort:           s.veyonPort,
+		DiscoverVeyonOnly:   s.discoverVeyonOnly,
 	}
 	if err := s.store.SaveConfig(cfg); err != nil {
 		log.Printf("state: errore save config: %v", err)
@@ -236,6 +263,14 @@ func (s *State) saveConfigLocked() {
 // Store esposto per i handler API che hanno bisogno di operare direttamente
 // sul DB (es. CRUD presets, listing sessioni).
 func (s *State) Store() *store.Store { return s.store }
+
+// DiscoverVeyonOnly ritorna lo stato corrente del flag (thread-safe).
+// Letto dal loop di discovery in main.go.
+func (s *State) DiscoverVeyonOnly() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discoverVeyonOnly
+}
 
 // SetLanIP imposta il LAN IP del docente, settato a boot da main.go (auto-
 // detected o env PLANCK_LAN_IP). Esposto via /api/config per la UI.
@@ -303,6 +338,23 @@ func (s *State) RegistraTraffic(ip, metodo, dominio string, blocked bool, tipo c
 		Type  string `json:"type"`
 		Entry Entry  `json:"entry"`
 	}{Type: "traffic", Entry: entry})
+}
+
+// ResetRuntime svuota i buffer runtime: storia traffic + tracking
+// alert-stato watchdog. NON tocca DB persistito (sessioni, eventi
+// storici): solo la memoria volatile e la coda usata da SSE/UI live.
+// Broadcast `{type:"reset-runtime"}` ai client per pulire le mappe
+// aggregate. Usato dal pulsante Reset dell'UI.
+func (s *State) ResetRuntime() {
+	s.mu.Lock()
+	s.storia = s.storia[:0]
+	s.watchdogStoppedAlerted = map[string]map[string]bool{}
+	s.watchdogAllStoppedAlerted = map[string]bool{}
+	s.mu.Unlock()
+
+	s.broker.Broadcast(struct {
+		Type string `json:"type"`
+	}{Type: "reset-runtime"})
 }
 
 // RegistraAlive aggiorna aliveMap[ip] e broadcasta `{type:"alive",ip,ts}`.

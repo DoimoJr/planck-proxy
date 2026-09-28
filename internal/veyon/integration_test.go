@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	testKeyName  = "planck-test"
-	testKeyPath  = "../../test/veyon-rig/keys/planck-test_private.pem"
-	testServer   = "localhost:11100"
+	testKeyName = "planck-test"
+	testKeyPath = "../../test/veyon-rig/keys/planck-test_private.pem"
+	testServer  = "localhost:11100"
 )
 
 // dialRig apre una connessione contro il Docker rig. Helper condiviso

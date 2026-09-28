@@ -13,7 +13,7 @@
  */
 
 import { state, assorbiEntry, resetDatiTraffico } from './state.js';
-import { renderAll, aggiornaInputDeadline } from './render.js';
+import { renderAll, aggiornaInputDeadline, flashCardTraffic } from './render.js';
 import { $ } from './util.js';
 
 let audioCtx = null;
@@ -61,25 +61,6 @@ function beep() {
 }
 
 /**
- * Mostra il banner rosso lampeggiante per 5s con il dominio AI rilevato.
- * Sparisce dopo 5s (timer reimpostato se arrivano nuove detection).
- * Emette anche notifica desktop + beep se le notifiche sono attive.
- * @param {string} dominio
- */
-function lampeggiaBannerAI(dominio) {
-    const b = $('ai-banner');
-    b.textContent = `ATTENZIONE: accesso AI rilevato - ${dominio}`;
-    b.style.display = 'block';
-    clearTimeout(lampeggiaBannerAI._t);
-    lampeggiaBannerAI._t = setTimeout(() => { b.style.display = 'none'; }, 5000);
-
-    if (state.notifiche && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        try { new Notification('AI rilevata', { body: dominio, silent: true }); } catch {}
-    }
-    beep();
-}
-
-/**
  * Mostra il banner "TEMPO SCADUTO" (resta visibile fino al prossimo reset),
  * emette notifica desktop non silenziosa + tripla serie di beep.
  */
@@ -101,10 +82,25 @@ function lampeggiaBannerDeadline() {
  */
 function setStato(connesso) {
     state.connesso = connesso;
-    const card = $('stat-status').parentElement;
-    card.classList.remove('connected', 'disconnected');
-    card.classList.add(connesso ? 'connected' : 'disconnected');
-    $('stat-status').textContent = connesso ? 'LIVE' : 'OFF';
+    // Stat card "Status" (Claude Designer redesign): contenitore con
+    // .live-pill > dot + label. Quando disconnessi cambiamo dot.ok→dot.alert
+    // e testo LIVE→OFF. Null-guard se la card e' assente in qualche layout.
+    const pill = document.querySelector('.stat-card.status .live-pill');
+    if (pill) {
+        const dot = pill.querySelector('.dot');
+        if (dot) {
+            dot.classList.toggle('ok', connesso);
+            dot.classList.toggle('alert', !connesso);
+        }
+        // Aggiorna solo il text node finale (l'ultimo nodo testuale),
+        // preserva il dot SVG/span.
+        const last = pill.lastChild;
+        if (last && last.nodeType === Node.TEXT_NODE) {
+            last.textContent = connesso ? ' LIVE' : ' OFF';
+        } else {
+            pill.appendChild(document.createTextNode(connesso ? ' LIVE' : ' OFF'));
+        }
+    }
 
     // Banner top "riconnessione..." quando perdiamo SSE.
     const banner = document.getElementById('connection-banner');
@@ -131,9 +127,11 @@ function setStato(connesso) {
  * | `alive`            | Aggiorna `aliveMap[ip] = ts` (dot watchdog).                   |
  */
 export function avviaSSE() {
+    console.log('[planck] avviaSSE() opening EventSource /api/stream');
     const es = new EventSource('/api/stream');
-    es.onopen = () => setStato(true);
-    es.onerror = () => {
+    es.onopen = () => { console.log('[planck] SSE onopen'); setStato(true); };
+    es.onerror = (e) => {
+        console.warn('[planck] SSE onerror', e, 'readyState=', es.readyState);
         setStato(false);
         es.close();
         setTimeout(avviaSSE, 2000);
@@ -142,12 +140,33 @@ export function avviaSSE() {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'traffic') {
             trafficBatch.push(msg.entry);
+            // Flash sulla card dello studente: feedback visivo immediato
+            // ad ogni richiesta. Skip per traffic 'sistema' (rumore, fa
+            // vibrare la card senza informazione utile).
+            if (msg.entry.tipo !== 'sistema') {
+                flashCardTraffic(msg.entry.ip);
+            }
+            // Beep + notifica desktop quando arriva un dominio AI nuovo:
+            // il banner alert unificato (renderAlertBanner) si occupa
+            // della parte visiva, qui solo audio/notifica se attivi.
             if (msg.entry.tipo === 'ai' && !state.bloccati.has(msg.entry.dominio)) {
-                lampeggiaBannerAI(msg.entry.dominio);
+                if (state.notifiche && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                    try { new Notification('AI rilevata', { body: msg.entry.dominio, silent: true }); } catch {}
+                }
+                beep();
             }
             scheduleTrafficFlush();
         } else if (msg.type === 'blocklist') {
+            console.log('[planck] SSE blocklist update, list size=', (msg.list||[]).length);
             state.bloccati = new Set(msg.list);
+            renderAll();
+        } else if (msg.type === 'blocchi-per-ip') {
+            const perIp = msg.perIp || {};
+            console.log('[planck] SSE blocchi-per-ip update, ip count=', Object.keys(perIp).length);
+            state.blocchiPerIp = new Map();
+            for (const [ip, doms] of Object.entries(perIp)) {
+                state.blocchiPerIp.set(ip, new Set(doms));
+            }
             renderAll();
         } else if (msg.type === 'reset') {
             trafficBatch.length = 0;
@@ -186,6 +205,36 @@ export function avviaSSE() {
             renderAll();
         } else if (msg.type === 'alive') {
             state.aliveMap.set(msg.ip, msg.ts);
+            renderAll();
+        } else if (msg.type === 'plugin-alive') {
+            let inner = state.alivePluginMap.get(msg.ip);
+            if (!inner) { inner = new Map(); state.alivePluginMap.set(msg.ip, inner); }
+            inner.set(msg.plugin, msg.ts);
+            renderAll();
+        } else if (msg.type === 'proxy-removed') {
+            // L'utente ha appena chiesto Remove proxy: pulisci la card
+            // (proxy grigio, plugin grigio) senza aspettare il timeout
+            // naturale. Pulisco anche gli eventi watchdog "appiccicati"
+            // di quell'IP cosi' la card riparte pulita: dopo
+            // remove+rimando deve sembrare un nuovo studente, non
+            // ereditare il giallo dell'evento precedente.
+            state.aliveMap.delete(msg.ip);
+            state.alivePluginMap.delete(msg.ip);
+            state.watchdogEventsPerIp.delete(msg.ip);
+            renderAll();
+        } else if (msg.type === 'reset-runtime') {
+            // Pulizia client: storia traffic, eventi watchdog runtime,
+            // marker eventi ignorati. NON tocca aliveMap (heartbeat
+            // continuano dai PC ancora vivi).
+            state.entries.length = 0;
+            state.perIp.clear();
+            state.perDominio.clear();
+            state.ultimaPerIp.clear();
+            state.watchdogEvents.length = 0;
+            state.watchdogEventsPerIp.clear();
+            state.eventiIgnoredIds.clear();
+            state.bannerDismissed = false;
+            state.bannerLastEventKey = null;
             renderAll();
         } else if (msg.type === 'ai-list') {
             state.aiList = {

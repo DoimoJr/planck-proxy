@@ -60,22 +60,8 @@ func (s *Store) MigrateFromFiles(filesDir string) (imported []string, err error)
 		}
 	}
 
-	// 2) studenti.json
-	if m, ok := readJSONFile[map[string]string](filepath.Join(filesDir, "studenti.json")); ok {
-		// Drop chiavi commento "_*"
-		clean := make(map[string]string, len(m))
-		for k, v := range m {
-			if !strings.HasPrefix(k, "_") {
-				clean[k] = v
-			}
-		}
-		if err := s.SaveStudenti(clean); err != nil {
-			log.Printf("migrate v1 studenti: %v", err)
-		} else {
-			imported = append(imported, "studenti.json")
-			renameToBak(filepath.Join(filesDir, "studenti.json"))
-		}
-	}
+	// 2) studenti.json — rimosso in v2.6.0 (mappa studenti non e' piu'
+	//    persistita: rigenerata ad ogni boot dal /24 corrente).
 
 	// 3) _blocked_domains.txt
 	if body, err := os.ReadFile(filepath.Join(filesDir, "_blocked_domains.txt")); err == nil {
@@ -116,27 +102,8 @@ func (s *Store) MigrateFromFiles(filesDir string) (imported []string, err error)
 		}
 	}
 
-	// 5) classi/*.json
-	classiEntries, _ := os.ReadDir(filepath.Join(filesDir, "classi"))
-	for _, e := range classiEntries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(filesDir, "classi", e.Name())
-		if c, ok := readJSONFile[v1Classe](path); ok {
-			if err := s.SaveClasse(ClasseFile{
-				Classe:    c.Classe,
-				Lab:       c.Lab,
-				Mappa:     c.Mappa,
-				UpdatedAt: c.UpdatedAt,
-			}); err != nil {
-				log.Printf("migrate v1 classe %s: %v", e.Name(), err)
-			} else {
-				imported = append(imported, "classi/"+e.Name())
-				renameToBak(path)
-			}
-		}
-	}
+	// 5) classi/*.json — rimosso in v2.6.0 (concetto "classe/laboratorio
+	//    salvato" eliminato: ogni boot e' un laboratorio diverso).
 
 	// 6) sessioni/*.json (snapshot archiviati)
 	// Il formato v1 ha entries come array di oggetti completi; li importiamo
@@ -267,13 +234,6 @@ type v1Preset struct {
 	Descrizione string   `json:"descrizione"`
 	Domini      []string `json:"domini"`
 	CreatedAt   int64    `json:"createdAt"`
-}
-
-type v1Classe struct {
-	Classe    string            `json:"classe"`
-	Lab       string            `json:"lab"`
-	Mappa     map[string]string `json:"mappa"`
-	UpdatedAt int64             `json:"updatedAt"`
 }
 
 type v1Archive struct {

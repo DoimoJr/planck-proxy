@@ -152,16 +152,16 @@ End Sub
 // proxyOffTemplate e' il contenuto di proxy_off.vbs.
 //
 // Sequenza (importante l'ordine):
-//   1. Crea il flag file `planck_stop.flag`. Il watchdog VBS lo controlla
-//      ad ogni iterazione e si auto-termina quando lo trova (kill "gentile",
-//      sempre affidabile, non dipende da WMIC ne' privilegi).
-//   2. Aspetta 6 secondi (un ciclo intero del watchdog = 5s + margine).
-//   3. Disabilita ProxyEnable in HKCU.
-//   4. Kill defensivo via PowerShell (`Get-CimInstance` + `Stop-Process`)
-//      di eventuali processi residui — sostituisce WMIC che e' deprecato/
-//      rimosso in Windows 11 24H2+ e causa il bug "il proxy non si toglie
-//      davvero" perche' il watchdog continuava a girare.
-//   5. Cleanup temp + self-delete.
+//  1. Crea il flag file `planck_stop.flag`. Il watchdog VBS lo controlla
+//     ad ogni iterazione e si auto-termina quando lo trova (kill "gentile",
+//     sempre affidabile, non dipende da WMIC ne' privilegi).
+//  2. Aspetta 6 secondi (un ciclo intero del watchdog = 5s + margine).
+//  3. Disabilita ProxyEnable in HKCU.
+//  4. Kill defensivo via PowerShell (`Get-CimInstance` + `Stop-Process`)
+//     di eventuali processi residui — sostituisce WMIC che e' deprecato/
+//     rimosso in Windows 11 24H2+ e causa il bug "il proxy non si toglie
+//     davvero" perche' il watchdog continuava a girare.
+//  5. Cleanup temp + self-delete.
 const proxyOffTemplate = `' ============================================================
 ' Planck Proxy v__VERSIONE__ - proxy_off.vbs
 ' Disattiva il proxy + ferma tutti i watchdog. Invisibile.

@@ -106,7 +106,7 @@ type State struct {
 	proxyRemovedAt map[string]int64
 
 	// --- Liste ---
-	bloccati       map[string]struct{}
+	bloccati map[string]struct{}
 	// blocchiPerIp[ip] = set di domini bloccati SOLO per quell'IP
 	// (additivi rispetto alla blocklist globale). Persistito su DB.
 	blocchiPerIp   map[string]map[string]struct{}
@@ -150,24 +150,24 @@ func NewWithStore(broker Broker, st *store.Store) *State {
 	copy(ignorati, dominiIgnoratiDefault)
 
 	s := &State{
-		broker:              broker,
-		store:               st,
-		titolo:              "Planck Proxy",
-		classe:              "",
-		modo:                "blocklist",
-		inattivitaSogliaSec: 180,
-		proxyPort:           9090,
-		webPort:             9999,
-		authEnabled:         false,
-		authUser:            "docente",
-		authPasswordHash:    "",
-		bloccati:            map[string]struct{}{},
-		blocchiPerIp:        map[string]map[string]struct{}{},
-		dominiIgnorati:      ignorati,
-		studenti:            map[string]string{},
-		discoverVeyonOnly:   true,
-		storia:              make([]Entry, 0, 256),
-		aliveMap:               map[string]int64{},
+		broker:                    broker,
+		store:                     st,
+		titolo:                    "Planck Proxy",
+		classe:                    "",
+		modo:                      "blocklist",
+		inattivitaSogliaSec:       180,
+		proxyPort:                 9090,
+		webPort:                   9999,
+		authEnabled:               false,
+		authUser:                  "docente",
+		authPasswordHash:          "",
+		bloccati:                  map[string]struct{}{},
+		blocchiPerIp:              map[string]map[string]struct{}{},
+		dominiIgnorati:            ignorati,
+		studenti:                  map[string]string{},
+		discoverVeyonOnly:         true,
+		storia:                    make([]Entry, 0, 256),
+		aliveMap:                  map[string]int64{},
 		watchdogHeartbeats:        map[string]map[string]int64{},
 		watchdogStoppedAlerted:    map[string]map[string]bool{},
 		watchdogAllStoppedAlerted: map[string]bool{},

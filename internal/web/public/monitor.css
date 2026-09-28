@@ -1372,13 +1372,6 @@ tr.filtro-hidden { display: none; }
 .dominio-txt { color: var(--danger-dark); font-weight: bold; }
 .dominio-txt.ai-alert { color: var(--danger); background: var(--ai-bg); padding: 1px 6px; border-radius: 3px; }
 
-.focus-bar {
-    background: var(--accent); color: white;
-    padding: 4px 10px; font-size: 0.85em; border-radius: 4px;
-    display: inline-flex; align-items: center; gap: 10px; margin-left: 8px;
-}
-.focus-bar button { background: rgba(255,255,255,0.2); color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer; }
-
 .hidden { display: none !important; }
 
 /* ============== TAB REPORT (Linear style coerente con Live) ============== */

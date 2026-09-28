@@ -5,7 +5,8 @@
 //   - il web server (default :9999) che serve UI + API REST + SSE
 //
 // Wiring: broker (SSE) -> state (mutazioni e snapshot) -> proxy (eventi)
-//                                                     -> api (handler GET)
+//
+//	-> api (handler GET)
 package main
 
 import (

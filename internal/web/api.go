@@ -256,11 +256,11 @@ func (a *API) handleSessioni(w http.ResponseWriter, r *http.Request) {
 	// durata. Cosi' il client puo' mostrare il nome custom dato dall'utente
 	// dopo Stop, oltre alla data/ora storiche.
 	type Item struct {
-		Filename   string `json:"filename"`
-		Titolo     string `json:"titolo"`
-		Inizio     string `json:"inizio"`
-		Fine       string `json:"fine,omitempty"`
-		DurataSec  int64  `json:"durataSec"`
+		Filename  string `json:"filename"`
+		Titolo    string `json:"titolo"`
+		Inizio    string `json:"inizio"`
+		Fine      string `json:"fine,omitempty"`
+		DurataSec int64  `json:"durataSec"`
 	}
 	out := make([]Item, 0, len(metas))
 	for _, m := range metas {

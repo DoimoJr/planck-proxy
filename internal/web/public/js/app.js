@@ -164,7 +164,6 @@ document.body.addEventListener('click', (e) => {
         case 'focus-ip': actions.handleCardClick(ip, e); break;
         case 'clear-selection': actions.clearSelection(); break;
         case 'multi-blocca-dominio': actions.bloccaDominioSelezione(); break;
-        case 'focus-clear': e.stopPropagation(); actions.clearFocus(); break;
         case 'detail-close': e.stopPropagation(); actions.chiudiDetail(); break;
         case 'log-open': e.stopPropagation(); actions.apriLogEventi(); break;
         case 'log-close': e.stopPropagation(); actions.chiudiLogEventi(); break;

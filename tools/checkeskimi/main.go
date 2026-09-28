@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"github.com/DoimoJr/planck-proxy/internal/classify"
+	"strings"
 )
 
 func main() {

@@ -192,7 +192,7 @@ func (s *State) persistBloccatiPerIp(snap map[string][]string) {
 func (s *State) broadcastBlocchiPerIp(snap map[string][]string) {
 	log.Printf("[state] broadcastBlocchiPerIp: %d ip", len(snap))
 	s.broker.Broadcast(struct {
-		Type string              `json:"type"`
+		Type  string              `json:"type"`
 		PerIp map[string][]string `json:"perIp"`
 	}{Type: "blocchi-per-ip", PerIp: snap})
 }

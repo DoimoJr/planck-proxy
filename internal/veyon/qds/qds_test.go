@@ -475,8 +475,8 @@ func TestVariantUnsupportedGoType(t *testing.T) {
 func TestUuidInvalid(t *testing.T) {
 	tests := []string{
 		"",
-		"da9ca56a",                                  // troppo corto
-		"da9ca56a-b2ad-4fff-8f8a-929b2927b44",       // 31 hex
+		"da9ca56a",                            // troppo corto
+		"da9ca56a-b2ad-4fff-8f8a-929b2927b44", // 31 hex
 		"da9ca56a-b2ad-4fff-8f8a-929b2927b442-aaaa", // troppo lungo
 		"za9ca56a-b2ad-4fff-8f8a-929b2927b442",      // hex invalido
 	}

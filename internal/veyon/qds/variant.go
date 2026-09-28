@@ -6,17 +6,17 @@ import "fmt"
 // usati da Veyon sono dichiarati: la lista deve combaciare con
 // `VariantStream::checkVariant` in core/src/VariantStream.cpp.
 const (
-	TypeBool         uint32 = 1
-	TypeInt          uint32 = 2
-	TypeLongLong     uint32 = 4
-	TypeDouble       uint32 = 6
-	TypeVariantMap   uint32 = 8
-	TypeVariantList  uint32 = 9
-	TypeString       uint32 = 10
-	TypeStringList   uint32 = 11
-	TypeByteArray    uint32 = 12
-	TypeRect         uint32 = 19
-	TypeUuid         uint32 = 30
+	TypeBool        uint32 = 1
+	TypeInt         uint32 = 2
+	TypeLongLong    uint32 = 4
+	TypeDouble      uint32 = 6
+	TypeVariantMap  uint32 = 8
+	TypeVariantList uint32 = 9
+	TypeString      uint32 = 10
+	TypeStringList  uint32 = 11
+	TypeByteArray   uint32 = 12
+	TypeRect        uint32 = 19
+	TypeUuid        uint32 = 30
 )
 
 // VariantMap e' l'alias Go di Qt's QVariantMap. La chiave e' sempre

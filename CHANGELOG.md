@@ -5,6 +5,31 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.28] — 2026-09-28
+
+### Rimosso
+
+- **`renderFocus` e il codice morto attorno**: `panel-ip-titolo` non
+  esiste piu' nell'HTML dopo il redesign, quindi la funzione usciva
+  sempre al primo `if` e girava a vuoto a ogni `renderAll`. Rimossa
+  insieme alla sua chiamata in `_renderAllSync`, a `setFocus` (nessun
+  chiamante: `focus-ip` passa da `handleCardClick`), al case
+  `focus-clear` in app.js (irraggiungibile, l'unico bottone che lo
+  emetteva stava dentro `renderFocus`) e alle regole CSS `.focus-bar`,
+  rimaste orfane.
+
+  La **funzione** focus resta intatta: `state.focusIp` filtra il
+  traffico e marca la card selezionata, viene impostato e liberato da
+  `apriDetail` / `chiudiDetail`, si esce cliccando di nuovo la card o
+  con Escape. `clearFocus` resta perche' Escape la usa.
+
+### Cambiato
+
+- **Tutto il codice Go passato per `gofmt`**: 17 file non erano
+  formattati. Diff puramente meccanico (allineamento di campi e
+  letterali), nessun cambio di semantica — `go vet` pulito, `go test
+  ./...` verde e build macOS + cross-compile Windows verificate dopo.
+
 ## [v2.9.27] — 2026-09-28
 
 ### Risolto

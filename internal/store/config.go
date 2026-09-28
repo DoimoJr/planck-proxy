@@ -41,17 +41,17 @@ var kvKeys = struct {
 	AuthPasswordHash, VeyonPort, DiscoverVeyonOnly,
 	DiscoverVeyonOnlySet string
 }{
-	Titolo:               "titolo",
-	Classe:               "classe",
-	Modo:                 "modo",
-	InattivitaSogliaSec:  "inattivitaSogliaSec",
-	ProxyPort:            "proxyPort",
-	WebPort:              "webPort",
-	AuthEnabled:          "authEnabled",
-	AuthUser:             "authUser",
-	AuthPasswordHash:     "authPasswordHash",
-	VeyonPort:            "veyonPort",
-	DiscoverVeyonOnly:    "discoverVeyonOnly",
+	Titolo:              "titolo",
+	Classe:              "classe",
+	Modo:                "modo",
+	InattivitaSogliaSec: "inattivitaSogliaSec",
+	ProxyPort:           "proxyPort",
+	WebPort:             "webPort",
+	AuthEnabled:         "authEnabled",
+	AuthUser:            "authUser",
+	AuthPasswordHash:    "authPasswordHash",
+	VeyonPort:           "veyonPort",
+	DiscoverVeyonOnly:   "discoverVeyonOnly",
 	// Marker per distinguere "esplicitamente false" da "mai impostato"
 	// (utile dato che il default applicato e' true).
 	DiscoverVeyonOnlySet: "discoverVeyonOnlySet",

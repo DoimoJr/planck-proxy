@@ -123,7 +123,7 @@ func WatchdogUsbScript(ipDocente string, portaWeb int, ignoredClasses, allowVidP
 //
 //	["a", "b", "c"]  →  'a','b','c'
 //
-// Singoli apici escapati con il pattern PowerShell `''`. Le stringhe
+// Singoli apici escapati con il pattern PowerShell `”`. Le stringhe
 // vengono inserite nella sintassi `@(...)` del template.
 func psStringArray(items []string) string {
 	out := make([]string, 0, len(items))

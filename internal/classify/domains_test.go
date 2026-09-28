@@ -85,9 +85,9 @@ func TestClassificaUtente(t *testing.T) {
 // e deve essere classificato come AI.
 func TestClassificaPriorita(t *testing.T) {
 	casi := map[string]Tipo{
-		"chat.openai.com":   TipoAI,      // matcha "openai.com" (AI) e "chat." (sistema) -> AI vince
-		"chatpdf.com":       TipoAI,      // pattern AI esplicito
-		"static.openai.com": TipoAI,      // matcha "openai.com" (AI) e "static." (sistema) -> AI vince
+		"chat.openai.com":   TipoAI, // matcha "openai.com" (AI) e "chat." (sistema) -> AI vince
+		"chatpdf.com":       TipoAI, // pattern AI esplicito
+		"static.openai.com": TipoAI, // matcha "openai.com" (AI) e "static." (sistema) -> AI vince
 	}
 	for d, atteso := range casi {
 		if got := Classifica(d); got != atteso {
@@ -99,9 +99,9 @@ func TestClassificaPriorita(t *testing.T) {
 // TestClassificaCaseInsensitive verifica che il match sia case-insensitive.
 func TestClassificaCaseInsensitive(t *testing.T) {
 	casi := map[string]Tipo{
-		"CHAT.OPENAI.COM":   TipoAI,
-		"Chat.OpenAI.com":   TipoAI,
-		"WWW.GOOGLE.COM":    TipoUtente,
+		"CHAT.OPENAI.COM":                TipoAI,
+		"Chat.OpenAI.com":                TipoAI,
+		"WWW.GOOGLE.COM":                 TipoUtente,
 		"Watson.TELEMETRY.Microsoft.com": TipoSistema,
 	}
 	for d, atteso := range casi {
@@ -125,9 +125,9 @@ func TestListeNonVuote(t *testing.T) {
 // Caso peggiore: dominio che non matcha nulla (full scan delle due liste).
 func BenchmarkClassifica(b *testing.B) {
 	domini := []string{
-		"chat.openai.com",                 // hit AI presto
-		"watson.telemetry.microsoft.com",  // hit sistema
-		"www.example.io",                  // miss totale (caso peggiore)
+		"chat.openai.com",                // hit AI presto
+		"watson.telemetry.microsoft.com", // hit sistema
+		"www.example.io",                 // miss totale (caso peggiore)
 		"chatgpt.com",
 		"www.youtube.com",
 	}

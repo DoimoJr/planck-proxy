@@ -1127,22 +1127,6 @@ export function renderUltimeRichieste() {
     );
 }
 
-/**
- * Aggiorna il titolo del pannello IP: "Traffico per IP" o "Focus: NOME (ip)"
- * con bottone di clear quando un IP e' in focus.
- */
-export function renderFocus() {
-    const titolo = $('panel-ip-titolo');
-    if (!titolo) return; // header rimosso nel redesign Claude Designer
-    if (state.focusIp) {
-        const nome = nomeStudente(state.focusIp);
-        const label = nome ? `${nome} (${state.focusIp})` : state.focusIp;
-        titolo.innerHTML = `Focus: ${escapeHtml(label)} <span class="focus-bar">filtrato <button data-action="focus-clear">X</button></span>`;
-    } else {
-        titolo.textContent = 'Traffico per IP';
-    }
-}
-
 // ========================================================================
 // Tab management + controlli minori
 // ========================================================================
@@ -2308,7 +2292,6 @@ function _renderAllSync() {
     safe('renderDetailPane', renderDetailPane);
     safe('renderLogPanel', renderLogPanel);
     safe('renderAlertBanner', renderAlertBanner);
-    safe('renderFocus', renderFocus);
     safe('renderReport', renderReport);
     safe('renderImpostazioni', renderImpostazioni);
     safe('renderWatchdogPluginsList', renderWatchdogPluginsList);

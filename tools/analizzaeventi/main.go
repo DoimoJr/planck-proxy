@@ -86,7 +86,10 @@ func main() {
 			byTypeFirst[t] = e
 		}
 	}
-	type tk struct{ key string; n int }
+	type tk struct {
+		key string
+		n   int
+	}
 	var tks []tk
 	for k, n := range byType {
 		tks = append(tks, tk{k, n})

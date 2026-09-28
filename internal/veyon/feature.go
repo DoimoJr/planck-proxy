@@ -245,7 +245,7 @@ func (c *Conn) TextMessage(text string) error {
 		FeatureUUID: uuid(FeatureTextMsg),
 		Command:     CmdDefault,
 		Arguments: qds.VariantMap{
-			"0": text,      // Text
+			"0": text,     // Text
 			"1": int32(1), // Icon = Information
 		},
 	})
@@ -277,4 +277,3 @@ func (c *Conn) OpenURL(urls []string) error {
 func (c *Conn) PowerOn() error {
 	return fmt.Errorf("veyon: PowerOn (Wake-on-LAN) non ancora implementato — serve MAC address nello studente")
 }
-

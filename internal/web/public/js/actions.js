@@ -234,8 +234,6 @@ export function nascondiDominio(d) { state.nascosti.add(d); salvaNascosti(); ren
 export function mostraDominio(d) { state.nascosti.delete(d); salvaNascosti(); renderAll(); }
 export function resetNascosti() { state.nascosti.clear(); salvaNascosti(); renderAll(); }
 
-export function setFocus(ip) { state.focusIp = state.focusIp === ip ? null : ip; renderAll(); }
-
 /** Apre il detail pane su `ip`: filtra anche il traffico (focusIp).
     Mutex: chiude eventuale log panel aperto. */
 export function apriDetail(ip) {

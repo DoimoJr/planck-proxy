@@ -137,8 +137,8 @@ func buildICO(pngs [][]byte, sizes []int) []byte {
 		}
 		buf.WriteByte(w)
 		buf.WriteByte(h)
-		buf.WriteByte(0) // palette (true color)
-		buf.WriteByte(0) // reserved
+		buf.WriteByte(0)                                    // palette (true color)
+		buf.WriteByte(0)                                    // reserved
 		binary.Write(&buf, binary.LittleEndian, uint16(1))  // planes
 		binary.Write(&buf, binary.LittleEndian, uint16(32)) // bits per pixel
 		binary.Write(&buf, binary.LittleEndian, uint32(len(p)))

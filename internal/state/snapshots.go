@@ -71,7 +71,7 @@ type HistorySnapshot struct {
 	// AlivePlugins[ip][plugin] = ms epoch dell'ultimo heartbeat ricevuto
 	// per quella tupla. Usato dalla UI per colorare il pallino "stato
 	// plugin" della card studente al boot prima che arrivino SSE.
-	AlivePlugins    map[string]map[string]int64 `json:"alivePlugins"`
+	AlivePlugins map[string]map[string]int64 `json:"alivePlugins"`
 }
 
 // HistorySnapshotData ritorna il payload per /api/history.

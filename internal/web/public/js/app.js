@@ -35,11 +35,12 @@ import * as actions from './actions.js';
  */
 async function init() {
     console.log('[planck] init() start');
-    const [cfgRes, histRes, sesRes, setRes] = await Promise.all([
+    const [cfgRes, histRes, sesRes, setRes, verRes] = await Promise.all([
         fetch('/api/config').then(r => r.json()),
         fetch('/api/history').then(r => r.json()),
         fetch('/api/sessioni').then(r => r.json()).catch(() => ({ sessioni: [] })),
         fetch('/api/settings').then(r => r.json()).catch(() => null),
+        fetch('/api/version').then(r => r.json()).catch(() => null),
     ]);
     console.log('[planck] init fetch done. studenti=', Object.keys(cfgRes.studenti||{}).length,
         'entries=', (histRes.entries||[]).length,
@@ -65,6 +66,7 @@ async function init() {
     // /api/settings ritorna l'oggetto piatto (proxy, web, modo, dominiIgnorati, ...).
     // L'SSE settings invece wrappa in {type, settings}, gestito separatamente in sse.js.
     state.settings = setRes;
+    state.versione = verRes?.version || '';
 
     if (histRes.alive) {
         for (const [ip, ts] of Object.entries(histRes.alive)) state.aliveMap.set(ip, ts);
@@ -218,6 +220,9 @@ document.body.addEventListener('click', (e) => {
         case 'veyon-firefox-lockdown': actions.veyonFirefoxLockdown(); break;
         case 'veyon-disinstalla-proxy': actions.veyonDisinstallaProxy(); break;
         case 'watchdog-toggle': actions.watchdogTogglePlugin(el.dataset.plugin); break;
+        case 'update-check': actions.updateControlla(); break;
+        case 'update-apply': actions.updateApplica(); break;
+        case 'update-vai': actions.updateVai(); break;
         case 'ai-refresh': actions.aiRefresh(); break;
         case 'watchdog-save-config': actions.watchdogSaveConfig(el.dataset.plugin); break;
         case 'watchdog-reset-config': actions.watchdogResetConfig(el.dataset.plugin); break;

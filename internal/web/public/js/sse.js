@@ -129,7 +129,21 @@ function setStato(connesso) {
 export function avviaSSE() {
     console.log('[planck] avviaSSE() opening EventSource /api/stream');
     const es = new EventSource('/api/stream');
-    es.onopen = () => { console.log('[planck] SSE onopen'); setStato(true); };
+    es.onopen = () => {
+        console.log('[planck] SSE onopen');
+        setStato(true);
+        // Riconnessione dopo un auto-update: il binario che risponde ora
+        // e' un altro, e con lui sono cambiati anche gli asset del
+        // frontend (sono embeddati nel binario). Restare sulla pagina
+        // vecchia significherebbe far girare il JS della versione
+        // precedente contro il backend nuovo, oltre a mostrare versione
+        // e stato ormai obsoleti. Ricarichiamo.
+        if (state.update.fase === 'riavvio') {
+            state.update.fase = 'idle';
+            console.log('[planck] ricarico la pagina dopo l\'aggiornamento');
+            location.reload();
+        }
+    };
     es.onerror = (e) => {
         console.warn('[planck] SSE onerror', e, 'readyState=', es.readyState);
         setStato(false);
@@ -156,6 +170,17 @@ export function avviaSSE() {
                 beep();
             }
             scheduleTrafficFlush();
+        } else if (msg.type === 'update-disponibile') {
+            // Controllo silenzioso fatto dal server al boot.
+            state.update.info = msg.info;
+            state.update.fase = 'idle';
+            renderAll();
+        } else if (msg.type === 'update-stato') {
+            // Avanzamento dell'installazione: il download puo' durare
+            // minuti, la richiesta HTTP ha gia' risposto da un pezzo.
+            state.update.fase = msg.fase || 'idle';
+            state.update.errore = msg.errore || '';
+            renderAll();
         } else if (msg.type === 'blocklist') {
             console.log('[planck] SSE blocklist update, list size=', (msg.list||[]).length);
             state.bloccati = new Set(msg.list);

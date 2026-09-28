@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DoimoJr/planck-proxy/internal/discover"
@@ -27,13 +28,22 @@ import (
 	"github.com/DoimoJr/planck-proxy/internal/state"
 	"github.com/DoimoJr/planck-proxy/internal/store"
 	"github.com/DoimoJr/planck-proxy/internal/sysutil"
+	"github.com/DoimoJr/planck-proxy/internal/update"
 	"github.com/DoimoJr/planck-proxy/internal/watchdog"
 	"github.com/DoimoJr/planck-proxy/internal/watchdog/builtin"
 	"github.com/DoimoJr/planck-proxy/internal/web"
 )
 
-const (
-	Versione = "2.9.25"
+// Versione e Fase sono `var` e non `const` per poter essere iniettate
+// al build via ldflags:
+//
+//	go build -ldflags "-X main.Versione=$(git describe --tags --abbrev=0)"
+//
+// I valori qui sotto sono solo il fallback per un `go build` nudo (es.
+// `go run`). Tenerla a mano era gia' andata storta: il binario si e'
+// dichiarato 2.9.25 fino alla 2.9.28, e l'auto-update confronta versioni.
+var (
+	Versione = "0.0.0-dev"
 	Fase     = "stable"
 )
 
@@ -74,9 +84,39 @@ func envOrDefault(key, def string) string {
 //
 // Skipped se PLANCK_NO_BROWSER=1: in modalita' headless niente browser
 // e niente auto-shutdown.
+// browserPID e' il PID della finestra browser che stiamo sorvegliando,
+// 0 se non ne abbiamo lanciata una. Serve a passarlo al nuovo processo
+// dopo un auto-update, cosi' il legame "chiudo la finestra → si spegne"
+// sopravvive al riavvio senza aprire una seconda finestra.
+var browserPID atomic.Int64
+
+// sorvegliaBrowserAdottato prende il posto di openBrowserAndWaitForClose
+// quando il processo e' stato avviato da un auto-update: la finestra e'
+// gia' aperta (quella del processo precedente), quindi non ne lanciamo
+// una nuova, ci limitiamo a sorvegliare quella.
+func sorvegliaBrowserAdottato(pid int) {
+	browserPID.Store(int64(pid))
+	log.Printf("Browser adottato dopo update (PID %d). Chiusura finestra → shutdown del server.", pid)
+	for {
+		time.Sleep(time.Second)
+		if !sysutil.ProcessoVivo(pid) {
+			log.Println("Browser chiuso, spengo Planck.")
+			os.Exit(0)
+		}
+	}
+}
+
 func openBrowserAndWaitForClose(url, profileDir string) {
 	if os.Getenv("PLANCK_NO_BROWSER") == "1" {
 		return
+	}
+	// Avviati da un auto-update: la finestra esiste gia'.
+	if v := os.Getenv("PLANCK_ADOPT_BROWSER_PID"); v != "" {
+		if pid, err := strconv.Atoi(v); err == nil && pid > 0 && sysutil.ProcessoVivo(pid) {
+			sorvegliaBrowserAdottato(pid)
+			return
+		}
+		log.Printf("PID browser da adottare non valido o gia' morto (%q): lancio una finestra nuova.", v)
 	}
 
 	// Candidati: Edge prima (sempre presente su Win10/11), poi Chrome.
@@ -116,7 +156,9 @@ func openBrowserAndWaitForClose(url, profileDir string) {
 			continue
 		}
 		log.Printf("Browser avviato (%s, PID %d). Chiusura finestra → shutdown del server.", filepath.Base(p), cmd.Process.Pid)
+		browserPID.Store(int64(cmd.Process.Pid))
 		_ = cmd.Wait()
+		browserPID.Store(0)
 		elapsed := time.Since(startedAt)
 		// Se Wait ritorna in <2s e' quasi certamente un caso "attached
 		// to existing instance" — la finestra non e' nostra. Non
@@ -321,10 +363,22 @@ func main() {
 
 	// API HTTP: handler GET registrati su mux + /api/stream del broker
 	api := web.NewAPI(st, broker, Versione, Fase)
+
+	// Auto-aggiornamento: il riavvio lo sa fare solo main, che conosce
+	// il PID del browser da passare al processo che subentra.
+	api.SetRiavvio(riavviaDopoUpdate)
 	mux := http.NewServeMux()
 	api.Register(mux) // monta /api/* + root "/" → static files embeddati
 
 	log.Printf("Planck Proxy v%s (fase %s)", Versione, Fase)
+
+	// Residuo di un aggiornamento precedente: finche' il vecchio
+	// processo era vivo il file era in uso e non si poteva cancellare.
+	update.PuliziaResidui()
+
+	// Controllo aggiornamenti silenzioso: se ne trova uno, la UI
+	// mostra il badge. Un errore di rete viene solo loggato.
+	api.ControllaInBackground()
 	log.Printf("Web:   http://localhost:%s", webPort)
 	log.Printf("Proxy: http://localhost:%s", proxyPort)
 	log.Printf("Data:  %s", dataDir)
@@ -387,4 +441,39 @@ func main() {
 	}()
 
 	wg.Wait()
+}
+
+// riavviaDopoUpdate rilancia il binario appena installato e termina
+// questo processo.
+//
+// A questo punto os.Executable() punta gia' al file NUOVO: update.Applica
+// ha fatto lo swap dei nomi, non dei contenuti. Passiamo al figlio il PID
+// della finestra browser che stiamo sorvegliando, cosi' la adotta invece
+// di aprirne una seconda — e il legame "chiudo la finestra, si spegne"
+// resta intatto attraverso l'aggiornamento.
+func riavviaDopoUpdate() {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("Riavvio dopo update: impossibile risolvere l'eseguibile: %v", err)
+		return
+	}
+	ambiente := os.Environ()
+	if pid := browserPID.Load(); pid > 0 {
+		ambiente = append(ambiente, "PLANCK_ADOPT_BROWSER_PID="+strconv.FormatInt(pid, 10))
+	}
+
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Env = ambiente
+	cmd.Dir = filepath.Dir(exe)
+	sysutil.HideConsoleWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("Riavvio dopo update fallito: %v", err)
+		return
+	}
+	log.Printf("Nuovo processo avviato (PID %d), esco.", cmd.Process.Pid)
+
+	// Rilascia le porte 9090/9999 il prima possibile: il figlio sta
+	// gia' provando a bindarle. os.Exit non esegue i defer, ma lo stato
+	// e' su SQLite e il DB fa il flush a ogni scrittura.
+	os.Exit(0)
 }

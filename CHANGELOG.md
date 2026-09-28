@@ -5,6 +5,67 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/) e il
 versioning segue [Semantic Versioning](https://semver.org/lang/it/) (con tag
 pre-release `-alpha.N` / `-beta.N` per le versioni intermedie del rewrite v2).
 
+## [v2.9.29] — 2026-09-28
+
+### Aggiunto
+
+- **Aggiornamento dall'interfaccia** (Impostazioni → Sistema → Aggiornamenti):
+  scarica l'ultima release da GitHub, la installa e riavvia da sola, senza
+  chiudere l'app ne' scaricare il binario a mano. Bottoni "Controlla ora" e
+  "Aggiorna e riavvia", piu' un badge in topbar quando il controllo
+  automatico al boot trova una versione nuova.
+
+  Meccanica: un eseguibile in uso non si puo' sovrascrivere ma si puo'
+  rinominare, quindi `planck.exe` → `planck.old.exe` e `planck.new.exe` →
+  `planck.exe`, poi respawn. Il `.old` viene cancellato al boot successivo.
+  Rollback se lo swap fallisce a meta', altrimenti resteresti senza binario.
+
+  La verifica del download NON esegue il file scaricato: il build Windows usa
+  `-H=windowsgui`, quindi una probe `--version` sarebbe cieca. Si controllano
+  dimensione dichiarata dall'API e magic bytes del formato eseguibile, che
+  bastano a scartare download troncati e pagine di errore HTML.
+
+  **Bloccato a sessione attiva**: il riavvio stacca il proxy per un paio di
+  secondi. Il vincolo e' nel server (409 `SESSIONE_ATTIVA`), non solo nel
+  bottone disabilitato.
+
+  API nuove: `GET /api/update/check`, `POST /api/update/apply`. Messaggi SSE
+  `update-disponibile` e `update-stato`. Override dell'endpoint via
+  `PLANCK_UPDATE_API` per i test.
+
+- **`internal/update`** con 5 test: confronto versioni (numerico, non
+  lessicografico: `2.10.0 > 2.9.28`; le pre-release valgono meno della
+  release), check con e senza aggiornamento, asset assente per la
+  piattaforma, verifica dei download rotti.
+
+### Risolto
+
+- **`Versione` non veniva piu' bumpata**: il binario si dichiarava `2.9.25`
+  mentre era `2.9.28`. Con un auto-update che confronta versioni, la feature
+  sarebbe nata rotta. Ora `Versione` e' una `var` iniettata al build dal tag
+  git (`-X main.Versione=...` in `build.sh` e `build.bat`), non piu' un valore
+  da ricordarsi di cambiare a mano.
+
+- **`.gitignore` non copriva gli archivi migrati**: la migrazione v1 → v2
+  rinomina i file importati in `*.json.v1.bak`, che non corrispondevano a
+  `sessioni/*.json`. Contengono IP e domini per studente, quindi rischiavano
+  di finire in un commit. Regola aggiunta.
+
+### Note
+
+- Dopo l'aggiornamento la pagina si ricarica da sola alla riconnessione SSE.
+  Non e' una comodita': il frontend e' embeddato nel binario, quindi senza
+  reload la pagina aperta girerebbe col JS della versione precedente contro
+  il backend nuovo.
+
+- Il processo che subentra riceve il PID della finestra browser e la adotta
+  invece di aprirne una seconda: il legame "chiudo la finestra → si spegne"
+  sopravvive all'aggiornamento.
+
+- Le release pubblicano solo `planck.exe`: su macOS e Linux il check risponde
+  "nessun binario per questo sistema operativo" invece di proporre un
+  aggiornamento non installabile.
+
 ## [v2.9.28] — 2026-09-28
 
 ### Rimosso

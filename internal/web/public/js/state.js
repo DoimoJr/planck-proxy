@@ -194,6 +194,16 @@ export const state = {
      * @type {{count:number, source:string, updatedAt:string, url?:string}}
      */
     aiList: { count: 0, source: '', updatedAt: '' },
+
+    /**
+     * Auto-aggiornamento. `info` e' la risposta di /api/update/check
+     * (null = mai controllato). `fase` segue l'installazione via SSE:
+     * idle | controllo | download | riavvio | errore.
+     */
+    update: { info: null, fase: 'idle', errore: '' },
+
+    /** Versione del binario in esecuzione, da /api/version al boot. */
+    versione: '',
 };
 
 /** Persiste il Set dei domini nascosti. */

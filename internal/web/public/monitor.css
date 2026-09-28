@@ -1935,3 +1935,13 @@ body.veyon-on .ip-card-veyon { display: flex; }
 }
 .ip-grid-vuota .empty-cta:hover { opacity: 0.9; }
 
+
+/* Badge "aggiornamento disponibile" in topbar. Nascosto finche' un
+   controllo non trova una versione nuova (renderUpdate lo scopre). */
+.topbar-update {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--accent); color: #fff; border: none;
+    padding: 3px 9px; border-radius: 4px; cursor: pointer;
+    font-size: 0.78em; font-weight: 600; letter-spacing: 0.01em;
+}
+.topbar-update:hover { filter: brightness(1.12); }

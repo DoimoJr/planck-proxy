@@ -1162,6 +1162,59 @@ export async function watchdogResetConfig(pluginId) {
 // ========================================================================
 
 /** Carica lo status della lista AI (count + source + timestamp). */
+/**
+ * Chiede al server di controllare se esiste una versione piu' recente.
+ * L'esito finisce in `state.update.info` e lo disegna renderUpdate().
+ */
+export async function updateControlla() {
+    state.update.fase = 'controllo';
+    state.update.errore = '';
+    renderAll();
+    try {
+        const r = await fetch('/api/update/check');
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'controllo fallito');
+        state.update.info = j;
+        state.update.fase = 'idle';
+        if (!j.disponibile) toast.info('Sei gia\' all\'ultima versione.');
+    } catch (e) {
+        state.update.fase = 'errore';
+        state.update.errore = String(e.message || e);
+        toast.error('Controllo aggiornamenti: ' + state.update.errore);
+    }
+    renderAll();
+}
+
+/**
+ * Avvia scaricamento + installazione + riavvio. Il server risponde
+ * subito e poi manda l'avanzamento via SSE (`update-stato`), perche' il
+ * download puo' durare minuti su linea lenta.
+ *
+ * A sessione attiva il server rifiuta con 409: il vincolo vive li', non
+ * solo nel bottone disabilitato.
+ */
+export async function updateApplica() {
+    const v = state.update.info?.ultima || '';
+    if (!confirm(`Aggiornare alla versione ${v} e riavviare?\n\nIl proxy resta giu' un paio di secondi. La finestra si riaggancia da sola.`)) return;
+    state.update.fase = 'download';
+    state.update.errore = '';
+    renderAll();
+    const r = await apiPost('/api/update/apply');
+    if (!r.ok) {
+        state.update.fase = 'errore';
+        state.update.errore = r.error || 'aggiornamento fallito';
+        toast.error(state.update.errore);
+        renderAll();
+    }
+}
+
+/** Porta l'utente alla card Aggiornamenti (click sul badge in topbar). */
+export function updateVai() {
+    cambiaTab('impostazioni');
+    cambiaSubtabImpostazioni('sistema');
+    renderAll();
+}
+
 export async function aiAggiornaStato() {
     try {
         state.aiList = await apiGet('/api/ai/status');
